@@ -33,6 +33,6 @@ page_size="$("$ANDROID_HOME/platform-tools/adb" shell getconf PAGE_SIZE | tr -d 
 echo "Android emulator page size: $page_size"
 test "$page_size" = 16384
 "$ANDROID_HOME/platform-tools/adb" shell df -h /data
-"$ANDROID_HOME/platform-tools/adb" shell grep -E 'MemTotal|MemAvailable' /proc/meminfo
+"$ANDROID_HOME/platform-tools/adb" shell cat /proc/meminfo | grep -E 'MemTotal|MemAvailable'
 (cd android && bash gradlew :app:connectedDebugAndroidTest --console=plain)
 python3 android/scripts/check-device-results.py
