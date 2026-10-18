@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name castor-ci --package 'system-images;android-37.2;google_apis_ps16k;x86_64' --device pixel_6
+export ANDROID_AVD_HOME="$RUNNER_TEMP/castor-avds"
+mkdir -p "$ANDROID_AVD_HOME"
+echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name castor-ci --path "$ANDROID_AVD_HOME/castor-ci.avd" --package 'system-images;android-37.2;google_apis_ps16k;x86_64' --device pixel_6
+"$ANDROID_HOME/emulator/emulator" -list-avds | grep -Fx castor-ci
 mkdir -p android/build
 log="$PWD/android/build/emulator.log"
 export ANDROID_SERIAL=emulator-5554
