@@ -5,6 +5,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cache="${CASTOR_NATIVE_CACHE:-/var/tmp/castor-android-native}"
 jobs="${CASTOR_BUILD_JOBS:-4}"
+checkout="$(printf '%s' "$root" | sha256sum | cut -c1-16)"
 mkdir -p "$cache" "$root/android/build" "$root/android/app/src/main/jniLibs"
 fetch() {
     local url="$1" archive="$2" destination="$3" checksum="$4"
@@ -100,7 +101,7 @@ for abi in "${@:-arm64-v8a}"; do
     fi
     cp "$build/ffmpeg/ffmpeg" "$out/libffmpeg.so"
     cp "$build/ffmpeg/ffprobe" "$out/libffprobe.so"
-    whisper="$build/whisper"
+    whisper="$build/whisper-$checkout"
     cmake -S "$root/third_party/whisper.cpp" -B "$whisper" -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
         -DANDROID_ABI="$abi" -DANDROID_PLATFORM=28 -DANDROID_STL=c++_static \

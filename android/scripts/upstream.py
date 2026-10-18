@@ -55,7 +55,9 @@ def pending_release(releases, current):
 
 def automatic(paths):
     # Workflow changes need human review before they can gain write permissions.
-    return not any(p.startswith((".github/", "android/scripts/upstream")) for p in paths)
+    protected = (".github/", "android/scripts/upstream", "android/scripts/ci-device.sh",
+                 "android/scripts/check-device-results.py")
+    return not any(p.startswith(protected) for p in paths)
 
 
 def merge_release(commit):

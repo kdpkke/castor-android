@@ -44,7 +44,7 @@ jobs:
           go test -race ./services/mediaserver/internal/source/follow ./services/mediaserver/internal/cast/deliver
           go vet ./cmd/... ./internal/... ./services/... ./e2e/...
 
-  android:
+  native:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -53,16 +53,50 @@ jobs:
           ref: ${{ inputs.ref || github.sha }}
           submodules: true
           persist-credentials: false
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with:
-          distribution: temurin
-          java-version: 25
       - run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build unzip pkg-config nasm autoconf automake libtool
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /var/tmp/castor-android-native
           key: android-native-${{ runner.os }}-${{ hashFiles('android/scripts/build-native.sh', '.gitmodules') }}
       - run: bash android/scripts/build-native.sh arm64-v8a x86_64
+      - name: Record the native source and payloads
+        run: |
+          git rev-parse HEAD > android/build/native-source-commit
+          (cd android && find app/src/main/jniLibs app/src/main/assets/go-licenses app/src/main/assets/native-licenses -type f -print0 | sort -z | xargs -0 sha256sum > build/native-build.sha256)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-native-${{ github.run_id }}
+          retention-days: 1
+          include-hidden-files: true
+          path: |
+            android/app/src/main/jniLibs/
+            android/app/src/main/assets/go-licenses/
+            android/app/src/main/assets/native-licenses/
+            android/build/native-corresponding-source.tar.gz
+            android/build/native-source-commit
+            android/build/native-build.sha256
+
+  android:
+    needs: native
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: android-native-${{ github.run_id }}
+          path: android
+      - name: Verify the native build belongs to this checkout
+        run: |
+          test "$(cat android/build/native-source-commit)" = "$(git rev-parse HEAD)"
+          (cd android && sha256sum --check build/native-build.sha256)
       - name: Android SDK and 16 KB emulator
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
@@ -75,19 +109,7 @@ jobs:
         working-directory: android
         run: bash gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --console=plain
       - name: Full device suite on Android 17 / 16 KB
-        run: |
-          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name castor-ci --package 'system-images;android-37.2;google_apis_ps16k;x86_64' --device pixel_6
-          "$ANDROID_HOME/emulator/emulator" -avd castor-ci -port 5554 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
-          trap '"$ANDROID_HOME/platform-tools/adb" -s emulator-5554 emu kill || true' EXIT
-          export ANDROID_SERIAL=emulator-5554
-          for attempt in $(seq 1 120); do
-            if [ "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then break; fi
-            sleep 3
-          done
-          test "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed | tr -d '\r')" = 1
-          test "$("$ANDROID_HOME/platform-tools/adb" shell getconf PAGE_SIZE | tr -d '\r')" = 16384
-          (cd android && bash gradlew :app:connectedDebugAndroidTest --console=plain)
-          python3 android/scripts/check-device-results.py
+        run: bash android/scripts/ci-device.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -98,3 +120,4 @@ jobs:
             android/app/build/outputs/androidTest-results/
             android/app/build/outputs/apk/debug/app-debug.apk
             android/build/native-corresponding-source.tar.gz
+            android/build/emulator.log

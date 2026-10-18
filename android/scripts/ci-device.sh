@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name castor-ci --package 'system-images;android-37.2;google_apis_ps16k;x86_64' --device pixel_6
+mkdir -p android/build
+log="$PWD/android/build/emulator.log"
+export ANDROID_SERIAL=emulator-5554
+"$ANDROID_HOME/emulator/emulator" -avd castor-ci -port 5554 -no-window -no-audio -no-boot-anim -no-snapshot -gpu software > "$log" 2>&1 &
+emulator_pid=$!
+cleanup() {
+    local result=$?
+    if [ "$result" -ne 0 ]; then cat "$log"; fi
+    "$ANDROID_HOME/platform-tools/adb" -s "$ANDROID_SERIAL" emu kill || true
+    if kill -0 "$emulator_pid" 2>/dev/null; then kill "$emulator_pid"; fi
+}
+trap cleanup EXIT
+for attempt in $(seq 1 120); do
+    if ! kill -0 "$emulator_pid" 2>/dev/null; then
+        echo 'Android emulator exited before boot completion' >&2
+        exit 1
+    fi
+    if [ "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then break; fi
+    sleep 3
+done
+test "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed | tr -d '\r')" = 1
+page_size="$("$ANDROID_HOME/platform-tools/adb" shell getconf PAGE_SIZE | tr -d '\r')"
+echo "Android emulator page size: $page_size"
+test "$page_size" = 16384
+(cd android && bash gradlew :app:connectedDebugAndroidTest --console=plain)
+python3 android/scripts/check-device-results.py

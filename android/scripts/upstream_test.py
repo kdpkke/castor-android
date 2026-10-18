@@ -34,7 +34,8 @@ class ReleaseSelectionTest(unittest.TestCase):
     def test_workflow_or_updater_changes_need_manual_review(self):
         self.assertTrue(upstream.automatic(["services/mediaserver/backend.go", "android/upstream.json"]))
         for path in (".github/workflows/new.yml", ".github/actions/setup/action.yml",
-                     "android/scripts/upstream.py", "android/scripts/upstream_test.py"):
+                     "android/scripts/upstream.py", "android/scripts/upstream_test.py",
+                     "android/scripts/ci-device.sh", "android/scripts/check-device-results.py"):
             self.assertFalse(upstream.automatic([path]))
 
 
