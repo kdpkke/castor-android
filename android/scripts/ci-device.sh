@@ -11,7 +11,7 @@ printf '\ndisk.dataPartition.size=8G\n' >> "$config"
 mkdir -p android/build
 log="$PWD/android/build/emulator.log"
 export ANDROID_SERIAL=emulator-5554
-"$ANDROID_HOME/emulator/emulator" -avd castor-ci -port 5554 -no-window -no-audio -no-boot-anim -no-snapshot -gpu software > "$log" 2>&1 &
+"$ANDROID_HOME/emulator/emulator" -avd castor-ci -port 5554 -memory 4096 -no-window -no-audio -no-boot-anim -no-snapshot -gpu software > "$log" 2>&1 &
 emulator_pid=$!
 cleanup() {
     local result=$?
@@ -33,5 +33,6 @@ page_size="$("$ANDROID_HOME/platform-tools/adb" shell getconf PAGE_SIZE | tr -d 
 echo "Android emulator page size: $page_size"
 test "$page_size" = 16384
 "$ANDROID_HOME/platform-tools/adb" shell df -h /data
+"$ANDROID_HOME/platform-tools/adb" shell grep -E 'MemTotal|MemAvailable' /proc/meminfo
 (cd android && bash gradlew :app:connectedDebugAndroidTest --console=plain)
 python3 android/scripts/check-device-results.py
