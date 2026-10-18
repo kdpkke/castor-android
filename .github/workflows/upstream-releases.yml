@@ -1,0 +1,73 @@
+name: Upstream releases
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-releases
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'kdpkke/castor-android'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      ready: ${{ steps.update.outputs.ready }}
+      head: ${{ steps.update.outputs.head }}
+      base: ${{ steps.update.outputs.base }}
+      pr: ${{ steps.update.outputs.pr }}
+      automatic: ${{ steps.update.outputs.automatic }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare the next stable release
+        id: update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name 'Matteo Muratore'
+          git config user.email 'matteomuratoredev@gmail.com'
+          gh auth setup-git
+          python3 android/scripts/upstream.py prepare
+
+  validate:
+    needs: prepare
+    if: needs.prepare.outputs.ready == 'true'
+    uses: ./.github/workflows/android-ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.head }}
+
+  integrate:
+    needs: [prepare, validate]
+    if: needs.prepare.outputs.automatic == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Advance main only to the validated commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_HEAD: ${{ needs.prepare.outputs.head }}
+          UPDATE_BASE: ${{ needs.prepare.outputs.base }}
+          UPDATE_PR: ${{ needs.prepare.outputs.pr }}
+        run: |
+          gh auth setup-git
+          python3 android/scripts/upstream.py complete --head "$UPDATE_HEAD" --base "$UPDATE_BASE" --pr "$UPDATE_PR"

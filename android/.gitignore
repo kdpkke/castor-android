@@ -18,3 +18,5 @@ app/build/
 app/src/main/jniLibs/
 app/src/main/assets/go-licenses/
 app/src/main/assets/native-licenses/
+
+scripts/__pycache__/

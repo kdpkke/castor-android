@@ -1,5 +1,7 @@
 # Security
 
+This is the independently maintained Castor Android project. Report Android issues in [kdpkke/castor-android](https://github.com/kdpkke/castor-android/issues). For a sensitive disclosure, contact this repository’s maintainer privately through their GitHub profile; do not publish credentials or private stream URLs. Shared-core issues can also be reported to upstream Castor. The core security guidance below remains applicable.
+
 Castor collects no telemetry.
 
 ## Keeping secrets out of git
@@ -36,4 +38,4 @@ docker buildx imagetools inspect ghcr.io/stupside/castor:latest --format '{{ jso
 
 ## Reporting a vulnerability
 
-Open a [GitHub issue](https://github.com/stupside/castor/issues) marked **[security]**, or for sensitive reports, email the maintainer (address on their GitHub profile).
+For the upstream core, use [stupside/castor](https://github.com/stupside/castor/issues) or the upstream maintainer’s private contact. For Android-specific vulnerabilities, use this project’s private contact described above.

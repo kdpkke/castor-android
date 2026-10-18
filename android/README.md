@@ -1,3 +1,5 @@
+> Community project: [kdpkke/castor-android](https://github.com/kdpkke/castor-android), based on [stupside/castor](https://github.com/stupside/castor). Android issues belong in this repository. See [core updates](docs/UPSTREAM.md).
+
 # Castor for Android
 
 An independent Android app using Castor's existing Go API and media engine. The phone extracts the video, controls the TV, and serves or transcodes media itself. No PC, NAS, Termux, root, or remote Castor server is required.

@@ -1,70 +1,28 @@
-# Contributing to Castor
+# Contributing to Castor Android
 
-## Scope
+Android bugs, receiver compatibility, extraction and playback reports belong in [this repository](https://github.com/kdpkke/castor-android/issues). Include the app version, Android version, receiver/protocol, reproducible steps and the copyable diagnostic. Remove access tokens, cookies and private URLs before posting logs.
 
-Welcome: bug/device reports, fixes, device support, transcoding, subtitles, and extraction robustness. No bundled sources, site-specific scrapers, or DRM/paywall/geo-restriction circumvention.
+Core-only changes can also be proposed to [upstream Castor](https://github.com/stupside/castor). This project maintains Android integration independently; the Go module and internal ownership rules remain upstream's. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Building from source
+## Build and test
 
-Requires Go 1.27+, cmake, and a C/C++ toolchain on macOS/Linux:
-
-```sh
-git clone --recurse-submodules https://github.com/stupside/castor.git
-cd castor
-make build   # libwhisper.a (~1 min), then castor
-```
-
-`go install` alone cannot build the native Whisper dependency. Export its build environment for Go tooling (`.envrc` also supports direnv):
+Follow [android/README.md](android/README.md). Build the Go/native runtime again after Go, proto or native-build changes. Keep English and Italian resources aligned and preserve saved preferences and active casts.
 
 ```sh
-eval "$(make env)"
-go run ./cmd/castor scan
-go test -short ./...
+python3 -m unittest discover -s android/scripts -p '*_test.py' -v
+bash android/scripts/build-native.sh arm64-v8a x86_64
+cd android
+bash gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-Omit `-short` for real-time end-to-end tests: fake sites/devices, real streams, embedded and three-process services. These require Chrome, ffmpeg, and ffprobe and are not run in CI.
+On Windows use `android/scripts/build.ps1` and `test-device.ps1`. Device tests use local fixtures, not a real streaming site or TV. Verify actual device-test XML; a successful Gradle build alone does not prove that installation/tests ran.
 
-## Running the stack with Tilt
+Kotlin follows ktfmt's two-space Google style. Go follows the upstream architecture and `gofmt`; test behavior and reproduce regressions before fixing them. Use Conventional Commits (`fix(android): ...`, `chore(core): ...`), with a blank line before a message body. Never commit signing keys, caches, `local.properties`, tokens or downloaded native binaries.
 
-[Tilt](https://tilt.dev) runs the native stack with live reload. Also install Node 24+ and Yarn; set all three service tokens in `.env` as in `docker-compose.yml`.
+## Upstream updates and releases
 
-```sh
-tilt up
-```
+[Core synchronization](android/docs/UPSTREAM.md) is handled by the Upstream releases workflow. Resolve conflicts and failed tests on its update PR, rerun validation, then integrate the reviewed commit. Do not force-push the published main branch or choose entire conflicting core files as ours/theirs.
 
-Tilt builds Whisper, installs app dependencies, generates the TypeScript client, and starts media (`:8410`), API (`:8411`), scraping (`:8412`), and Next.js (`:3000`). Open `http://localhost:3000` or your machine's LAN address. The app calls only public API through `/rpc`.
+Android validation produces short-lived debug APK artifacts and corresponding native sources. Those APKs use an ephemeral CI signer. Maintainer-published APKs need the established local signer; core synchronization never uploads private keys or publishes installable updates automatically.
 
-## The rules
-
-### Checked by CI
-
-- Tests pass without skips; end-to-end tests are excluded.
-- `go vet`, `staticcheck -checks all`, `gofmt -s`, and `go fix -diff` are clean.
-- `deadcode -test` finds no unreachable code except C-called `castorNativeLog`.
-- API and scraping build without cgo.
-- Protos pass lint, formatting, and generated-code comparison. RPC contracts are not stable yet.
-- The app passes typecheck, lint, functional regressions, generated-code comparison, and production build.
-
-Lint tools are pinned. Test behaviour, not import graphs, code shape, or libraries. Mutation-test additions: break the behaviour, confirm a clear failure, then restore it.
-
-### Held in review
-
-Follow [ARCHITECTURE.md](ARCHITECTURE.md):
-
-- Share contracts, not service implementations (including tests). Binary main wires service entry points; internals and TUI stay private.
-- API owns devices, scraping owns extraction, media owns playback, clients own content/UI. Consumers declare narrow ports; entry points wire adapters.
-- Inject settings at construction; keep config with its consumer. Name packages by responsibility, nesting single-feature helpers; one concept per file and one file per strategy.
-- Put contract rules in protos; validate requests and peer responses at RPC edges. Use generated types, not mirrors; expose only what integrators need.
-- Optional lookups return `(T, bool)`. Comments explain only what code cannot, in one short line. Prefer Go 1.27 idioms; no compatibility shims or dead fallbacks.
-
-## Commit messages
-
-[Conventional Commits](https://www.conventionalcommits.org): `type(scope)?: summary`. Use `!` or a `BREAKING CHANGE:` footer for breaking changes. Enable local checking:
-
-```sh
-make hooks
-```
-
-## Releases
-
-[release-please](https://github.com/googleapis/release-please) maintains the release PR from `main`. Merging tags `vX.Y.Z` and publishes archives, the `:latest` image, and the Homebrew cask. Run **canary-release** on any branch to publish `:canary` without changing stable releases.
+Desktop CI/delivery workflows are retained from upstream for history but disabled in this repository. Active workflows are Android validation and Upstream releases.

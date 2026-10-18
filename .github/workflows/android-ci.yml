@@ -1,0 +1,100 @@
+name: Android validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  automation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - run: python3 -m unittest discover -s android/scripts -p '*_test.py' -v
+
+  core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          submodules: true
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Host FFmpeg for native-engine regressions
+        run: |
+          curl -fsSL https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n9.0-latest-linux64-gpl-9.0.tar.xz | sudo tar -xJ --strip-components=2 -C /usr/local/bin --wildcards '*/bin/ffmpeg' '*/bin/ffprobe'
+      - name: Core tests and vet
+        run: |
+          eval "$(make env)"
+          go test -short ./cmd/... ./internal/... ./services/... ./e2e/...
+          go test -race ./services/mediaserver/internal/source/follow ./services/mediaserver/internal/cast/deliver
+          go vet ./cmd/... ./internal/... ./services/... ./e2e/...
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          submodules: true
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 25
+      - run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build unzip pkg-config nasm autoconf automake libtool
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /var/tmp/castor-android-native
+          key: android-native-${{ runner.os }}-${{ hashFiles('android/scripts/build-native.sh', '.gitmodules') }}
+      - run: bash android/scripts/build-native.sh arm64-v8a x86_64
+      - name: Android SDK and 16 KB emulator
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" 'platforms;android-37.2' 'build-tools;37.0.0' 'platform-tools' 'emulator' 'system-images;android-37.2;google_apis_ps16k;x86_64'
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: JVM tests, lint and APK
+        working-directory: android
+        run: bash gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --console=plain
+      - name: Full device suite on Android 17 / 16 KB
+        run: |
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name castor-ci --package 'system-images;android-37.2;google_apis_ps16k;x86_64' --device pixel_6
+          "$ANDROID_HOME/emulator/emulator" -avd castor-ci -port 5554 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          trap '"$ANDROID_HOME/platform-tools/adb" -s emulator-5554 emu kill || true' EXIT
+          export ANDROID_SERIAL=emulator-5554
+          for attempt in $(seq 1 120); do
+            if [ "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; then break; fi
+            sleep 3
+          done
+          test "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed | tr -d '\r')" = 1
+          test "$("$ANDROID_HOME/platform-tools/adb" shell getconf PAGE_SIZE | tr -d '\r')" = 16384
+          (cd android && bash gradlew :app:connectedDebugAndroidTest --console=plain)
+          python3 android/scripts/check-device-results.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: android-validation-${{ github.run_id }}
+          retention-days: 7
+          path: |
+            android/app/build/reports/
+            android/app/build/outputs/androidTest-results/
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/build/native-corresponding-source.tar.gz
