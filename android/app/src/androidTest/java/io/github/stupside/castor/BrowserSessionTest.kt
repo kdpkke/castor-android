@@ -143,14 +143,12 @@ class BrowserSessionTest {
     val resolver = withContext(Dispatchers.Main) { BrowserResolver(context) }
     val bridge = BrowserServer(resolver, { emptyList() }, "fixture-token")
     try {
-      val response =
-        ResolveResponse.parseFrom(
-          Rpc(bridge.url, "fixture-token")
-            .call(
-              "/castor.scraping.v1.ScrapingService/Resolve",
-              ResolveRequest.newBuilder().addUrls(origin.url("/page").toString()).build(),
-            )
+      val api = Rpc(bridge.url, "fixture-token")
+      val response = api.result {
+        api.scraping.resolve(
+          ResolveRequest.newBuilder().addUrls(origin.url("/page").toString()).build()
         )
+      }
       val playlist = response.streamsList.single().stream.url
       ticket.set(2)
       val simultaneous =

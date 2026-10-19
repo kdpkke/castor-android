@@ -58,12 +58,15 @@ class MainScreenTest {
         override fun dispatch(request: RecordedRequest): MockResponse =
           if (request.path == "/castor.v1.CastService/ListCasts")
             MockResponse()
+              .setHeader("Content-Type", "application/proto")
               .setBody(
                 Buffer()
                   .write(ListCastsResponse.newBuilder().addCasts(active).build().toByteArray())
               )
           else
             MockResponse()
+              .setHeader("Content-Type", "application/proto")
+              .setHeader("Content-Type", "application/connect+proto")
               .setBody(Buffer().apply { repeat(100) { write(frame) } })
               .throttleBody(frame.size.toLong(), 1, java.util.concurrent.TimeUnit.SECONDS)
       }
@@ -115,11 +118,12 @@ class MainScreenTest {
         override fun dispatch(request: RecordedRequest): MockResponse =
           if (request.path == "/castor.v1.CastService/ListCasts")
             MockResponse()
+              .setHeader("Content-Type", "application/proto")
               .setBody(
                 Buffer()
                   .write(ListCastsResponse.newBuilder().addCasts(actual).build().toByteArray())
               )
-          else MockResponse().setBody("")
+          else MockResponse().setHeader("Content-Type", "application/proto").setBody("")
       }
     server.start()
     val model = MainScreenViewModel()
@@ -152,6 +156,7 @@ class MainScreenTest {
       object : Dispatcher() {
         override fun dispatch(request: RecordedRequest): MockResponse =
           MockResponse()
+            .setHeader("Content-Type", "application/proto")
             .setBody(
               Buffer()
                 .write(

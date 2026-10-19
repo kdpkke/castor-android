@@ -31,3 +31,4 @@ plugins {
 
 rootProject.name = "Castor"
 include(":app")
+include(":client")

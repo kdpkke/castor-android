@@ -67,8 +67,8 @@ class CastorRuntimeTest {
       } catch (_: java.io.IOException) {}
       assertEquals(1, calls)
       try {
-        Rpc(bridge.url, "fixture-token")
-          .call("/castor.scraping.v1.ScrapingService/Resolve", ResolveRequest.getDefaultInstance())
+        val api = Rpc(bridge.url, "fixture-token")
+        api.result { api.scraping.resolve(ResolveRequest.getDefaultInstance()) }
         fail("An empty page request was accepted")
       } catch (error: java.io.IOException) {
         assertTrue(error.message.orEmpty().contains("invalid_argument"))

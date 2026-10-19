@@ -6,7 +6,7 @@ An independent Android app using Castor's existing Go API and media engine. The 
 
 ## Use
 
-1. Install the development APK on Android 9 or newer. ARM64 phones and x86-64 emulators are supported.
+1. Install the APK from [Releases](https://github.com/kdpkke/castor-android/releases) on Android 9 or newer. ARM64 phones and x86-64 emulators are supported.
 2. Connect the phone and TV to the same Wi-Fi. On Android 17, allow local network access. Notifications expose the running service and its stop action.
 3. Tap **Paste link** or share a URL from another app. **Automatic** recognizes common video extensions; use the source menu to override it with **Web page** or **Direct stream** for extensionless endpoints.
 4. Tap **Choose your TV** to discover receivers, reuse the previous TV, or enter an address. DLNA also accepts a full description URL.
@@ -25,7 +25,7 @@ Subtitles offer **Off**, **App language**, or an explicit language code such as 
 - At engine startup, Android's default trust anchors are exported to an app-private PEM file and passed to OpenSSL through `SSL_CERT_FILE`. Android's hashed certificate-directory filenames are incompatible with OpenSSL's lookup scheme. TLS certificate and hostname verification remain enabled.
 - Android WebView implements the existing `castor.scraping.v1` contract. It uses an app-private profile, captures stream requests and their replay headers, and exposes no JavaScript-to-native bridge. File/content URLs and protected-media permission requests are refused.
 - Android NSD handles Chromecast discovery. SSDP discovery uses a default-route UDP socket, avoiding Android's restricted netlink interface enumeration. Results enter the API's existing device directory; device protocols remain in Go.
-- Protobuf Java classes are generated directly from `../proto`. The Android client uses Connect's protobuf format for unary calls and framed status updates. A stream closing before an explicit `Ended` result is an error.
+- Protobuf Java classes and the official Connect-Kotlin clients use the same `../proto` contracts as the Go engine. The `client` Gradle project runs the pinned Buf CLI and Connect generator before Android compilation; generated sources stay in `client/build/` and are not committed. The app uses generated methods instead of maintaining RPC paths and protocol decoding. Its endpoint adapter retains bearer authentication, bounded responses, cancellation and the requirement for an explicit cast `Ended` result.
 - The shared HLS segment reader recognizes bounded `TIKTIKPX` PNG/gzip envelopes carrying MPEG-TS. HLS detected as PNG or without usable video dimensions is measured again through that same reader before admission; ordinary static images remain ineligible. This handles the media envelope without adding site-specific URL templates or disabling admission checks.
 - Progressive live playback treats an open byte-zero range as a growing response, without a fixed content length. Chromecast can keep reading future bytes instead of finishing at the initial buffer. Bounded ranges, retained-window checks and finished-stream ranges keep their existing semantics.
 - Debuggable Android builds enable the engine's diagnostic logger; release builds retain normal logging. Credentials are redacted by the shared engine logger.
@@ -47,7 +47,13 @@ The native build runs the checked-in Bash script through WSL. It downloads pinne
 
 The Gradle wrapper pins Gradle 9.8.1; the version catalog pins AGP 9.4.1 and Kotlin 2.4.21. Existing desktop dependencies and the Whisper submodule revision are retained. Generated native binaries and Gradle output are ignored by Git.
 
+Client generation is part of a normal Gradle build on Windows and Linux; no separate Buf installation is needed. To regenerate explicitly, run `:client:bufGenerate` with the Gradle wrapper from `android/`. Buf CLI 1.74.0, its Gradle plugin 0.11.2 and Connect-Kotlin 0.9.0 are pinned. The generator template is `client/buf.gen.yaml`; keep its Connect version aligned with the runtime in the version catalog. Generation uses the public Buf remote plugin and requires network access when it runs. Buf is a build tool and is not included in the APK.
+
 After building native binaries, open `android/` in Android Studio. The development APK is at `app/build/outputs/apk/debug/app-debug.apk`. It is signed with the local Android development key and is not a Play Store release.
+
+For distribution, use Android Studio's **Build > Generate Signed App Bundle or APK > APK**, select the **release** variant and a dedicated release keystore stored outside the repository. Alternatively, `:app:assembleRelease` produces an unsigned APK at `app/build/outputs/apk/release/app-release-unsigned.apk`; sign it with the Android SDK's `apksigner`. Keep an encrypted backup of the keystore and store its password separately. Future updates must preserve the signing identity and increase `versionCode`.
+
+Verify a signed download with `apksigner verify --verbose --print-certs <apk>` and compare the certificate SHA-256 fingerprint and APK checksum with the release notes. A fingerprint identifies the signer; it is different from the APK's file checksum. A release key change without an Android-supported rotation cannot update an installation signed with the development key. Self-signed certificates are supported; a paid certificate is not required and does not remove Android's installation or Play Protect checks.
 
 Rerun the native builder after changing Go, protobuf, or native build sources. Gradle checks that runtime binaries and license notices are present; it does not rebuild the Go engine itself. Kotlin uses ktfmt's two-space Google style. Regenerate the Android mascot drawable with `python android/scripts/sync-logo.py` when the repository SVG changes.
 

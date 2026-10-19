@@ -123,3 +123,4 @@ jobs:
             android/app/build/outputs/apk/debug/app-debug.apk
             android/build/native-corresponding-source.tar.gz
             android/build/emulator.log
+            android/build/device-logcat.txt

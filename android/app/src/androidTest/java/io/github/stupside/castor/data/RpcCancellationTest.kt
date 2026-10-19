@@ -37,7 +37,10 @@ class RpcCancellationTest {
     val frame = statusFrame()
     val body = Buffer().apply { repeat(100) { write(frame) } }
     server.enqueue(
-      MockResponse().setBody(body).throttleBody(frame.size.toLong(), 1, TimeUnit.SECONDS)
+      MockResponse()
+        .setHeader("Content-Type", "application/connect+proto")
+        .setBody(body)
+        .throttleBody(frame.size.toLong(), 1, TimeUnit.SECONDS)
     )
     server.start()
     try {
@@ -67,7 +70,10 @@ class RpcCancellationTest {
   @Test
   fun unexpectedStatusStreamClosureIsStillReported() = runBlocking {
     val server = MockWebServer()
-    server.enqueue(MockResponse().setBody(Buffer().write(statusFrame())))
+    val body = Buffer().write(statusFrame()).writeByte(2).writeInt(2).writeUtf8("{}")
+    server.enqueue(
+      MockResponse().setHeader("Content-Type", "application/connect+proto").setBody(body)
+    )
     server.start()
     try {
       val api = Rpc(server.url("/").toString().removeSuffix("/"), "fixture")

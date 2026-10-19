@@ -1,103 +1,110 @@
 package io.github.stupside.castor.data
 
+import castor.scraping.v1.ScrapingServiceClient
+import castor.v1.CastOuterClass.WatchRequest
 import castor.v1.CastOuterClass.WatchResponse
-import com.google.protobuf.MessageLite
-import java.io.DataInputStream
+import castor.v1.CastServiceClient
+import castor.v1.DeviceServiceClient
+import com.connectrpc.ConnectException
+import com.connectrpc.ProtocolClientConfig
+import com.connectrpc.ResponseMessage
+import com.connectrpc.extensions.GoogleJavaProtobufStrategy
+import com.connectrpc.getOrThrow
+import com.connectrpc.impl.ProtocolClient
+import com.connectrpc.okhttp.ConnectOkHttpClient
+import com.connectrpc.simpleTimeouts
 import java.io.EOFException
-import java.net.HttpURLConnection
-import java.net.URL
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
 
-// Connect's protobuf wire format uses the same generated contracts as the desktop clients.
-class Rpc(private val baseUrl: String, private val token: String) {
-  private fun open(
-    method: String,
-    request: MessageLite,
-    streaming: Boolean = false,
-  ): HttpURLConnection {
-    val connection = URL(baseUrl + method).openConnection() as HttpURLConnection
-    connection.instanceFollowRedirects = false
-    connection.requestMethod = "POST"
-    connection.connectTimeout = 10_000
-    connection.readTimeout = if (streaming) 0 else 90_000
-    connection.doOutput = true
-    connection.setRequestProperty("Authorization", "Bearer $token")
-    connection.setRequestProperty("Connect-Protocol-Version", "1")
-    connection.setRequestProperty(
-      "Content-Type",
-      if (streaming) "application/connect+proto" else "application/proto",
+// Generated clients own the wire protocol; this endpoint owns credentials and cast lifecycle.
+class Rpc(baseUrl: String, token: String) {
+  private val client =
+    ProtocolClient(
+      ConnectOkHttpClient(
+        transport
+          .newBuilder()
+          .addInterceptor { chain ->
+            val request =
+              chain
+                .request()
+                .newBuilder()
+                .header("Authorization", "Bearer $token")
+                .header("Accept-Encoding", "identity")
+                .build()
+            val response = chain.proceed(request)
+            if (
+              response.header("Content-Encoding").orEmpty().let {
+                it.isNotEmpty() && it != "identity"
+              }
+            ) {
+              response.close()
+              throw IOException("Compressed RPC responses are not supported")
+            }
+            response
+              .newBuilder()
+              .body(
+                RpcResponseBody(
+                  response.body,
+                  response.header("Content-Type").orEmpty().startsWith("application/connect+"),
+                )
+              )
+              .build()
+          }
+          .build()
+      ),
+      ProtocolClientConfig(
+        host = baseUrl,
+        serializationStrategy = GoogleJavaProtobufStrategy(),
+        compressionPools = emptyList(),
+        ioCoroutineContext = Dispatchers.IO,
+        timeoutOracle = simpleTimeouts(90.seconds, null),
+      ),
     )
-    connection.outputStream.use { output ->
-      val bytes = request.toByteArray()
-      if (streaming) {
-        java.io.DataOutputStream(output).apply {
-          writeByte(0)
-          writeInt(bytes.size)
-          write(bytes)
-        }
-      } else output.write(bytes)
+
+  internal val casts = CastServiceClient(client)
+  internal val devices = DeviceServiceClient(client)
+  internal val scraping = ScrapingServiceClient(client)
+
+  internal suspend fun <T> result(call: suspend () -> ResponseMessage<T>): T =
+    try {
+      call().getOrThrow()
+    } catch (error: ConnectException) {
+      currentCoroutineContext().ensureActive()
+      throw ioFailure(error)
     }
-    if (connection.responseCode !in 200..299) {
-      val message = connection.errorStream?.use { readLimited(it, 4096).toString(Charsets.UTF_8) }
-      connection.disconnect()
-      throw java.io.IOException(message ?: "Castor returned HTTP ${connection.responseCode}")
+
+  suspend fun watch(request: WatchRequest, update: suspend (WatchResponse) -> Unit) {
+    val stream = casts.watch()
+    try {
+      stream.sendAndClose(request).getOrThrow()
+      for (response in stream.responseChannel()) {
+        require(response.hasStatus() || response.hasEnded()) { "Empty status update" }
+        update(response)
+        if (response.hasEnded()) return
+      }
+      throw EOFException("The status stream closed before the cast ended.")
+    } catch (error: ConnectException) {
+      currentCoroutineContext().ensureActive()
+      throw ioFailure(error)
+    } finally {
+      withContext(NonCancellable) { stream.receiveClose() }
     }
-    return connection
   }
 
-  suspend fun call(method: String, request: MessageLite): ByteArray =
-    withContext(Dispatchers.IO) {
-      val connection = open(method, request)
-      try {
-        connection.inputStream.use { input ->
-          readLimited(input, MAX_MESSAGE)
-        }
-      } finally {
-        connection.disconnect()
-      }
-    }
-
-  suspend fun watch(request: MessageLite, update: suspend (WatchResponse) -> Unit) =
-    withContext(Dispatchers.IO) {
-      val connection = open("/castor.v1.CastService/Watch", request, true)
-      try {
-        coroutineScope {
-          val cancellation =
-            launch(Dispatchers.Default, start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
-              try {
-                awaitCancellation()
-              } finally {
-                connection.disconnect()
-              }
-            }
-          try {
-            val input = DataInputStream(connection.inputStream)
-            while (currentCoroutineContext().isActive) {
-              val message = readWatch(input)
-              update(message)
-              if (message.hasEnded()) break
-            }
-          } finally {
-            cancellation.cancel()
-            connection.disconnect()
-          }
-        }
-      } catch (error: java.io.IOException) {
-        // Disconnecting a cancelled blocking read can throw SocketException on Android.
-        currentCoroutineContext().ensureActive()
-        throw error
-      }
-    }
-
   companion object {
-    private const val MAX_MESSAGE = 8 * 1024 * 1024
+    private fun ioFailure(error: ConnectException) =
+      IOException(
+        "${error.code.name.lowercase()}: ${error.message ?: error.cause?.message ?: "Castor request failed"}",
+        error,
+      )
 
     internal fun readLimited(input: java.io.InputStream, limit: Int): ByteArray {
       val output = java.io.ByteArrayOutputStream()
@@ -110,24 +117,14 @@ class Rpc(private val baseUrl: String, private val token: String) {
       }
     }
 
-    internal fun readWatch(input: DataInputStream): WatchResponse {
-      val flags =
-        try {
-          input.readUnsignedByte()
-        } catch (_: EOFException) {
-          throw EOFException("The status stream closed before the cast ended.")
-        }
-      val size = input.readInt()
-      require(size in 0..MAX_MESSAGE) { "Invalid status message length" }
-      val bytes = ByteArray(size).also { input.readFully(it) }
-      if (flags == 2)
-        throw java.io.IOException(
-          "Status stream ended before the cast: ${bytes.toString(Charsets.UTF_8)}"
+    private val transport =
+      ConnectOkHttpClient.configureClient(
+          OkHttpClient.Builder()
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .retryOnConnectionFailure(false)
+            .connectTimeout(10, TimeUnit.SECONDS)
         )
-      require(flags == 0) { "Unsupported status message flags" }
-      return WatchResponse.parseFrom(bytes).also {
-        require(it.hasStatus() || it.hasEnded()) { "Empty status update" }
-      }
-    }
+        .build()
   }
 }

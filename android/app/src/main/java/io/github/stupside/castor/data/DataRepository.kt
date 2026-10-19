@@ -5,26 +5,19 @@ import castor.v1.DeviceOuterClass.*
 
 class DataRepository(private val api: Rpc) {
   suspend fun devices(): List<Device> =
-    ListDevicesResponse.parseFrom(
-        api.call("/castor.v1.DeviceService/ListDevices", ListDevicesRequest.getDefaultInstance()),
-      )
-      .devicesList
+    api.result { api.devices.listDevices(ListDevicesRequest.getDefaultInstance()) }.devicesList
 
   suspend fun casts(): List<Cast> =
-    ListCastsResponse.parseFrom(
-        api.call("/castor.v1.CastService/ListCasts", ListCastsRequest.getDefaultInstance()),
-      )
-      .castsList
+    api.result { api.casts.listCasts(ListCastsRequest.getDefaultInstance()) }.castsList
 
   suspend fun cast(request: CastRequest): String =
-    CastResponse.parseFrom(
-        api.call("/castor.v1.CastService/Cast", request),
-      )
+    api
+      .result { api.casts.cast(request) }
       .castId
       .also { check(it.isNotBlank()) { "The server returned an empty cast ID" } }
 
   suspend fun stop(id: String) {
-    api.call("/castor.v1.CastService/Stop", StopRequest.newBuilder().setCastId(id).build())
+    api.result { api.casts.stop(StopRequest.newBuilder().setCastId(id).build()) }
   }
 
   suspend fun watch(id: String, update: suspend (WatchResponse) -> Unit) =

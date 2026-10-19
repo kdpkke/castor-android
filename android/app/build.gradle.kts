@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.stupside.castor"
         minSdk = 28
         targetSdk = 37
-        versionCode = 14
-        versionName = "1.9.0-android-dev.14"
+        versionCode = 15
+        versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -44,8 +44,13 @@ android {
 }
 
 android.sourceSets {
-  named("main") { proto { srcDir("../../proto") } }
+  named("main") {
+    proto { srcDir("../../proto") }
+    kotlin.directories.add(rootProject.file("client/build/bufbuild/generated/kotlin").path)
+  }
 }
+
+tasks.named("preBuild") { dependsOn(":client:bufGenerate") }
 
 protobuf {
   protoc { artifact = "com.google.protobuf:protoc:${libs.versions.protobuf.get()}" }
@@ -80,6 +85,9 @@ kotlin {
 dependencies {
   implementation(libs.protobuf.java)
   implementation(libs.protovalidate)
+  implementation(libs.connect.okhttp)
+  implementation(libs.connect.google.java)
+  implementation(libs.okhttp.core)
   val composeBom = platform(libs.androidx.compose.bom)
   implementation(composeBom)
   androidTestImplementation(composeBom)
@@ -106,6 +114,7 @@ dependencies {
   // Local tests: jUnit, coroutines, Android runner
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
+  testImplementation(libs.mockwebserver)
 
   // Instrumented tests: jUnit rules and runners
   androidTestImplementation(libs.androidx.test.core)

@@ -6,7 +6,7 @@ Upstream: https://github.com/stupside/castor. Android: https://github.com/kdpkke
 
 `android/`, `cmd/castor-android` and the two Android workflow files belong to this community project. Existing Go packages, generated contracts and the Whisper pin retain their upstream layout and history. The module remains `github.com/stupside/castor` so Go's internal-import rules work without copying or exposing private service implementations.
 
-`android/upstream.json` records the last integrated stable tag and immutable commit. Initially this is v1.9.0 (`01d45f8`); dev.14 also contains unreleased upstream changes through `af8c784` and Android adaptations/fixes. Keeping that tested snapshot avoids losing working fixes. Tracking a stable release does not imply an unmodified copy of that release.
+`android/upstream.json` records the last integrated stable tag and immutable commit. Initially this is v1.9.0 (`01d45f8`); the initial Android snapshot also contains unreleased upstream changes through `af8c784` and Android adaptations/fixes. Keeping that tested snapshot avoids losing working fixes. Tracking a stable release does not imply an unmodified copy of that release. Android versions are independent, starting at 1.0.0 with tags such as `android-v1.0.0`.
 
 ## Automatic updates
 
@@ -22,6 +22,8 @@ The `upstream-releases.yml` workflow runs at minute 23 every six hours and suppo
 
 Checks failing leave the PR open. Conflicts produce an issue. A manually closed update PR pauses that release until reopened. The workflow does not close user issues or send messages to the upstream maintainer. Source integration does not publish an Android release.
 
+Android compilation depends on `:client:bufGenerate`: each changed contract regenerates the official Connect-Kotlin client from the same checkout used to build the engine. Java message generation uses those same Protobuf sources. Generated clients are build outputs rather than merged snapshots. Generation updates the communication code; new UI controls or incompatible contract changes still require Android development and tests. The current core source/history integration remains in place; adopting Buf alone does not extract the Android Go host into a separate dependency.
+
 GitHub schedules run on the default branch, can be delayed, and may be disabled after 60 days without repository activity. Check Actions occasionally or use Run workflow. Authentication uses the repository's short-lived GITHUB_TOKEN, scoped separately for preparation, read-only testing and final publication. Repository Actions settings must allow workflow-created PRs. A repository policy disallowing direct main updates will stop the final push; do not silently bypass such a policy.
 
 ## Manual repair
@@ -32,6 +34,6 @@ To undo an incompatible integration, prepare and review a new revert commit, reb
 
 ## Android distributions
 
-Only maintainer-published releases use the established local signing key. The updater does not read/upload that key. CI debug APKs are temporary test artifacts with a different signer; they cannot update an existing locally signed installation. Distribute GPL corresponding sources/notices alongside an APK. Android app versionCode/versionName are independent of the core tracking file and must advance for an actual Android update.
+Only maintainer-published releases use the release signing identity recorded in their release notes. The updater does not read/upload the private key. CI debug APKs are temporary test artifacts with a different signer; they cannot update a release installation. Distribute GPL corresponding sources/notices alongside an APK. Android app versionCode/versionName are independent of the core tracking file and must advance for an actual Android update.
 
 The upstream desktop release-please/container/Homebrew workflows are retained in source but disabled through repository Actions settings. Only Android validation and Upstream releases are enabled here. A future update changing workflow files is held for manual review before it can affect repository automation.

@@ -7,7 +7,7 @@ A community Android client for [Castor](https://github.com/stupside/castor), mai
 <img src="android/docs/images/home-dark.png" width="280" alt="Castor Android home" />
 <img src="android/docs/images/appearance-dark.png" width="280" alt="System, Light and Dark appearance" />
 
-Native emulator previews from dev.12 with synthetic input. The current tested application is dev.14.
+Native Android emulator previews with sample input.
 
 ## Features
 
@@ -19,13 +19,15 @@ Native emulator previews from dev.12 with synthetic input. The current tested ap
 - Settings remain open while choices update immediately; diagnostic details are selectable and copyable.
 - Live-stream delivery follows future bytes; captured HLS access can renew through the original page when tokens expire.
 
-Android 9+; arm64-v8a phones and x86_64 emulators. Manually tested on **OPPO Find X8 Pro / ColorOS 16 → LG C2 in Chromecast mode**. Roku remains experimental and requires upstream's developer-channel setup.
+Android 9+; arm64-v8a phones and x86_64 emulators. Previous casting builds were manually tested on **OPPO Find X8 Pro / ColorOS 16 → LG C2 in Chromecast mode**; see current validation coverage below. Roku remains experimental and requires upstream's developer-channel setup.
 
 ## Install and use
 
 Download an APK from this repository's Releases, connect the phone and TV to the same Wi-Fi, then paste/share a URL, choose the TV and tap **Cast video**. Use Web page for an HTML player, Direct stream for an actual media URL. Android 17 requires local-network permission. See the [usage and compatibility guide](android/README.md) for details.
 
-The initial dev.14 APK uses the same local development signer as earlier test builds. CI artifacts use the runner's temporary debug signer: they are validation builds and cannot update the locally signed installation. Public signed updates are published separately after maintainer testing. No signing keys are committed or uploaded by the updater.
+Release notes include SHA-256 checksums and the signing certificate fingerprint so you can verify your download. CI debug APKs are temporary validation builds and use a different signer. No signing keys are committed or uploaded by the updater.
+
+Android versions follow their own sequence, starting at **1.0.0**, with tags such as `android-v1.0.0`. The upstream core version is tracked separately in [android/upstream.json](android/upstream.json).
 
 ## Build
 
@@ -52,13 +54,15 @@ bash gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 
 Every six hours, **Upstream releases** checks published stable releases in `stupside/castor`. New versions are processed in ascending order, one per run. It merges the tagged source into an update branch, records the exact tag/commit in [android/upstream.json](android/upstream.json), opens a PR and explicitly calls Android validation. Once Go checks, both native ABI builds, JVM tests, lint and the full Android 17 / 16 KB device suite pass, main advances to that exact tested commit without a force-push.
 
+Normal Android builds generate the official Connect-Kotlin client with Buf from the same Protobuf contracts used by the engine. New core contracts regenerate the communication code automatically; new interface controls and incompatible API changes still need Android development.
+
 Conflicts open an issue and leave main unchanged. Failed checks leave the update PR open. Workflow/automation changes require manual review. Prereleases, drafts and unrelated tags are ignored. This is source integration; it does not install desktop release binaries or silently publish an APK. GitHub's scheduler can be delayed and can disable schedules after 60 days without repository activity; **Run workflow** also checks immediately.
 
-The starting snapshot preserves dev.14, including unreleased core adaptations based on upstream `af8c784`; it is already newer than the stable v1.9.0 baseline. The updater does not downgrade it. The full source and history are retained because the native entry point uses Go internal packages; changing the Go module path would break those boundaries. Android's application ID is also retained so locally signed updates preserve existing app data.
+The starting snapshot includes core adaptations based on upstream `af8c784` and live-stream fixes beyond the stable v1.9.0 baseline. The updater does not downgrade it. The full source and history are retained because the native entry point uses Go internal packages; changing the Go module path would break those boundaries. Android's application ID is also retained; updating an installed app requires the same signing identity.
 
 ## Validation
 
-The inherited dev.14 application passed 10 JVM tests, all 28 instrumentation tests on Android 17 / 16 KB, lint (0 errors, 10 warnings), native payload/alignment verification, and the Go short suite (1,149 passing test/subtest results; three desktop/E2E tests excluded). The reporter confirmed the live-playback fixes on the OPPO/LG pair above. Repository synchronization has additional local Git integration tests. New core releases must pass the live CI gates before automatic integration.
+The generated-client integration passed 18 JVM tests, all 28 instrumentation tests on a local Android 17 / 16 KB emulator, release lint and debug/release assembly. A build without existing generated clients recreated them automatically. This integration has not yet been retested on the physical OPPO/LG pair. The unchanged Go source previously passed the short suite (1,149 passing test/subtest results; three desktop/E2E tests excluded), and repository synchronization has additional local Git integration tests. The GitHub-hosted emulator is still being diagnosed; new core releases must pass all CI gates before automatic integration.
 
 ## Credits and licensing
 
