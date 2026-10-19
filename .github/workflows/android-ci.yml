@@ -81,6 +81,8 @@ jobs:
     needs: native
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      ANDROID_CMDLINE_TOOLS_VERSION: '23.0'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -102,6 +104,9 @@ jobs:
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "cmdline-tools;$ANDROID_CMDLINE_TOOLS_VERSION"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/$ANDROID_CMDLINE_TOOLS_VERSION/bin/sdkmanager"
+          cat "$ANDROID_HOME/cmdline-tools/$ANDROID_CMDLINE_TOOLS_VERSION/source.properties"
           "$SDKMANAGER" 'platforms;android-37.2' 'build-tools;37.0.0' 'platform-tools' 'emulator' 'system-images;android-37.2;google_apis_ps16k;x86_64'
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules

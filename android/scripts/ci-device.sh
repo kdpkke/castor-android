@@ -3,8 +3,16 @@ set -euo pipefail
 
 export ANDROID_AVD_HOME="$RUNNER_TEMP/castor-avds"
 mkdir -p "$ANDROID_AVD_HOME"
-echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --name castor-ci --path "$ANDROID_AVD_HOME/castor-ci.avd" --package 'system-images;android-37.2;google_apis_ps16k;x86_64' --device pixel_6
+echo no | "$ANDROID_HOME/cmdline-tools/$ANDROID_CMDLINE_TOOLS_VERSION/bin/avdmanager" create avd --name castor-ci --path "$ANDROID_AVD_HOME/castor-ci.avd" --package 'system-images;android-37.2;google_apis_ps16k;x86_64' --device pixel_6
 config="$ANDROID_AVD_HOME/castor-ci.avd/config.ini"
+# Older avdmanager versions silently turn minor API levels into android-0,
+# which misconfigures gfxstream and crashes SurfaceFlinger before tests start.
+for metadata in "$ANDROID_AVD_HOME/castor-ci.ini" "$config"; do
+    if ! grep -Fx 'target=android-37.2' "$metadata"; then
+        echo "Invalid AVD target in $metadata; Android 37.2 requires current command-line tools" >&2
+        exit 1
+    fi
+done
 sed -i '/^disk\.dataPartition\.size=/d' "$config"
 printf '\ndisk.dataPartition.size=8G\n' >> "$config"
 "$ANDROID_HOME/emulator/emulator" -list-avds | grep -Fx castor-ci
