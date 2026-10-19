@@ -1,5 +1,19 @@
 # Castor Android
 
+---
+
+## ☕ Like this project?
+
+This project is developed and maintained in my spare time. If it has saved you time or helped you build something cool, please consider buying me a coffee to say thanks!
+
+Your support keeps me caffeinated and motivated to work on new features and bug fixes.
+
+<a href="https://paypal.me/matteomuratore1">
+  <img src="https://img.shields.io/badge/PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white" alt="Donate with PayPal" />
+</a>
+
+---
+
 A community Android client for [Castor](https://github.com/stupside/castor), maintained independently by [kdpkke](https://github.com/kdpkke). Cast a video link from your phone to a TV on the same Wi-Fi. The phone runs the Go media engine itself; no desktop server, root or Termux is required.
 
 [Download APKs](https://github.com/kdpkke/castor-android/releases) · [Report an Android issue](https://github.com/kdpkke/castor-android/issues) · [Android build guide](android/README.md) · [Core updates](android/docs/UPSTREAM.md)
