@@ -53,6 +53,8 @@ After building native binaries, open `android/` in Android Studio. The developme
 
 For distribution, use Android Studio's **Build > Generate Signed App Bundle or APK > APK**, select the **release** variant and a dedicated release keystore stored outside the repository. Alternatively, `:app:assembleRelease` produces an unsigned APK at `app/build/outputs/apk/release/app-release-unsigned.apk`; sign it with the Android SDK's `apksigner`. Keep an encrypted backup of the keystore and store its password separately. Future updates must preserve the signing identity and increase `versionCode`.
 
+Official stable APKs use the dedicated certificate documented in [Release signing](docs/SIGNING.md). That guide includes its fingerprint, verification commands and the maintainer's signing procedure. Development installations need a one-time uninstall before moving to this identity.
+
 Verify a signed download with `apksigner verify --verbose --print-certs <apk>` and compare the certificate SHA-256 fingerprint and APK checksum with the release notes. A fingerprint identifies the signer; it is different from the APK's file checksum. A release key change without an Android-supported rotation cannot update an installation signed with the development key. Self-signed certificates are supported; a paid certificate is not required and does not remove Android's installation or Play Protect checks.
 
 Rerun the native builder after changing Go, protobuf, or native build sources. Gradle checks that runtime binaries and license notices are present; it does not rebuild the Go engine itself. Kotlin uses ktfmt's two-space Google style. Regenerate the Android mascot drawable with `python android/scripts/sync-logo.py` when the repository SVG changes.
