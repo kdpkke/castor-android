@@ -177,6 +177,7 @@ class MainScreenTest {
       compose.runOnIdle {
         model.connect(Rpc(server.url("/").toString().removeSuffix("/"), "fixture"))
       }
+      compose.waitUntil(5000) { model.uiState.value.ready }
       compose.onNodeWithTag("cast-action").performClick()
       compose.waitUntil(5000) { model.uiState.value.castId == "new-cast" }
       compose.onNodeWithText("Chosen receiver").assertExists()

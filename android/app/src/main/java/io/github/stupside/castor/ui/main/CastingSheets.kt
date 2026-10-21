@@ -56,8 +56,7 @@ internal fun AppLanguagePicker(
           AppChoiceRow(
             selected == language,
             language.nativeName,
-            if (language == AppLanguage.English) stringResource(R.string.language_default)
-            else null,
+            if (language == AppLanguage.English) stringResource(R.string.language_default) else null,
           ) {
             select(language)
           }
@@ -75,11 +74,7 @@ internal fun themeLabel(theme: AppTheme): Int =
   }
 
 @Composable
-internal fun AppThemePicker(
-  selected: AppTheme,
-  dismiss: () -> Unit,
-  select: (AppTheme) -> Unit,
-) {
+internal fun AppThemePicker(selected: AppTheme, dismiss: () -> Unit, select: (AppTheme) -> Unit) {
   GlassSheet(dismiss) {
     Column(
       Modifier.fillMaxWidth()
@@ -216,21 +211,22 @@ internal fun TvPicker(
           stringResource(R.string.search_help),
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        saved?.let { tv ->
-          GlassPanel(Modifier.fillMaxWidth(), onClick = { select(tv) }) {
-            ListItem(
-              headlineContent = { Text(tv.name) },
-              supportingContent = {
-                Text("${stringResource(R.string.last_tv)} · ${protocolName(tv.type)}")
-              },
-              leadingContent = { CastIcon(R.drawable.ic_tv) },
-              trailingContent = {
-                CastIcon(R.drawable.ic_next, stringResource(R.string.use_tv))
-              },
-              colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            )
+        saved
+          ?.available(state.devices)
+          ?.takeIf { state.discoveryComplete && !state.discovering }
+          ?.let { tv ->
+            GlassPanel(Modifier.fillMaxWidth(), onClick = { select(tv) }) {
+              ListItem(
+                headlineContent = { Text(tv.name) },
+                supportingContent = {
+                  Text("${stringResource(R.string.last_tv)} · ${protocolName(tv.type)}")
+                },
+                leadingContent = { CastIcon(R.drawable.ic_tv) },
+                trailingContent = { CastIcon(R.drawable.ic_next, stringResource(R.string.use_tv)) },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+              )
+            }
           }
-        }
         if (state.discovering) {
           LinearProgressIndicator(Modifier.fillMaxWidth())
           Text(stringResource(R.string.searching), style = MaterialTheme.typography.bodyMedium)
@@ -238,11 +234,7 @@ internal fun TvPicker(
         state.devices
           .filter { it.address.isNotBlank() && it.type in receiverTypes }
           .forEach { device ->
-            GlassPanel(
-              onClick = {
-                select(SavedTv(device.name.ifBlank { device.address }, device.address, device.type))
-              }
-            ) {
+            GlassPanel(onClick = { select(SavedTv(device)) }) {
               ListItem(
                 headlineContent = { Text(device.name.ifBlank { device.address }) },
                 supportingContent = { Text(protocolName(device.type)) },
@@ -415,8 +407,7 @@ internal fun PlaybackSettings(
         onClick = {
           save(
             height,
-            if (subtitleMode == "language") language.trim().lowercase(Locale.ROOT)
-            else subtitleMode,
+            if (subtitleMode == "language") language.trim().lowercase(Locale.ROOT) else subtitleMode,
           )
         },
         enabled = validHeight && validLanguage,

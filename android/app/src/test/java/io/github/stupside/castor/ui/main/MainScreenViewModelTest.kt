@@ -1,11 +1,85 @@
 package io.github.stupside.castor.ui.main
 
+import castor.v1.DeviceOuterClass.Device
+import castor.v1.DeviceOuterClass.DeviceType
 import castor.v1.DeviceOuterClass.Target
 import org.junit.Assert.*
 import org.junit.Test
 
 class MainScreenViewModelTest {
   private val target = Target.newBuilder().setDeviceId("living-room").build()
+
+  @Test
+  fun savedReceiverRequiresCurrentEvidenceAndRefreshesItsAddressByIdentity() {
+    val device =
+      Device.newBuilder()
+        .setId("dlna:living-room")
+        .setName("Living room")
+        .setType(DeviceType.DEVICE_TYPE_DLNA)
+        .setAddress("http://192.0.2.10:1938/")
+        .build()
+    val saved = SavedTv(device).copy(address = "http://192.0.2.10:1487/")
+    assertNull(saved.available(emptyList()))
+    assertEquals(SavedTv(device), saved.available(listOf(device)))
+    assertNull(
+      saved.available(
+        listOf(device.toBuilder().setId("dlna:another-tv").setAddress(saved.address).build())
+      )
+    )
+    assertNull(
+      saved.available(listOf(device.toBuilder().setType(DeviceType.DEVICE_TYPE_ROKU).build()))
+    )
+  }
+
+  @Test
+  fun legacyAndManualEntriesAreConfirmedOnlyAtTheirSavedAddress() {
+    val device =
+      Device.newBuilder()
+        .setId("dlna:living-room")
+        .setName("Living room")
+        .setType(DeviceType.DEVICE_TYPE_DLNA)
+        .setAddress("http://192.0.2.10:1938/")
+        .build()
+    val legacy = SavedTv("Old preference", device.address, device.type)
+    assertEquals(SavedTv(device), legacy.available(listOf(device)))
+    assertNull(
+      legacy.available(listOf(device.toBuilder().setAddress("http://192.0.2.10:1487/").build()))
+    )
+  }
+
+  @Test
+  fun discoveredTvKeepsItsIdentityWhenItsDescriptionPortChanges() {
+    val first =
+      Device.newBuilder()
+        .setId("dlna:uuid:living-room")
+        .setName("Living room")
+        .setType(DeviceType.DEVICE_TYPE_DLNA)
+        .setAddress("http://192.0.2.10:1487/")
+        .build()
+    val moved = first.toBuilder().setAddress("http://192.0.2.10:1938/").build()
+    for (device in listOf(first, moved)) {
+      val request =
+        MainScreenViewModel.request(
+          "https://example.org/video.mp4",
+          false,
+          SavedTv(device).target(),
+          "1080",
+        )
+      assertEquals(first.id, request.target.deviceId)
+      assertFalse(request.target.hasPinned())
+    }
+  }
+
+  @Test
+  fun manuallyEnteredTvStillUsesItsExactAddress() {
+    val address = "http://192.0.2.10:1487/custom/description.xml"
+    val saved = SavedTv("Manual receiver", address, DeviceType.DEVICE_TYPE_DLNA)
+    val request =
+      MainScreenViewModel.request("https://example.org/video.mp4", false, saved.target(), "1080")
+    assertEquals(address, request.target.pinned.address)
+    assertEquals(DeviceType.DEVICE_TYPE_DLNA, request.target.pinned.type)
+    assertFalse(request.target.hasDeviceId())
+  }
 
   @Test
   fun automaticSourceDetectionIgnoresQueryStringsAndHonorsOverrides() {

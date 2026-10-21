@@ -68,8 +68,10 @@ fun MainScreen(
   var tvName by rememberSaveable { mutableStateOf(options.television()?.name.orEmpty()) }
   var tvAddress by rememberSaveable { mutableStateOf(options.television()?.address.orEmpty()) }
   var tvType by rememberSaveable { mutableIntStateOf(options.television()?.type?.number ?: 1) }
+  var tvId by rememberSaveable { mutableStateOf(options.television()?.id.orEmpty()) }
   val tv =
-    if (tvAddress.isBlank()) null else SavedTv(tvName, tvAddress, DeviceType.forNumber(tvType))
+    if (tvAddress.isBlank()) null
+    else SavedTv(tvName, tvAddress, DeviceType.forNumber(tvType), tvId)
   var height by rememberSaveable { mutableStateOf(options.height()) }
   var subtitles by rememberSaveable { mutableStateOf(options.subtitles()) }
   var sheet by rememberSaveable { mutableStateOf<String?>(null) }
@@ -226,9 +228,7 @@ fun MainScreen(
             active
               ?.device
               ?.takeIf { it.address.isNotBlank() && it.type in receiverTypes }
-              ?.let {
-                SavedTv(it.name.ifBlank { it.address }, it.address, it.type)
-              }
+              ?.let { SavedTv(it) }
           ActiveCast(state.phase, activeUrl, receiver)
         } else {
           if (!compact)
@@ -267,9 +267,7 @@ fun MainScreen(
                   Modifier.fillMaxWidth()
                     .heightIn(min = if (compact) 64.dp else 88.dp)
                     .testTag("video-url")
-                    .semantics {
-                      contentDescription = inputDescription
-                    },
+                    .semantics { contentDescription = inputDescription },
                 shape = MaterialTheme.shapes.large,
                 colors =
                   TextFieldDefaults.colors(
@@ -311,10 +309,7 @@ fun MainScreen(
                     if (clip != null && clip.itemCount > 0)
                       clip.getItemAt(0).coerceToText(context)?.toString()
                     else null
-                  if (text.isNullOrBlank())
-                    scope.launch {
-                      snackbar.showSnackbar(clipboardEmpty)
-                    }
+                  if (text.isNullOrBlank()) scope.launch { snackbar.showSnackbar(clipboardEmpty) }
                   else {
                     url = text.trim()
                     mode = VideoSourceMode.Automatic
@@ -463,6 +458,7 @@ fun MainScreen(
       tvName = selected.name
       tvAddress = selected.address
       tvType = selected.type.number
+      tvId = selected.id
       options.television(selected)
       sheet = null
     }
@@ -606,10 +602,7 @@ private fun ErrorPanel(error: String, dismiss: () -> Unit, copy: () -> Unit) {
       Text(stringResource(R.string.error_help), style = MaterialTheme.typography.bodyMedium)
       FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TextButton(onClick = copy) {
-          Text(
-            stringResource(R.string.copy_error),
-            color = MaterialTheme.colorScheme.error,
-          )
+          Text(stringResource(R.string.copy_error), color = MaterialTheme.colorScheme.error)
         }
         TextButton(onClick = { details = !details }) {
           Text(
