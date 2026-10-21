@@ -13,6 +13,8 @@ An independent Android app using Castor's existing Go API and media engine. The 
 5. Open **Playback settings** if needed. **Native quality** keeps the selected stream’s resolution; the TV may still need codec conversion, so it does not promise bit-identical video. Existing height limits and the 1080p default remain available. Then tap the fixed **Cast video** button. If a page requires interaction, start its video in the embedded player while extraction is running.
 6. **Stop casting** ends the current cast. The app-bar menu and notification expose **Stop Castor**, which shuts down the phone's engine and releases its locks.
 
+On Android 16+, DLNA/Roku discovery also searches the phone's active hotspot interfaces. This lets a TV connected to the phone's hotspot respond even when the default internet route is cellular or a VPN.
+
 The Android interface uses a shared Liquid Glass material with **Dark** as the default appearance. Choose **Appearance** from the app-bar menu for **System**, **Light** or **Dark**; the choice is saved and applies immediately without recreating the screen or restarting the cast. **System** follows device night-mode changes, while explicit choices override them, including the system-bar foregrounds. Native sheets, inputs and controls use translucent surfaces with a specular rim; Android 12+ blurs only the scenic backplate, keeping content sharp. Android 9–11 retain the same material without the native blur effect. English is the default language; choose **App language** from the app-bar menu to switch to **Italiano** or **English**. The choice is saved and applies immediately, including after reopening the app. Changing language recreates the screen while the casting service keeps running. Both language and appearance choosers stay open after selection, immediately updating their content and selected row; close them with the close button, Android Back or a native sheet gesture. The playback summary explicitly labels its subtitle value. Only language, appearance, receiver and playback preferences are saved in private preferences; video URLs and access tokens are not saved there. Errors have collapsible, selectable details; **Copy error** always copies the entire diagnostic.
 
 Subtitles offer **Off**, **App language**, or an explicit language code such as `en` or `it`. Castor selects source captions in that language, with Whisper transcription as a fallback when captions are missing. The saved `auto` preference now follows the selected app language (English or Italian), matching upstream’s explicit language policy. First transcription use downloads a pinned, checksum-verified Whisper model; caption delivery follows the receiver’s capabilities and requires served playback. Real-time software encoding and transcription can consume substantial battery and may exceed a phone's sustained processing speed.
@@ -24,7 +26,7 @@ Subtitles offer **Off**, **App language**, or an explicit language code such as 
 - `CastorService` owns the native process, foreground notification, wake lock, and multicast lock. Casting continues when the activity is backgrounded. The native host reports cast activity, so the wake lock is held only during a cast. Service shutdown cancels the engine and browser.
 - At engine startup, Android's default trust anchors are exported to an app-private PEM file and passed to OpenSSL through `SSL_CERT_FILE`. Android's hashed certificate-directory filenames are incompatible with OpenSSL's lookup scheme. TLS certificate and hostname verification remain enabled.
 - Android WebView implements the existing `castor.scraping.v1` contract. It uses an app-private profile, captures stream requests and their replay headers, and exposes no JavaScript-to-native bridge. File/content URLs and protected-media permission requests are refused.
-- Android NSD handles Chromecast discovery. SSDP discovery uses a default-route UDP socket, avoiding Android's restricted netlink interface enumeration. Results enter the API's existing device directory; device protocols remain in Go.
+- Android NSD handles Chromecast discovery. SSDP uses multicast sockets on active tethered interfaces reported by Android 16+, falling back to the default route when none are present or on older versions. It looks up only those interface names through Java, without enumerating restricted netlink interfaces. Results enter the API's existing device directory; device protocols remain in Go.
 - Protobuf Java classes and the official Connect-Kotlin clients use the same `../proto` contracts as the Go engine. The `client` Gradle project runs the pinned Buf CLI and Connect generator before Android compilation; generated sources stay in `client/build/` and are not committed. The app uses generated methods instead of maintaining RPC paths and protocol decoding. Its endpoint adapter retains bearer authentication, bounded responses, cancellation and the requirement for an explicit cast `Ended` result.
 - The shared HLS segment reader recognizes bounded `TIKTIKPX` PNG/gzip envelopes carrying MPEG-TS. HLS detected as PNG or without usable video dimensions is measured again through that same reader before admission; ordinary static images remain ineligible. This handles the media envelope without adding site-specific URL templates or disabling admission checks.
 - Progressive live playback treats an open byte-zero range as a growing response, without a fixed content length. Chromecast can keep reading future bytes instead of finishing at the initial buffer. Bounded ranges, retained-window checks and finished-stream ranges keep their existing semantics.
@@ -63,7 +65,7 @@ On Linux, run `android/scripts/build-native.sh` with Bash for `arm64-v8a` and `x
 
 ## Verify
 
-The build wrapper runs JVM tests, lint, and APK assembly. Device tests use only local fixtures: a private webpage, a generated video, and a simulated DLNA renderer. No real TV or streaming site is contacted.
+The build wrapper runs JVM tests, lint, and APK assembly. By default, device tests use only local fixtures: a private webpage, a generated video, and a simulated DLNA renderer. No real TV or streaming site is contacted unless the hotspot test below is explicitly enabled.
 
 Start an Android emulator, then run from PowerShell:
 
@@ -72,6 +74,14 @@ Start an Android emulator, then run from PowerShell:
 ```
 
 This waits for boot completion and checks fresh XML test results. Some Android Gradle versions can print `BUILD SUCCESSFUL` after APK installation fails; that text is insufficient evidence that device tests ran. Repeat with Android 17's 16 KB system image to exercise native loading and local-network permissions.
+
+To verify discovery on a physical Android 16+ phone, connect a powered-on DLNA TV to its hotspot, install the debug app and test APK, then run:
+
+```powershell
+adb -s <phone-serial> shell am instrument -w -e class io.github.stupside.castor.DeviceDiscoveryHotspotTest -e hotspot true io.github.stupside.castor.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+This opt-in test requires a real TV and asserts that discovery returns a DLNA receiver. It is skipped in the normal fixture suite.
 
 ## Compatibility and limits
 

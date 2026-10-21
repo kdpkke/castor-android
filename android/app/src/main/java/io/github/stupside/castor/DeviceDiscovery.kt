@@ -1,15 +1,19 @@
 package io.github.stupside.castor
 
 import android.content.Context
+import android.net.TetheringInterface
+import android.net.TetheringManager
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.os.Build
 import android.util.Xml
 import castor.v1.DeviceOuterClass.Device
 import castor.v1.DeviceOuterClass.DeviceType
 import java.net.DatagramPacket
-import java.net.DatagramSocket
 import java.net.HttpURLConnection
 import java.net.InetAddress
+import java.net.MulticastSocket
+import java.net.NetworkInterface
 import java.net.URI
 import java.net.URL
 import kotlin.coroutines.resume
@@ -17,22 +21,48 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import org.xmlpull.v1.XmlPullParser
 
-// Android supplies mDNS; SSDP uses one default-route socket and never enumerates restricted netlink
-// interfaces.
-class DeviceDiscovery(context: Context) {
+// Android supplies mDNS and active hotspot interfaces; no restricted netlink enumeration is needed.
+class DeviceDiscovery(private val context: Context) {
   private val nsd = context.getSystemService(NsdManager::class.java)
 
   suspend fun find(): List<Device> = coroutineScope {
     val cast = async { chromecasts() }
-    val ssdp = async(Dispatchers.IO) { ssdp() }
+    val ssdp = async(Dispatchers.IO) {
+      val tethered = tetheredInterfaces()
+      if (tethered.isEmpty()) ssdp(null)
+      else coroutineScope { tethered.map { async { ssdp(it) } }.awaitAll().flatten() }
+    }
     (ssdp.await() + cast.await()).distinctBy { "${it.type}:${it.id}" }
   }
 
-  private suspend fun ssdp(): List<Device> {
+  private suspend fun tetheredInterfaces(): List<NetworkInterface> {
+    if (Build.VERSION.SDK_INT < 36) return emptyList()
+    val manager = context.getSystemService(TetheringManager::class.java)
+    val names = withTimeoutOrNull(2000) {
+      callbackFlow {
+        val callback = object : TetheringManager.TetheringEventCallback {
+          override fun onTetheredInterfacesChanged(interfaces: Set<TetheringInterface>) {
+            trySend(interfaces.map { it.getInterface() })
+          }
+        }
+        manager.registerTetheringEventCallback(context.mainExecutor, callback)
+        awaitClose { manager.unregisterTetheringEventCallback(callback) }
+      }.first()
+    } ?: throw java.io.IOException("Android did not report the hotspot network. Search again.")
+    return names.map { name ->
+      NetworkInterface.getByName(name)
+        ?: throw java.io.IOException("The hotspot network changed. Search again.")
+    }
+  }
+
+  private suspend fun ssdp(network: NetworkInterface?): List<Device> {
     val found = linkedMapOf<String, Pair<String, DeviceType>>()
-    DatagramSocket().use { socket ->
+    MulticastSocket().use { socket ->
+      // The default route can be cellular even while the TV is on this phone's hotspot.
+      if (network != null) socket.networkInterface = network
       socket.soTimeout = 200
       for (target in listOf("urn:schemas-upnp-org:device:MediaRenderer:1", "roku:ecp")) {
         val message =
