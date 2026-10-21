@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.webkit.CookieManager
 import android.webkit.PermissionRequest
+import android.webkit.ServiceWorkerClient
+import android.webkit.ServiceWorkerController
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -30,7 +32,9 @@ data class BrowserPage(val url: String, val loading: Boolean = true, val error: 
 
 // A private WebView profile captures requests; no JavaScript interface is exposed to websites.
 @SuppressLint("SetJavaScriptEnabled")
-class BrowserResolver(context: Context) {
+class BrowserResolver internal constructor(context: Context, private val adBlock: BrowserAdBlock) {
+  constructor(context: Context) : this(context, BrowserAdBlock.bundled(context))
+
   val active = MutableStateFlow(false)
   val page = MutableStateFlow<BrowserPage?>(null)
   val webView = WebView(context)
@@ -49,15 +53,35 @@ class BrowserResolver(context: Context) {
       allowFileAccess = false
       allowContentAccess = false
       mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-      setSupportMultipleWindows(false)
+      // With false, target=_blank/window.open can replace the current page in this WebView.
+      // Handle new-window requests explicitly and refuse them instead.
+      setSupportMultipleWindows(true)
+      javaScriptCanOpenWindowsAutomatically = false
     }
     CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
     webView.webChromeClient =
       object : WebChromeClient() {
+        override fun onCreateWindow(
+          view: WebView,
+          isDialog: Boolean,
+          isUserGesture: Boolean,
+          resultMsg: android.os.Message,
+        ): Boolean = false
+
         override fun onPermissionRequest(request: PermissionRequest) {
           request.deny()
         }
       }
+    // Service-worker network requests bypass WebViewClient. The app has a single browser profile;
+    // install the same immutable rules there, without retaining the WebView or its context.
+    val serviceWorkerRules = adBlock
+    ServiceWorkerController.getInstance()
+      .setServiceWorkerClient(
+        object : ServiceWorkerClient() {
+          override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? =
+            serviceWorkerRules.intercept(request.url.toString())
+        }
+      )
     webView.webViewClient =
       object : WebViewClient() {
         override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
@@ -93,12 +117,15 @@ class BrowserResolver(context: Context) {
         }
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-          !isHttp(request.url.toString())
+          !isHttp(request.url.toString()) || adBlock.blocks(request.url.toString())
 
         override fun shouldInterceptRequest(
           view: WebView,
           request: WebResourceRequest,
         ): android.webkit.WebResourceResponse? {
+          adBlock.intercept(request.url.toString())?.let {
+            return it
+          }
           capture(request.url.toString(), request.requestHeaders)
           return null
         }
@@ -116,6 +143,8 @@ class BrowserResolver(context: Context) {
     htmlVideo: Boolean = false,
   ) {
     if (!capturing || !isHttp(url) || url.length > 8192 || candidates.size >= 1600) return
+    // DOM currentSrc/src can expose blocked media even when its request never reached the network.
+    if (adBlock.blocks(url)) return
     val type =
       when (URI(url).path.orEmpty().substringAfterLast('.').lowercase()) {
         // Use Castor's canonical identity so inspection selects its HLS decoder.
@@ -161,7 +190,12 @@ class BrowserResolver(context: Context) {
             active.value = interactive
             if (!reuse) {
               page.value = if (interactive) BrowserPage(address) else null
-              webView.loadUrl(address)
+              if (adBlock.blocks(address)) {
+                capturing = false
+                webView.stopLoading()
+                webView.loadUrl("about:blank")
+                failedLoading("The page address was blocked by the browser's ad filter.")
+              } else webView.loadUrl(address)
             }
           }
           var firstSeen = 0L

@@ -23,6 +23,12 @@ The Android interface uses a shared Liquid Glass material with **Dark** as the d
 
 Subtitles offer **Off**, **App language**, or an explicit language code such as `en` or `it`. Castor selects source captions in that language, with Whisper transcription as a fallback when captions are missing. The saved `auto` preference now follows the selected app language (English or Italian), matching upstream’s explicit language policy. First transcription use downloads a pinned, checksum-verified Whisper model; caption delivery follows the receiver’s capabilities and requires served playback. Real-time software encoding and transcription can consume substantial battery and may exceed a phone's sustained processing speed.
 
+Webpages use an always-on, bundled AdAway domain blocklist before requests or
+video sources are captured. Advertising hosts are filtered in WebView and
+service-worker requests, and new-window popups are refused. Ads delivered through
+unlisted or shared content hosts can still get through. See [browser ad blocking](docs/ADBLOCK.md)
+for the list's license, updates and exact limits.
+
 ## Architecture
 
 - `cmd/castor-android` composes the existing API and media services. Their RPCs stay authenticated and bound to loopback; only the device-facing media route is reachable on the LAN.

@@ -35,17 +35,20 @@ class BrowserPresentationTest {
   fun embeddedPagePaintsAndCapturesVideoAfterARealTap() =
     runBlocking<Unit> {
       val context = InstrumentationRegistry.getInstrumentation().targetContext
+      val popupRequests = AtomicInteger()
       val server = MockWebServer()
       server.dispatcher =
         object : Dispatcher() {
-          override fun dispatch(request: RecordedRequest) =
-            MockResponse()
+          override fun dispatch(request: RecordedRequest): MockResponse {
+            if (request.path?.startsWith("/popup") == true) popupRequests.incrementAndGet()
+            return MockResponse()
               .setHeader("Content-Type", "text/html")
               .setBody(
                 """<meta name="viewport" content="width=device-width,initial-scale=1">
           <style>html,body{margin:0;height:100%;background:#217a39}button{position:fixed;inset:0;width:100%;height:100%;background:#217a39;color:white;border:0;font-size:24px}</style>
-          <button onclick="fetch('/manual.m3u8')">Play test video</button>"""
+          <button onclick="window.open('/popup-window'); const a=document.createElement('a'); a.href='/popup-link'; a.target='_blank'; document.body.appendChild(a); a.click(); fetch('/manual.m3u8')">Play test video</button>"""
               )
+          }
         }
       server.start()
       val browser = withContext(Dispatchers.Main) { BrowserResolver(context) }
@@ -103,6 +106,11 @@ class BrowserPresentationTest {
         }
         val result = withTimeout(10_000) { pending.await() }
         assertTrue(result.streamsList.any { it.stream.url.endsWith("/manual.m3u8") })
+        assertEquals(
+          "Play must not load popups or replace the embedded player",
+          0,
+          popupRequests.get(),
+        )
       } finally {
         pending.cancelAndJoin()
         withContext(Dispatchers.Main) { browser.close() }
