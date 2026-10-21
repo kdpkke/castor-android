@@ -52,6 +52,9 @@ func main() {
 			ticker := time.NewTicker(time.Second)
 			defer ticker.Stop()
 			active := false
+			// A busy phone can miss a check; only a persistently silent engine ends the host.
+			const maxMissedChecks = 5
+			missed := 0
 			for {
 				select {
 				case <-ctx.Done():
@@ -60,9 +63,16 @@ func main() {
 					check, cancel := context.WithTimeout(ctx, 5*time.Second)
 					listed, err := casts.ListCasts(check, &castorv1.ListCastsRequest{})
 					cancel()
-					if err != nil {
-						return err
+					if ctx.Err() != nil {
+						return nil
 					}
+					if err != nil {
+						if missed++; missed >= maxMissedChecks {
+							return err
+						}
+						continue
+					}
+					missed = 0
 					now := len(listed.GetCasts()) > 0
 					if now != active {
 						if err := output.Encode(struct {
