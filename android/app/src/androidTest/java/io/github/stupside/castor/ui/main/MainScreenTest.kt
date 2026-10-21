@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.platform.app.InstrumentationRegistry
 import castor.v1.CastOuterClass.*
@@ -224,14 +225,52 @@ class MainScreenTest {
     compose.onNodeWithText("Playback settings").performScrollTo().performClick()
     compose.onNodeWithText("720p").performClick().assertIsSelected()
     compose.onNodeWithText("Language", useUnmergedTree = true).performClick()
-    compose.onNodeWithText("Done").performScrollTo().assertIsNotEnabled()
+    compose.onNodeWithText("Save").performScrollTo().assertIsNotEnabled()
     compose.onNodeWithText("Language code, e.g. it or en").performScrollTo().performTextInput("it")
-    compose.onNodeWithText("Done").performScrollTo().performClick()
+    compose.onNodeWithText("Save").performScrollTo().performClick()
     compose.onNodeWithText("720p · Subtitles: IT").assertExists()
     compose.runOnIdle {
       assertEquals("720", CastOptions(context).height())
       assertEquals("it", CastOptions(context).subtitles())
     }
+  }
+
+  @Test
+  fun nativeQualityIsTheDefaultAndClosingWithChangesAsksToSave() {
+    val model = MainScreenViewModel()
+    compose.setContent {
+      io.github.stupside.castor.theme.CastorTheme { MainScreen(model, null, "", {}) }
+    }
+    compose.onNodeWithText("Native quality · Subtitles: Off").assertExists()
+    // Without changes the sheet closes directly.
+    compose.onNodeWithText("Playback settings").performScrollTo().performClick()
+    compose.onNodeWithContentDescription("Close").performClick()
+    compose.onNodeWithText("Save your changes?").assertDoesNotExist()
+    // X with a change asks first; Don't save keeps the stored setting.
+    compose.onNodeWithText("Playback settings").performScrollTo().performClick()
+    compose.onNodeWithText("720p").performClick()
+    compose.onNodeWithContentDescription("Close").performClick()
+    compose.onNodeWithText("Save your changes?").assertIsDisplayed()
+    compose.onNodeWithText("Don’t save").performClick()
+    compose.onNodeWithText("Native quality · Subtitles: Off").assertExists()
+    compose.runOnIdle { assertEquals("native", CastOptions(context).height()) }
+    // Back with a change asks too; Save stores it.
+    compose.onNodeWithText("Playback settings").performScrollTo().performClick()
+    compose.onNodeWithText("720p").performClick()
+    androidx.test.espresso.Espresso.pressBack()
+    compose.onNodeWithTag("unsaved-save").performClick()
+    compose.onNodeWithText("720p · Subtitles: Off").assertExists()
+    compose.runOnIdle { assertEquals("720", CastOptions(context).height()) }
+    // An invalid value cannot be saved from the prompt; dismissing it returns to editing.
+    compose.onNodeWithText("Playback settings").performScrollTo().performClick()
+    compose.onNodeWithText("Custom").performClick()
+    compose.onNodeWithText("Maximum height in pixels").performTextClearance()
+    compose.onNodeWithContentDescription("Close").performClick()
+    compose.onNodeWithTag("unsaved-save").assertIsNotEnabled()
+    androidx.test.espresso.Espresso.pressBack()
+    compose.onNodeWithText("Save your changes?").assertDoesNotExist()
+    compose.onNodeWithText("Maximum height in pixels").assertExists()
+    compose.runOnIdle { assertEquals("720", CastOptions(context).height()) }
   }
 
   @Test
@@ -328,15 +367,15 @@ class MainScreenTest {
     }
     compose.onNodeWithText("Playback settings").performScrollTo().performClick()
     compose.onNodeWithText("Native quality").performClick().assertIsSelected()
-    compose.onNodeWithText("Done").performScrollTo().performClick()
+    compose.onNodeWithText("Save").performScrollTo().performClick()
     compose.onNodeWithText("Native quality · Subtitles: Off").assertExists()
     compose.runOnIdle { assertEquals("native", CastOptions(context).height()) }
     compose.onNodeWithText("Playback settings").performScrollTo().performClick()
     compose.onNodeWithText("Native quality").assertIsSelected()
     compose.onNodeWithText("Custom").performClick()
-    compose.onNodeWithText("Done").performScrollTo().assertIsNotEnabled()
+    compose.onNodeWithText("Save").performScrollTo().assertIsNotEnabled()
     compose.onNodeWithText("1080p").performScrollTo().performClick()
-    compose.onNodeWithText("Done").performScrollTo().performClick()
+    compose.onNodeWithText("Save").performScrollTo().performClick()
     compose.onNodeWithText("1080p · Subtitles: Off").assertExists()
   }
 

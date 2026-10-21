@@ -97,7 +97,16 @@ class DesignEvidenceTest {
     capture("settings")
     compose.onNodeWithText("Native quality").performClick().assertIsSelected()
     capture("settings-native")
-    compose.onNodeWithText("Done").performClick()
+    compose.onNodeWithText("720p").performClick()
+    compose.onNodeWithContentDescription("Close").performClick()
+    compose.onNodeWithText("Save your changes?").assertIsDisplayed()
+    capture("settings-unsaved")
+    compose.runOnIdle { dark = true }
+    capture("settings-unsaved-dark")
+    compose.runOnIdle { dark = false }
+    compose.onNodeWithText("Don’t save").performClick()
+    compose.onNodeWithText("Playback settings").performScrollTo().performClick()
+    compose.onNodeWithText("Save").performClick()
     compose.runOnIdle { dark = true }
     capture("phone-dark")
     compose.runOnIdle {

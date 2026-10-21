@@ -13,6 +13,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -318,7 +319,28 @@ internal fun PlaybackSettings(
   val validLanguage =
     subtitleMode != "language" ||
       Regex("^[a-z]{2,3}$").matches(language.trim().lowercase(Locale.ROOT))
-  GlassSheet(dismiss) {
+  val subtitles =
+    if (subtitleMode == "language") language.trim().lowercase(Locale.ROOT) else subtitleMode
+  val changed = height != initialHeight || subtitles != initialSubtitles
+  // Closing with unsaved changes asks first, whether through X, a tap outside, a swipe or Back.
+  var confirmClose by rememberSaveable { mutableStateOf(false) }
+  fun close() {
+    if (changed) confirmClose = true else dismiss()
+  }
+  GlassSheet(
+    dismiss,
+    allowDismiss = {
+      if (changed) confirmClose = true
+      !changed
+    },
+  ) {
+    if (confirmClose)
+      UnsavedChangesDialog(
+        canSave = validHeight && validLanguage,
+        keepEditing = { confirmClose = false },
+        discard = dismiss,
+        save = { save(height, subtitles) },
+      )
     Column(
       Modifier.fillMaxWidth()
         .verticalScroll(rememberScrollState())
@@ -333,7 +355,7 @@ internal fun PlaybackSettings(
           style = MaterialTheme.typography.headlineMedium,
           modifier = Modifier.weight(1f),
         )
-        IconButton(onClick = dismiss, modifier = Modifier.glassMaterial(RoundedCornerShape(50))) {
+        IconButton(onClick = ::close, modifier = Modifier.glassMaterial(RoundedCornerShape(50))) {
           CastIcon(R.drawable.ic_close, stringResource(R.string.close))
         }
       }
@@ -423,17 +445,44 @@ internal fun PlaybackSettings(
         )
       GlassButton(
         prominent = true,
-        onClick = {
-          save(
-            height,
-            if (subtitleMode == "language") language.trim().lowercase(Locale.ROOT) else subtitleMode,
-          )
-        },
+        onClick = { save(height, subtitles) },
         enabled = validHeight && validLanguage,
         modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
       ) {
-        Text(stringResource(R.string.done))
+        Text(stringResource(R.string.save))
       }
+    }
+  }
+}
+
+@Composable
+private fun UnsavedChangesDialog(
+  canSave: Boolean,
+  keepEditing: () -> Unit,
+  discard: () -> Unit,
+  save: () -> Unit,
+) {
+  GlassDialog(keepEditing) {
+    Text(
+      stringResource(R.string.unsaved_title),
+      style = MaterialTheme.typography.headlineSmall,
+      modifier = Modifier.semantics { heading() },
+    )
+    Text(
+      stringResource(if (canSave) R.string.unsaved_message else R.string.unsaved_invalid),
+      style = MaterialTheme.typography.bodyMedium,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    GlassButton(
+      prominent = true,
+      onClick = save,
+      enabled = canSave,
+      modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("unsaved-save"),
+    ) {
+      Text(stringResource(R.string.save))
+    }
+    GlassButton(onClick = discard, modifier = Modifier.fillMaxWidth()) {
+      Text(stringResource(R.string.dont_save))
     }
   }
 }

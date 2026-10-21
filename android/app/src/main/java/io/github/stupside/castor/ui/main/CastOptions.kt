@@ -141,7 +141,8 @@ class CastOptions(private val context: Context) {
       .apply()
   }
 
-  fun height(): String = preferences.getString("height", "1080").orEmpty()
+  // Keep the selected stream's resolution unless the user chose a limit.
+  fun height(): String = preferences.getString("height", NATIVE_QUALITY).orEmpty()
 
   fun subtitles(): String = preferences.getString("subtitles", "off").orEmpty()
 

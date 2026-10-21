@@ -32,7 +32,7 @@ service. No computer, NAS, root, or remote server is required during use.
 
 - Webpage extraction and direct-stream input; Android share intents.
 - DLNA, Chromecast, and Roku discovery and explicit receiver addresses.
-- Native quality retains the selected stream’s resolution; device compatibility may still require re-encoding. Existing height limits remain available, with the saved setting and 1080p default preserved.
+- Native quality retains the selected stream’s resolution; device compatibility may still require re-encoding. It is the default for new installations; existing height limits and saved settings remain available.
 - Disabled, app-language, or language-specific subtitles; source captions precede transcription fallback.
 - Active-cast status, stop, engine restart, and complete copyable errors.
 - English by default, with an immediate, saved choice of English or Italian.

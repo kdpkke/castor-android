@@ -54,7 +54,11 @@
     <string name="language_invalid">Use a two- or three-letter language code.</string>
     <string name="subtitles_help">Castor uses source captions in the chosen language, or generates them with a downloaded speech model. App language follows English or Italian. Transcription can use substantial battery and requires served playback, such as DLNA.</string>
     <string name="preferences_summary">%1$s · Subtitles: %2$s</string>
-    <string name="done">Done</string>
+    <string name="save">Save</string>
+    <string name="dont_save">Don’t save</string>
+    <string name="unsaved_title">Save your changes?</string>
+    <string name="unsaved_message">You changed the playback settings. Save them before closing?</string>
+    <string name="unsaved_invalid">Some values are not valid, so they cannot be saved. Correct them or close without saving.</string>
     <string name="cast_video">Cast video</string>
     <string name="connecting">Connecting…</string>
     <string name="stop_casting">Stop casting</string>

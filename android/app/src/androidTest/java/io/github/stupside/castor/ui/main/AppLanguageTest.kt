@@ -210,7 +210,7 @@ class AppLanguageTest {
       }
       compose.onNodeWithText("Italiano").assertIsSelected()
       compose.onNodeWithContentDescription("Chiudi").performClick()
-      compose.onNodeWithText("1080p · Sottotitoli: Disattivati").assertExists()
+      compose.onNodeWithText("Qualità nativa · Sottotitoli: Disattivati").assertExists()
       capture("home-it")
       compose.onNodeWithText("https://example.org/shared-video").assertExists()
       compose.onNodeWithContentDescription("Altre opzioni").performClick()
@@ -234,7 +234,7 @@ class AppLanguageTest {
       compose.activityRule.scenario.recreate()
       compose.onNodeWithText("App language").assertDoesNotExist()
       compose.onNodeWithText("Paste link").assertExists()
-      compose.onNodeWithText("1080p · Subtitles: Off").assertExists()
+      compose.onNodeWithText("Native quality · Subtitles: Off").assertExists()
     } finally {
       context.unbindService(connection)
     }

@@ -54,7 +54,11 @@
     <string name="language_invalid">Usa un codice lingua di due o tre lettere.</string>
     <string name="subtitles_help">Castor usa i sottotitoli del flusso nella lingua scelta, oppure li genera scaricando un modello vocale. Lingua app segue inglese o italiano. La trascrizione può consumare molta batteria e richiede riproduzione servita, ad esempio DLNA.</string>
     <string name="preferences_summary">%1$s · Sottotitoli: %2$s</string>
-    <string name="done">Fatto</string>
+    <string name="save">Salva</string>
+    <string name="dont_save">Non salvare</string>
+    <string name="unsaved_title">Salvare le modifiche?</string>
+    <string name="unsaved_message">Hai modificato le impostazioni di riproduzione. Vuoi salvarle prima di chiudere?</string>
+    <string name="unsaved_invalid">Alcuni valori non sono validi e non possono essere salvati. Correggili oppure chiudi senza salvare.</string>
     <string name="cast_video">Trasmetti sulla TV</string>
     <string name="connecting">Collegamento…</string>
     <string name="stop_casting">Interrompi trasmissione</string>

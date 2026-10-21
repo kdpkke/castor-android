@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 
 private class GlassBackdrop(val layer: GraphicsLayer) {
   var origin by mutableStateOf(Offset.Zero)
@@ -189,10 +190,19 @@ fun glassFieldColors(): TextFieldColors =
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GlassSheet(dismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+fun GlassSheet(
+  dismiss: () -> Unit,
+  // Asked before a swipe, a tap outside or Back closes the sheet; false keeps it open.
+  allowDismiss: () -> Boolean = { true },
+  content: @Composable ColumnScope.() -> Unit,
+) {
+  val allow by rememberUpdatedState(allowDismiss)
+  // A stable lambda: the sheet state is remembered per confirmValueChange instance.
+  val confirm = remember { { value: SheetValue -> value != SheetValue.Hidden || allow() } }
   ModalBottomSheet(
-    onDismissRequest = dismiss,
-    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    // Back reports a dismissal even when the vetoed sheet stayed open.
+    onDismissRequest = { if (allow()) dismiss() },
+    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true, confirm),
     sheetMaxWidth = 640.dp,
     containerColor = Color.Transparent,
     scrimColor = MaterialTheme.colorScheme.onBackground.copy(alpha = .3f),
@@ -213,6 +223,23 @@ fun GlassSheet(dismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit)
           }
           content()
         }
+      }
+    }
+  }
+}
+
+/** A modal prompt in the sheets' material. A tap outside or Back calls [dismiss]. */
+@Composable
+fun GlassDialog(dismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+  Dialog(onDismissRequest = dismiss) {
+    val shape = MaterialTheme.shapes.large
+    GlassScene(Modifier.fillMaxWidth().clip(shape)) {
+      GlassPanel(Modifier.fillMaxWidth()) {
+        Column(
+          Modifier.padding(24.dp),
+          verticalArrangement = Arrangement.spacedBy(16.dp),
+          content = content,
+        )
       }
     }
   }
