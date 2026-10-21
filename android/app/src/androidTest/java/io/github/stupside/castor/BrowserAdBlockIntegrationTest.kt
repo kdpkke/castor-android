@@ -163,7 +163,10 @@ class BrowserAdBlockIntegrationTest {
           }
           return requests.toList()
         }
-        for (id in BrowserEngine.blockers.keys) {
+        // A fresh AdGuard installs its default filters after its first-run page; switching it off
+        // before then leaves it without filters, which the app never does. Test AdGuard alone
+        // first, so it is never the blocker disabled during that first run.
+        for (id in BrowserEngine.blockers.keys.sortedByDescending { it.startsWith("adguard") }) {
           val other = extensions.getValue(BrowserEngine.blockers.keys.single { it != id })
           withContext(Dispatchers.Main) {
             controller.disable(other, WebExtensionController.EnableSource.APP).await()

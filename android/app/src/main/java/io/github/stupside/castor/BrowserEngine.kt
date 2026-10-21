@@ -50,7 +50,16 @@ internal class BrowserEngine private constructor(private val context: Context) {
           }
         session.progressDelegate =
           object : GeckoSession.ProgressDelegate {
+            private var addonPage = false
+
+            override fun onPageStart(session: GeckoSession, url: String) {
+              addonPage = url.startsWith(base)
+            }
+
             override fun onPageStop(session: GeckoSession, success: Boolean) {
+              // The first stop can belong to the session's initial about:blank; closing then
+              // aborted the add-on's own page before it loaded on a CI emulator.
+              if (!addonPage) return
               setupSessions.remove(session)
               session.close()
             }
