@@ -133,13 +133,8 @@ class BrowserAdBlockIntegrationTest {
             }
           }
         origin.start()
-        for (id in BrowserEngine.blockers.keys) {
-          val other = extensions.getValue(BrowserEngine.blockers.keys.single { it != id })
-          withContext(Dispatchers.Main) {
-            controller.disable(other, WebExtensionController.EnableSource.APP).await()
-          }
-          // Only this local fixture uses a raw session. Production refuses loads with a blocker
-          // off.
+        // Only this local fixture uses a raw session. Production refuses loads with a blocker off.
+        suspend fun filtering(): List<String> {
           val session =
             withContext(Dispatchers.Main) {
               GeckoSession().also {
@@ -148,10 +143,11 @@ class BrowserAdBlockIntegrationTest {
               }
             }
           try {
-            // Re-enabling an event-page extension completes before its filter engine has warmed.
-            // Probe only local fixtures until actual filtering is observable, rather than sleeping
-            // for an assumed startup duration or treating the enabled flag as proof.
-            withTimeout(20_000) {
+            // Re-enabling an event-page extension completes before its filter engine has warmed,
+            // which can take tens of seconds on a CI emulator. Probe only local fixtures until
+            // actual filtering is observable, like the app's startup check, rather than sleeping
+            // for an assumed duration or treating the enabled flag as proof.
+            withTimeout(60_000) {
               while (true) {
                 requests.clear()
                 withContext(Dispatchers.Main) { session.loadUri(origin.url("/page").toString()) }
@@ -160,14 +156,27 @@ class BrowserAdBlockIntegrationTest {
                 delay(250)
               }
             }
-            assertFalse("$id must block on its own: $requests", "/ads/custom_ads.js" in requests)
+            return requests.toList()
+          } finally {
+            withContext(Dispatchers.Main) { session.close() }
+          }
+        }
+        for (id in BrowserEngine.blockers.keys) {
+          val other = extensions.getValue(BrowserEngine.blockers.keys.single { it != id })
+          withContext(Dispatchers.Main) {
+            controller.disable(other, WebExtensionController.EnableSource.APP).await()
+          }
+          try {
+            val seen = filtering()
+            assertFalse("$id must block on its own: $seen", "/ads/custom_ads.js" in seen)
           } finally {
             withContext(Dispatchers.Main) {
-              session.close()
               controller.enable(other, WebExtensionController.EnableSource.APP).await()
             }
           }
         }
+        // Leave both blockers filtering again for the tests that follow.
+        filtering()
       }
     }
 
