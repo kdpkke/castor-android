@@ -5,6 +5,7 @@ import castor.scraping.v1.Scraping.ResolveRequest
 import castor.scraping.v1.Scraping.ResolveResponse
 import castor.v1.StreamOuterClass.Stream
 import castor.v1.StreamOuterClass.StreamCandidate
+import io.github.stupside.castor.ui.main.CastOptions
 import java.net.URI
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.*
@@ -36,15 +37,32 @@ class BrowserResolver(private val context: Context) {
   private var opened = false
   private var closed = false
   private var sourcePage = ""
+  // When this resolver last started a navigation; earlier requests belong to another document.
+  private var navigationStarted = 0L
+  // Responses become candidates, including after a retained page's late Play.
   private var capturing = false
+  // The extension starts and reports page videos only while a resolution is waiting for them.
+  private var extracting = false
+    set(value) {
+      if (field == value) return
+      field = value
+      announceExtracting()
+    }
+
+  private var listening = false
+
   @Volatile private var loadFailure: String? = null
   private var loadingUrl: String? = null
   private var mainPort: WebExtension.Port? = null
+  // The extension's id for this session's tab, learned from its content script; -1 until then.
+  private var tabId = -1
   private var evaluationId = 0
   private val evaluations = mutableMapOf<Int, (String) -> Unit>()
-  private val pageError: (String, Int) -> Unit = { url, status ->
-    if (!closed && capturing && url == (page.value?.url ?: sourcePage))
-      failedLoading("The page returned HTTP $status.")
+  private val pageError: (Int, String, Int) -> Unit = { tab, url, status ->
+    if (
+      !closed && capturing && (tabId < 0 || tab == tabId) && url == (page.value?.url ?: sourcePage)
+    )
+      failedLoading(text(R.string.page_http_error, status))
   }
 
   init {
@@ -86,7 +104,7 @@ class BrowserResolver(private val context: Context) {
           uri: String?,
           error: WebRequestError,
         ): GeckoResult<String>? {
-          if (uri != "about:blank") failedLoading("The page could not load: $error")
+          if (uri != "about:blank") failedLoading(text(R.string.page_load_error, error.toString()))
           return null
         }
       }
@@ -95,8 +113,12 @@ class BrowserResolver(private val context: Context) {
         override fun onPageStart(session: GeckoSession, url: String) {
           loadingUrl = url
           if (isHttp(url)) {
-            mainPort = null
-            finishEvaluations()
+            // The new document's content script can connect before this callback arrives; only a
+            // port from another document is stale.
+            if (mainPort?.sender?.url != url) {
+              mainPort = null
+              finishEvaluations()
+            }
             if (page.value?.url != url) loadFailure = null
             page.value =
               page.value?.copy(url = url, loading = loadFailure == null, error = loadFailure)
@@ -107,6 +129,12 @@ class BrowserResolver(private val context: Context) {
           if (loadingUrl != "about:blank" && loadingUrl == page.value?.url)
             page.value = page.value?.copy(loading = false)
         }
+      }
+    session.contentDelegate =
+      object : GeckoSession.ContentDelegate {
+        override fun onCrash(session: GeckoSession) = contentStopped()
+
+        override fun onKill(session: GeckoSession) = contentStopped()
       }
     session.permissionDelegate =
       object : GeckoSession.PermissionDelegate {
@@ -128,16 +156,38 @@ class BrowserResolver(private val context: Context) {
       }
   }
 
+  // GeckoView closed the session with its content process. Reopen it on the next resolution; the
+  // visible page explains the failure and a retry loads it again.
+  private fun contentStopped() {
+    opened = false
+    mainPort = null
+    tabId = -1
+    finishEvaluations()
+    view.releaseSession()
+    failedLoading(text(R.string.page_player_stopped))
+  }
+
   internal suspend fun prepare() =
     withContext(Dispatchers.Main) {
       check(!closed) { "The browser is closed" }
-      val extension = withTimeout(90_000) { engine.ready.await() }
+      val extension =
+        try {
+          withTimeoutOrNull(90_000) { engine.ready().await() }
+        } catch (failure: Exception) {
+          if (failure is CancellationException) throw failure
+          throw java.io.IOException(
+            text(R.string.browser_protection_failed, failure.message.orEmpty()),
+            failure,
+          )
+        } ?: throw java.io.IOException(text(R.string.browser_protection_failed, ""))
       val enabled = engine.runtime.webExtensionController.list().await().associateBy { it.id }
-      check(BrowserEngine.blockers.keys.all { enabled[it]?.metaData?.disabledFlags == 0 }) {
-        "Browser protection is unavailable: uBlock Origin and AdGuard must both be active"
+      if (!BrowserEngine.blockers.keys.all { enabled[it]?.metaData?.disabledFlags == 0 })
+        throw IllegalStateException(text(R.string.browser_protection_unavailable))
+      if (!listening) {
+        engine.pageErrors += pageError
+        listening = true
       }
       if (!opened) {
-        engine.pageErrors += pageError
         session.open(engine.runtime)
         view.setSession(session)
         opened = true
@@ -153,19 +203,20 @@ class BrowserResolver(private val context: Context) {
                 port.disconnect()
                 return
               }
-              if (port.sender.isTopLevel) mainPort = port
+              mainPort = port
               port.setDelegate(
                 object : WebExtension.PortDelegate {
                   override fun onPortMessage(message: Any, port: WebExtension.Port) {
                     if (closed || port !== mainPort || message !is JSONObject) return
                     when (message.optString("type")) {
                       "candidate" -> capture(message)
+                      "tab" -> tabId = message.optInt("id", -1)
                       "page" ->
                         if (
                           message.optInt("status") >= 400 &&
                             message.optString("url") == page.value?.url
                         )
-                          failedLoading("The page returned HTTP ${message.optInt("status")}.")
+                          failedLoading(text(R.string.page_http_error, message.optInt("status")))
                       "requestError" ->
                         if (requestErrors.size < 100)
                           requestErrors[message.optString("url")] = message.optString("error")
@@ -184,6 +235,7 @@ class BrowserResolver(private val context: Context) {
                   }
                 }
               )
+              announceExtracting()
             }
           },
           "castor",
@@ -205,23 +257,34 @@ class BrowserResolver(private val context: Context) {
     port.postMessage(JSONObject().put("type", "evaluate").put("id", id).put("code", code))
   }
 
+  private fun announceExtracting() {
+    runCatching {
+      mainPort?.postMessage(JSONObject().put("type", "extracting").put("value", extracting))
+    }
+  }
+
   private fun failedLoading(message: String) {
     loadFailure = message
     page.value = page.value?.copy(loading = false, error = message)
   }
 
+  private fun text(id: Int, vararg args: Any): String =
+    CastOptions(context).localizedContext().getString(id, *args)
+
   private fun capture(message: JSONObject) {
     val url = message.optString("url")
     if (!capturing || !isHttp(url) || url.length > 8192 || candidates.size >= 1600) return
-    val mime = message.optString("mime").substringBefore(';').lowercase()
+    // Both clocks are the device's wall clock; allow for their rounding only.
+    val started = message.optLong("started", 0L)
+    if (started > 0 && started < navigationStarted - 50) return
+    val mime = message.optString("mime").substringBefore(';').trim().lowercase()
     val type =
       when {
-        mime in setOf("application/vnd.apple.mpegurl", "application/x-mpegurl") ->
-          "application/x-mpegURL"
+        mime in hlsTypes -> HLS
         mime == "application/dash+xml" || mime.startsWith("video/") -> mime
         else ->
           when (URI(url).path.orEmpty().substringAfterLast('.').lowercase()) {
-            "m3u8" -> "application/x-mpegURL"
+            "m3u8" -> HLS
             "mpd" -> "application/dash+xml"
             "mp4",
             "m4v" -> "video/mp4"
@@ -231,19 +294,8 @@ class BrowserResolver(private val context: Context) {
           }
       }
     val raw = message.optJSONObject("headers") ?: JSONObject()
-    val headers = mutableMapOf<String, String>()
     if (raw.length() > 100 || raw.toString().length > 65536) return
-    for (name in raw.keys()) {
-      if (name.lowercase() in setOf("host", "connection", "content-length", "range")) continue
-      val canonical =
-        when (name.lowercase()) {
-          "cookie" -> "Cookie"
-          "user-agent" -> "User-Agent"
-          "referer" -> "Referer"
-          else -> name
-        }
-      headers[canonical] = raw.optString(name)
-    }
+    val headers = replayable(raw.keys().asSequence().associateWith { raw.optString(it) })
     headers.putIfAbsent("Referer", sourcePage)
     val stream = Stream.newBuilder().setUrl(url).setContentType(type).putAllHeaders(headers).build()
     candidates[url] =
@@ -272,12 +324,17 @@ class BrowserResolver(private val context: Context) {
             if (!reuse) {
               candidates.clear()
               requestErrors.clear()
+              // Any connected port belongs to the document this navigation replaces.
+              mainPort = null
+              finishEvaluations()
             }
             sourcePage = address
             loadFailure = null
             capturing = true
+            extracting = true
             if (!reuse) {
               page.value = if (interactive) BrowserPage(address, protectionReady = true) else null
+              navigationStarted = System.currentTimeMillis()
               session.loadUri(address)
             }
           }
@@ -297,16 +354,15 @@ class BrowserResolver(private val context: Context) {
         }
         if (streams.isEmpty()) {
           keepPage = interactive
-          throw java.io.IOException(
-            loadFailure
-              ?: "No playable stream was found on this page. The channel may be offline. Start the video in the page player and try casting again, or use a direct video URL. DRM-protected streams cannot be cast."
-          )
+          throw java.io.IOException(loadFailure ?: text(R.string.page_no_stream))
         }
         ResolveResponse.newBuilder().addAllStreams(streams).build()
       } finally {
         val retain = keepPage && currentCoroutineContext().isActive
         withContext(NonCancellable + Dispatchers.Main) {
           active.value = false
+          // A retained page keeps capturing the user's Play, but its videos are no longer started.
+          extracting = false
           if (!retain) clearPage()
         }
       }
@@ -325,6 +381,7 @@ class BrowserResolver(private val context: Context) {
   private fun clearPage() {
     page.value = null
     capturing = false
+    extracting = false
     loadFailure = null
     mainPort = null
     finishEvaluations()
@@ -340,14 +397,67 @@ class BrowserResolver(private val context: Context) {
     clearPage()
     closed = true
     (view.parent as? android.view.ViewGroup)?.removeView(view)
+    if (listening) engine.pageErrors -= pageError
     if (opened) {
-      engine.pageErrors -= pageError
       view.releaseSession()
       session.close()
     }
   }
 
   companion object {
+    internal const val HLS = "application/x-mpegURL"
+    private val hlsTypes =
+      setOf(
+        "application/vnd.apple.mpegurl",
+        "application/x-mpegurl",
+        "audio/mpegurl",
+        "audio/x-mpegurl",
+      )
+    // Connection, framing, range and cache-validation state belong to the browser's own request.
+    // Replaying them would make another reader receive compressed bytes or a 304 without a body.
+    private val browserOnly =
+      setOf(
+        "host",
+        "connection",
+        "proxy-connection",
+        "keep-alive",
+        "transfer-encoding",
+        "te",
+        "trailer",
+        "upgrade",
+        "content-length",
+        "range",
+        "accept-encoding",
+        "if-range",
+        "if-none-match",
+        "if-modified-since",
+        "if-match",
+        "if-unmodified-since",
+      )
+
+    internal fun replayable(headers: Map<String, String>): MutableMap<String, String> {
+      val connection =
+        headers.entries
+          .filter { it.key.equals("connection", ignoreCase = true) }
+          .flatMap { it.value.split(',') }
+          .map { it.trim().lowercase() }
+          .toSet()
+      val kept = mutableMapOf<String, String>()
+      for ((name, value) in headers) {
+        val key = name.lowercase()
+        if (key in browserOnly || key in connection) continue
+        val canonical =
+          when (key) {
+            "cookie" -> "Cookie"
+            "user-agent" -> "User-Agent"
+            "referer" -> "Referer"
+            else -> name
+          }
+        kept[canonical] = value
+      }
+      return kept
+    }
+
     internal fun isHttp(value: String): Boolean =
       runCatching {
           val uri = URI(value)

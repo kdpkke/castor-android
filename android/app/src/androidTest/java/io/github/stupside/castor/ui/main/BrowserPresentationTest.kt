@@ -29,7 +29,9 @@ class BrowserPresentationTest {
   fun prepareBrowserProtection() =
     runBlocking<Unit> {
       withContext(Dispatchers.Main) {
-        BrowserEngine.get(InstrumentationRegistry.getInstrumentation().targetContext).ready.await()
+        BrowserEngine.get(InstrumentationRegistry.getInstrumentation().targetContext)
+          .ready()
+          .await()
       }
     }
 

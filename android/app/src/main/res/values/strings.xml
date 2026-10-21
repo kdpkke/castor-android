@@ -108,4 +108,12 @@
     <string name="theme_default">Default</string>
     <string name="browser_protection_active">uBlock Origin + AdGuard · Active</string>
     <string name="browser_protection_starting">Starting uBlock Origin + AdGuard…</string>
+    <string name="page_http_error">The page returned HTTP %1$d.</string>
+    <string name="page_load_error">The page could not load: %1$s</string>
+    <string name="page_no_stream">No playable stream was found on this page. The channel may be offline. Start the video in the page player and try casting again, or use a direct video URL. DRM-protected streams cannot be cast.</string>
+    <string name="page_player_stopped">The page player stopped unexpectedly. Try again.</string>
+    <string name="browser_protection_unavailable">Browser protection is unavailable: uBlock Origin and AdGuard must both be active.</string>
+    <string name="browser_protection_failed">uBlock Origin and AdGuard could not start filtering, so the page was not opened. %1$s</string>
+    <string name="tv_checking">Checking that this TV is still on the network…</string>
+    <string name="tv_not_found">Not found on this network. Choose another TV or search again.</string>
 </resources>

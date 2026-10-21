@@ -108,4 +108,12 @@
     <string name="theme_default">Predefinito</string>
     <string name="browser_protection_active">uBlock Origin + AdGuard · Attivi</string>
     <string name="browser_protection_starting">Avvio di uBlock Origin + AdGuard…</string>
+    <string name="page_http_error">La pagina ha restituito l’errore HTTP %1$d.</string>
+    <string name="page_load_error">Impossibile caricare la pagina: %1$s</string>
+    <string name="page_no_stream">In questa pagina non è stato trovato nessun flusso riproducibile. Il canale potrebbe essere offline. Avvia il video nel lettore della pagina e riprova a trasmettere, oppure usa un link diretto al video. I flussi protetti da DRM non possono essere trasmessi.</string>
+    <string name="page_player_stopped">Il lettore della pagina si è interrotto. Riprova.</string>
+    <string name="browser_protection_unavailable">Protezione del browser non disponibile: uBlock Origin e AdGuard devono essere entrambi attivi.</string>
+    <string name="browser_protection_failed">uBlock Origin e AdGuard non sono riusciti ad avviare i filtri, quindi la pagina non è stata aperta. %1$s</string>
+    <string name="tv_checking">Verifica che la TV sia ancora in rete…</string>
+    <string name="tv_not_found">Non trovata su questa rete. Scegli un’altra TV o ripeti la ricerca.</string>
 </resources>

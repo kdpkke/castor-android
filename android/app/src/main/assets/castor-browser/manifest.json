@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Castor stream capture",
-  "version": "1.0.2",
+  "version": "1.2.0",
   "browser_specific_settings": {"gecko": {"id": "capture@castor.android"}},
   "permissions": ["<all_urls>", "tabs", "webRequest", "nativeMessaging", "nativeMessagingFromContent", "geckoViewAddons"],
   "background": {"scripts": ["background.js"]},

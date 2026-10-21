@@ -30,7 +30,9 @@ class BrowserSessionTest {
   fun prepareBrowserProtection() =
     runBlocking<Unit> {
       withContext(Dispatchers.Main) {
-        BrowserEngine.get(InstrumentationRegistry.getInstrumentation().targetContext).ready.await()
+        BrowserEngine.get(InstrumentationRegistry.getInstrumentation().targetContext)
+          .ready()
+          .await()
       }
     }
 
@@ -222,6 +224,62 @@ class BrowserSessionTest {
       } finally {
         missing.disconnect()
       }
+    } finally {
+      bridge.close()
+      withContext(Dispatchers.Main) { resolver.close() }
+      origin.shutdown()
+    }
+  }
+
+  @Test
+  fun mimeTypedPlaylistWithoutSuffixIsRenewableAndCarriesNoBrowserRequestState() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val origin = MockWebServer()
+    origin.dispatcher =
+      object : Dispatcher() {
+        override fun dispatch(request: RecordedRequest): MockResponse =
+          when (request.requestUrl!!.encodedPath) {
+            "/page" ->
+              MockResponse()
+                .setHeader("Content-Type", "text/html")
+                .setBody("<script>fetch('/live/stream?id=7')</script>")
+            // Gecko asks for compressed bodies; that request state must not reach other readers.
+            "/live/stream" ->
+              MockResponse()
+                .setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8")
+                .setHeader("Cache-Control", "no-store")
+                .setBody("#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\npiece.ts\n")
+            else -> MockResponse().setResponseCode(404)
+          }
+      }
+    origin.start()
+    val resolver = withContext(Dispatchers.Main) { BrowserResolver(context) }
+    val bridge = BrowserServer(resolver, { emptyList() }, "fixture-token")
+    try {
+      val api = Rpc(bridge.url, "fixture-token")
+      val stream =
+        api
+          .result {
+            api.scraping.resolve(
+              ResolveRequest.newBuilder().addUrls(origin.url("/page").toString()).build()
+            )
+          }
+          .streamsList
+          .single()
+          .stream
+      assertEquals("application/x-mpegURL", stream.contentType)
+      assertTrue(
+        "MIME-typed HLS must use the renewable loopback playlist: ${stream.url}",
+        stream.url.startsWith(bridge.url + "/"),
+      )
+      val replayed = stream.headersMap.keys.map { it.lowercase() }
+      for (name in
+        listOf("accept-encoding", "if-none-match", "if-modified-since", "range")) assertFalse(
+        "$name must not be replayed: $replayed",
+        name in replayed,
+      )
+      val body = withContext(Dispatchers.IO) { URL(stream.url).readText() }
+      assertTrue(body, body.contains(origin.url("/live/piece.ts").toString()))
     } finally {
       bridge.close()
       withContext(Dispatchers.Main) { resolver.close() }

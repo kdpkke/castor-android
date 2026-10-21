@@ -11,7 +11,8 @@ Source archive: https://github.com/gorhill/uBlock/archive/refs/tags/1.75.0.tar.g
 
 AdGuard AdBlocker 5.5.3.5
 Copyright 2015-2026 Adguard Software Ltd. and contributors.
-GNU General Public License version 3 or later; see AdGuard-LICENSE.txt and XPI notices.
+GNU General Public License version 3, as stated by the repository's LICENSE (AMO lists
+LGPL-3.0-only); see AdGuard-LICENSE.txt. The XPI itself contains no license file.
 Signed package: https://addons.mozilla.org/firefox/downloads/file/5116233/adguard_adblocker-5.5.3.5.xpi
 Corresponding source and build instructions:
 https://github.com/AdguardTeam/AdguardBrowserExtension/tree/v5.5.3.5

@@ -2,6 +2,7 @@ package io.github.stupside.castor
 
 import castor.scraping.v1.Scraping.ResolveRequest
 import castor.scraping.v1.Scraping.ResolveResponse
+import castor.v1.StreamOuterClass.Stream
 import castor.v1.StreamOuterClass.StreamCandidate
 import io.github.stupside.castor.data.Rpc
 import java.net.HttpURLConnection
@@ -53,7 +54,7 @@ internal class BrowserPlaylists(private val resolver: BrowserResolver) {
       .clearStreams()
       .addAllStreams(
         response.streamsList.map { candidate ->
-          if (!hls(candidate.stream.url)) candidate
+          if (!hls(candidate.stream)) candidate
           else
             candidate
               .toBuilder()
@@ -198,9 +199,10 @@ internal class BrowserPlaylists(private val resolver: BrowserResolver) {
         val next = URI(address).resolve(document.body)
         val previous = URI(address)
         if (previous.scheme != next.scheme || previous.rawAuthority != next.rawAuthority) {
-          headers = headers.filterKeys {
-            it.lowercase() !in setOf("authorization", "cookie", "proxy-authorization")
-          }
+          headers =
+            headers.filterKeys {
+              it.lowercase() !in setOf("authorization", "cookie", "proxy-authorization")
+            }
         }
         address = next.toString()
       }
@@ -212,6 +214,11 @@ internal class BrowserPlaylists(private val resolver: BrowserResolver) {
     sessions.clear()
     routes.clear()
   }
+
+  // The browser names HLS by MIME type even when the URL has no .m3u8 suffix; both need renewal.
+  private fun hls(stream: Stream) =
+    stream.contentType == BrowserResolver.HLS && BrowserResolver.isHttp(stream.url) ||
+      hls(stream.url)
 
   private fun hls(value: String) =
     BrowserResolver.isHttp(value) && URI(value).path.orEmpty().endsWith(".m3u8", ignoreCase = true)

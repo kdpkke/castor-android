@@ -22,7 +22,7 @@ class BrowserAdBlockIntegrationTest {
   fun prepareBrowserProtection() =
     runBlocking<Unit> {
       withContext(Dispatchers.Main) {
-        withTimeout(90_000) { BrowserEngine.get(context).ready.await() }
+        withTimeout(90_000) { BrowserEngine.get(context).ready().await() }
       }
     }
 
