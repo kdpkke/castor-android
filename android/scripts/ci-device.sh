@@ -53,4 +53,13 @@ test "$page_size" = 16384
 "$ANDROID_HOME/platform-tools/adb" shell df -h /data
 "$ANDROID_HOME/platform-tools/adb" shell cat /proc/meminfo | grep -E 'MemTotal|MemAvailable'
 (cd android && bash gradlew :app:connectedDebugAndroidTest --console=plain)
+# A freshly booted emulator can still be starting system services and reject the APK install;
+# Gradle then reports success without running a test. Retry once only when no test ran: any
+# failure, error or skip still fails the job.
+ran="$(python3 -c 'import glob, xml.etree.ElementTree as ET; print(sum(int(s.get("tests", "0")) for p in glob.glob("android/app/build/outputs/androidTest-results/connected/debug/**/*.xml", recursive=True) for s in ([ET.parse(p).getroot()] if ET.parse(p).getroot().tag == "testsuite" else ET.parse(p).getroot().findall("testsuite"))))')"
+if [ "$ran" = 0 ]; then
+    echo 'No device test ran; retrying the suite once after the emulator settles' >&2
+    sleep 60
+    (cd android && bash gradlew :app:connectedDebugAndroidTest --console=plain)
+fi
 python3 android/scripts/check-device-results.py
