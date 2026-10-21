@@ -161,15 +161,23 @@ internal class BrowserEngine private constructor(private val context: Context) {
   // (`/ads/custom_ads.js$script`) until a blocker actually stops it. No external host is contacted.
   private suspend fun awaitFiltering() {
     val probe = withContext(Dispatchers.IO) { BlockerProbe() }
-    val session = GeckoSession().apply { open(runtime) }
     try {
-      session.setActive(true)
       withTimeoutOrNull(60_000) {
         while (true) {
           probe.requests.clear()
-          session.loadUri(probe.url(BlockerProbe.PAGE))
+          // A fresh session per attempt: Android may kill a content process under memory pressure,
+          // which leaves the previous session closed.
+          val session = GeckoSession().apply { open(runtime) }
           val ran =
-            withTimeoutOrNull(10_000) { while (BlockerProbe.CONTROL !in probe.requests) delay(100) }
+            try {
+              session.setActive(true)
+              session.loadUri(probe.url(BlockerProbe.PAGE))
+              withTimeoutOrNull(10_000) {
+                while (BlockerProbe.CONTROL !in probe.requests) delay(100)
+              }
+            } finally {
+              session.close()
+            }
           if (ran != null && BlockerProbe.AD !in probe.requests) return@withTimeoutOrNull
           delay(250)
         }
@@ -178,7 +186,6 @@ internal class BrowserEngine private constructor(private val context: Context) {
           "uBlock Origin and AdGuard did not start filtering. Close the page and try again."
         )
     } finally {
-      session.close()
       withContext(NonCancellable + Dispatchers.IO) { probe.close() }
     }
   }

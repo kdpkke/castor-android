@@ -19,7 +19,7 @@ printf '\ndisk.dataPartition.size=8G\n' >> "$config"
 mkdir -p android/build
 log="$PWD/android/build/emulator.log"
 export ANDROID_SERIAL=emulator-5554
-"$ANDROID_HOME/emulator/emulator" -avd castor-ci -port 5554 -memory 4096 -no-window -no-audio -no-boot-anim -no-snapshot -gpu software > "$log" 2>&1 &
+"$ANDROID_HOME/emulator/emulator" -avd castor-ci -port 5554 -memory 6144 -no-window -no-audio -no-boot-anim -no-snapshot -gpu software > "$log" 2>&1 &
 emulator_pid=$!
 logcat_pid=
 cleanup() {

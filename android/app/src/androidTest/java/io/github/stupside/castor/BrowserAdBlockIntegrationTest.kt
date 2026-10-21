@@ -135,31 +135,33 @@ class BrowserAdBlockIntegrationTest {
         origin.start()
         // Only this local fixture uses a raw session. Production refuses loads with a blocker off.
         suspend fun filtering(): List<String> {
-          val session =
-            withContext(Dispatchers.Main) {
-              GeckoSession().also {
-                it.open(engine.runtime)
-                it.setActive(true)
-              }
+          // Re-enabling an event-page extension completes before its filter engine has warmed,
+          // which can take tens of seconds on a CI emulator. Probe only local fixtures until
+          // actual filtering is observable, like the app's startup check, rather than sleeping
+          // for an assumed duration or treating the enabled flag as proof. Each attempt uses a
+          // fresh session because Android may kill a content process under memory pressure.
+          withTimeout(90_000) {
+            while (true) {
+              requests.clear()
+              val session =
+                withContext(Dispatchers.Main) {
+                  GeckoSession().also {
+                    it.open(engine.runtime)
+                    it.setActive(true)
+                    it.loadUri(origin.url("/page").toString())
+                  }
+                }
+              val ran =
+                try {
+                  withTimeoutOrNull(10_000) { while ("/control" !in requests) delay(100) }
+                } finally {
+                  withContext(Dispatchers.Main) { session.close() }
+                }
+              if (ran != null && "/ads/custom_ads.js" !in requests) break
+              delay(250)
             }
-          try {
-            // Re-enabling an event-page extension completes before its filter engine has warmed,
-            // which can take tens of seconds on a CI emulator. Probe only local fixtures until
-            // actual filtering is observable, like the app's startup check, rather than sleeping
-            // for an assumed duration or treating the enabled flag as proof.
-            withTimeout(60_000) {
-              while (true) {
-                requests.clear()
-                withContext(Dispatchers.Main) { session.loadUri(origin.url("/page").toString()) }
-                while ("/control" !in requests) delay(100)
-                if ("/ads/custom_ads.js" !in requests) break
-                delay(250)
-              }
-            }
-            return requests.toList()
-          } finally {
-            withContext(Dispatchers.Main) { session.close() }
           }
+          return requests.toList()
         }
         for (id in BrowserEngine.blockers.keys) {
           val other = extensions.getValue(BrowserEngine.blockers.keys.single { it != id })
