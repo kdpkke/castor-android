@@ -3,8 +3,8 @@ package execute
 import (
 	"errors"
 
-	"github.com/stupside/castor/services/mediaserver/internal/cast/deliver"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output/storage"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
@@ -36,7 +36,7 @@ func evidence(r ran, err error, cancelled bool) recovery.Evidence {
 	if undelivered, ok := errors.AsType[*health.Undelivered](err); ok {
 		e.Undelivered = undelivered
 	}
-	// A device its family saw go away while the cast played (see supervising).
+	// A device its family saw go away while the cast played (reported by the playback observer).
 	if gone, ok := errors.AsType[*media.Gone](err); ok {
 		e.DeviceGone = gone
 	}
@@ -46,11 +46,11 @@ func evidence(r ran, err error, cancelled bool) recovery.Evidence {
 			e.Lines = verdict.Evidence
 		}
 	}
-	if errors.Is(err, deliver.ErrSpoolExpired) {
-		e.ResourceErr = deliver.ErrSpoolExpired
+	if errors.Is(err, storage.ErrSpoolExpired) {
+		e.ResourceErr = storage.ErrSpoolExpired
 	}
-	if errors.Is(err, deliver.ErrSpoolLimit) || errors.Is(e.ReadErr, deliver.ErrSpoolLimit) {
-		e.ResourceErr = deliver.ErrSpoolLimit
+	if errors.Is(err, storage.ErrSpoolLimit) || errors.Is(e.ReadErr, storage.ErrSpoolLimit) {
+		e.ResourceErr = storage.ErrSpoolLimit
 	}
 	return e
 }

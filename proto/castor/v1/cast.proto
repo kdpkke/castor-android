@@ -28,6 +28,15 @@ message CastRequest {
   Target target = 1 [(buf.validate.field).required = true];
   Source source = 2 [(buf.validate.field).required = true];
   Preferences preferences = 3;
+  MediaInfo media_info = 4;
+}
+
+// MediaInfo describes the selected movie or episode on the receiver's playback screen.
+message MediaInfo {
+  string title = 1 [(buf.validate.field).string.max_len = 256];
+  string synopsis = 2 [(buf.validate.field).string.max_len = 4096];
+  string image_url = 3 [(buf.validate.field).string.max_len = 8192];
+  string release_date = 4 [(buf.validate.field).string.max_len = 10];
 }
 
 message CastResponse {

@@ -22,7 +22,7 @@ func TestExpansionBudget(t *testing.T) {
 			body := fmt.Sprintf(`<MPD><Period duration="PT100000S"><AdaptationSet contentType="video">%s<Representation id="v"/></AdaptationSet></Period></MPD>`, addressing)
 			in := media.Input{URL: sourcetest.URL(t, "https://example.test/m.mpd"), Representation: "v"}
 			f := Format{}.Timeline(&sourcetest.Documents{ByPath: map[string]string{"/m.mpd": body}}, in, media.TrackVideo)
-			if _, err := f.Window(t.Context()); err == nil {
+			if _, err := f.Source.Window(t.Context()); err == nil {
 				t.Fatal("oversized expansion accepted")
 			}
 		})
@@ -52,7 +52,7 @@ func TestWindowBudgetSpansPeriods(t *testing.T) {
 	body += `</MPD>`
 	in := media.Input{URL: sourcetest.URL(t, "https://example.test/m.mpd"), Representation: "v"}
 	f := Format{}.Timeline(&sourcetest.Documents{ByPath: map[string]string{"/m.mpd": body}}, in, media.TrackVideo)
-	if _, err := f.Window(t.Context()); !errors.Is(err, errExpansionLimit) {
+	if _, err := f.Source.Window(t.Context()); !errors.Is(err, errExpansionLimit) {
 		t.Fatalf("aggregate limit = %v", err)
 	}
 }

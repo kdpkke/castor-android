@@ -75,11 +75,6 @@ type AudioSupport struct {
 	MaxChannels int
 }
 
-// AcceptsContainer reports whether the device plays contentType directly (the pass-through decision).
-func (c Capabilities) AcceptsContainer(contentType string) bool {
-	return slices.ContainsFunc(c.Formats, func(f FormatSupport) bool { return f.Transport.ContentType() == contentType })
-}
-
 // PlaybackSampleRate is the highest audio sample rate any device castor serves plays.
 const PlaybackSampleRate = 48000
 
@@ -98,7 +93,7 @@ func (c Capabilities) CanCopyAudio(p ProbeInfo) bool {
 }
 
 func (s AudioSupport) accepts(p ProbeInfo) bool {
-	if p.AudioCodec != s.Codec {
+	if p.AudioCodec == "" || p.AudioCodec != s.Codec {
 		return false
 	}
 	// Unknown source channel count (0) is trusted: don't force-transcode a matching codec with no layout.
@@ -109,7 +104,7 @@ func (s AudioSupport) accepts(p ProbeInfo) bool {
 }
 
 func (s VideoSupport) accepts(v ProbeInfo) bool {
-	if v.VideoCodec != s.Codec {
+	if v.VideoCodec == "" || v.VideoCodec != s.Codec {
 		return false
 	}
 	if len(s.Profiles) > 0 && !slices.Contains(s.Profiles, v.VideoProfile) && !(v.VideoProfile == ProfileConstrainedBaseline && slices.Contains(s.Profiles, ProfileBaseline)) {
@@ -128,29 +123,57 @@ func (s VideoSupport) accepts(v ProbeInfo) bool {
 
 // FormatSupport is one indivisible playback combination.
 type FormatSupport struct {
-	Transport Transport
-	Video     VideoSupport
-	Audio     AudioSupport
-	Captions  []CaptionFormat
+	Transport     Transport
+	Video         VideoSupport
+	Audio         AudioSupport
+	Captions      []CaptionFormat
+	ExtraSegments []HLSExtraSegmentFormat
+}
+
+type HLSExtraSegmentFormat uint8
+
+const (
+	HLSExtraSegmentTIKTIKPX HLSExtraSegmentFormat = iota + 1
+)
+
+// canPlayHLSWith checks that one playback envelope accepts the tracks and
+// all of the supplied nonstandard segment formats.
+func (c Capabilities) canPlayHLSWith(p ProbeInfo, segments ...HLSExtraSegmentFormat) bool {
+	return slices.ContainsFunc(c.Formats, func(f FormatSupport) bool {
+		if f.Transport.ContentType() != HLS || !f.accepts(p, c.Deinterlaces) {
+			return false
+		}
+		for _, segment := range segments {
+			if !slices.Contains(f.ExtraSegments, segment) {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+// CanPlaySourceIn checks the source's observed HLS segment envelope as well as
+// its tracks. Served output uses CanPlayIn because Castor has already unwrapped it.
+func (c Capabilities) CanPlaySourceIn(container string, p ProbeInfo) bool {
+	// The destination's HDR mode is not established by its codec capability.
+	if p.VideoHDR {
+		return false
+	}
+	if container == HLS && p.SourceUnwrapped {
+		return c.canPlayHLSWith(p, HLSExtraSegmentTIKTIKPX)
+	}
+	return c.CanPlayIn(container, p)
 }
 
 func (c Capabilities) CanPlayIn(container string, p ProbeInfo) bool {
-	switch {
-	case p.VideoCodec == "" && p.AudioCodec == "":
-		return false
-	case p.VideoInterlaced && !c.Deinterlaces:
-		return false
-	}
 	return slices.ContainsFunc(c.Formats, func(f FormatSupport) bool {
-		switch {
-		case f.Transport.ContentType() != container:
-			return false
-		case p.VideoCodec != "" && !f.Video.accepts(p):
-			return false
-		case p.AudioCodec != "" && !f.Audio.accepts(p):
-			return false
-		default:
-			return true
-		}
+		return f.Transport.ContentType() == container && f.accepts(p, c.Deinterlaces)
 	})
+}
+
+func (f FormatSupport) accepts(p ProbeInfo, deinterlaces bool) bool {
+	return (p.HasVideo() || p.HasAudio()) &&
+		(!p.VideoInterlaced || deinterlaces) &&
+		(!p.HasVideo() || f.Video.accepts(p)) &&
+		(!p.HasAudio() || f.Audio.accepts(p))
 }

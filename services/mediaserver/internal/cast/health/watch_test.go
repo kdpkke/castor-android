@@ -22,10 +22,10 @@ func TestTheWatchEndsOnAVerdictCarryingTheProducersError(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
-		err := Watch(ctx, Monitor{
+		err := watchFixture(ctx, Monitor{
 			Subject: "playback gate", Phase: Reading,
 			Producer: producer, Telemetry: producer,
-			Landed: func() int64 { return 1 },
+			Landed: func() (int64, error) { return 1, nil },
 		})
 		fault, ok := errors.AsType[*Fault](err)
 		if !ok || fault.Kind != Dead || !fault.Revise || !errors.Is(err, sentinel) || len(fault.Evidence) != 1 {
@@ -53,10 +53,10 @@ func TestBytesWithNoMediaBehindThemAreAStall(t *testing.T) {
 		var landed int64
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 		defer cancel()
-		err := Watch(ctx, Monitor{
+		err := watchFixture(ctx, Monitor{
 			Subject: "the playing cast", Phase: Playing,
 			Producer: producer, Telemetry: producer,
-			Landed: func() int64 { landed += 188; return landed },
+			Landed: func() (int64, error) { landed += 188; return landed, nil },
 		})
 		if fault, ok := errors.AsType[*Fault](err); !ok || fault.Kind != Stalled {
 			t.Fatalf("Watch = %v, want a stall once no media arrived for the stall window", err)
@@ -83,7 +83,7 @@ func TestATrickleUnderHalfOfPlaybackIsAStall(t *testing.T) {
 		producer := &pacedProducer{done: make(chan struct{}), start: time.Now(), made: func(d time.Duration) time.Duration { return d / time.Minute * time.Second }}
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 		defer cancel()
-		err := Watch(ctx, Monitor{Subject: "the playing cast", Phase: Playing, Producer: producer, Telemetry: producer})
+		err := watchFixture(ctx, Monitor{Subject: "the playing cast", Phase: Playing, Producer: producer, Telemetry: producer})
 		if fault, ok := errors.AsType[*Fault](err); !ok || fault.Kind != Stalled {
 			t.Fatalf("Watch = %v, want a stall from a producer making a second of media a minute", err)
 		}
@@ -96,7 +96,7 @@ func TestAProducerKeepingHalfOfPlaybackIsNotAStall(t *testing.T) {
 		producer := &pacedProducer{done: make(chan struct{}), start: time.Now(), made: func(d time.Duration) time.Duration { return d * 6 / 10 }}
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 		defer cancel()
-		err := Watch(ctx, Monitor{Subject: "the playing cast", Phase: Playing, Producer: producer, Telemetry: producer})
+		err := watchFixture(ctx, Monitor{Subject: "the playing cast", Phase: Playing, Producer: producer, Telemetry: producer})
 		if _, judged := errors.AsType[*Fault](err); judged {
 			t.Fatalf("Watch = %v, want no verdict against a producer at 0.6x", err)
 		}
@@ -123,7 +123,7 @@ func TestAReadThatCannotLandItsCushionIsUndeliverable(t *testing.T) {
 		producer := &pacedProducer{done: make(chan struct{}), start: time.Now(), made: func(d time.Duration) time.Duration { return d * 2 / 10 }}
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 		defer cancel()
-		err := Watch(ctx, Monitor{Subject: "playback gate", Phase: Reading, Producer: producer, Telemetry: producer, Landed: func() int64 { return 1 << 20 }})
+		err := watchFixture(ctx, Monitor{Subject: "playback gate", Phase: Reading, Producer: producer, Telemetry: producer, Landed: func() (int64, error) { return 1 << 20, nil }})
 		fault, ok := errors.AsType[*Fault](err)
 		if !ok || fault.Kind != Undeliverable || !fault.Revise {
 			t.Fatalf("Watch = %v, want a revisable undeliverable verdict against a 0.2x read", err)
@@ -140,7 +140,7 @@ func TestAReadKeepingPaceOpensOnItsCushion(t *testing.T) {
 		producer := &pacedProducer{done: make(chan struct{}), start: time.Now(), made: func(d time.Duration) time.Duration { return d * 12 / 10 }}
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 		defer cancel()
-		if err := Watch(ctx, Monitor{Subject: "playback gate", Phase: Reading, Producer: producer, Telemetry: producer, Landed: func() int64 { return 1 << 20 }}); err != nil {
+		if err := watchFixture(ctx, Monitor{Subject: "playback gate", Phase: Reading, Producer: producer, Telemetry: producer, Landed: func() (int64, error) { return 1 << 20, nil }}); err != nil {
 			t.Fatalf("Watch = %v, want the gate open", err)
 		}
 		if waited := time.Since(producer.start); waited > readCushion+time.Second {
@@ -201,7 +201,7 @@ func TestADeviceOutrunningItsReadIsHeldThenReleased(t *testing.T) {
 			<-ctx.Done()
 			close(producer.done)
 		}()
-		err := Watch(ctx, Monitor{Subject: "the playing cast", Phase: Playing, Producer: producer, Telemetry: producer, Audience: dev, Transport: dev})
+		err := watchFixture(ctx, Monitor{Subject: "the playing cast", Phase: Playing, Producer: producer, Telemetry: producer, Audience: dev, Holdable: true}, dev)
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("Watch = %v, want it still watching a cast that recovered", err)
 		}
@@ -228,7 +228,7 @@ func TestADeviceHeldPastThePauseBudgetIsStarved(t *testing.T) {
 		dev := &heldDevice{}
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 		defer cancel()
-		err := Watch(ctx, Monitor{Subject: "the playing cast", Phase: Playing, Producer: producer, Telemetry: producer, Audience: dev, Transport: dev})
+		err := watchFixture(ctx, Monitor{Subject: "the playing cast", Phase: Playing, Producer: producer, Telemetry: producer, Audience: dev, Holdable: true}, dev)
 		fault, ok := errors.AsType[*Fault](err)
 		if !ok || fault.Kind != Starved || fault.Revise {
 			t.Fatalf("Watch = %v, want a starved verdict after the pause budget", err)
@@ -251,7 +251,7 @@ func TestADeviceThatRefusesToPauseIsJudgedUnholdable(t *testing.T) {
 		dev := &heldDevice{refuse: errors.New("UPnP 701: transition not available")}
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 		defer cancel()
-		err := Watch(ctx, Monitor{Subject: "the playing cast", Phase: Playing, Producer: producer, Telemetry: producer, Audience: dev, Transport: dev})
+		err := watchFixture(ctx, Monitor{Subject: "the playing cast", Phase: Playing, Producer: producer, Telemetry: producer, Audience: dev, Holdable: true}, dev)
 		if fault, ok := errors.AsType[*Fault](err); !ok || fault.Kind != Stalled {
 			t.Fatalf("Watch = %v, want a stall once the device played out what the silent read had made", err)
 		}
@@ -266,14 +266,99 @@ func TestARefusedResumeIsWarnedOnce(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	dev := &heldDevice{refuseResume: errors.New("UPnP 701")}
-	tr := &tracker{m: Monitor{Subject: "the playing cast", Transport: dev}, pausedAt: time.Now()}
+	tr := Observe(Monitor{Subject: "the playing cast", Holdable: true})
+	if err := tr.Applied(t.Context(), Pause, nil); err != nil {
+		t.Fatal(err)
+	}
 	for range 3 {
-		tr.release(t.Context(), rule{name: "replenished"}, Vitals{})
+		if err := tr.Applied(t.Context(), Resume, dev.Resume(t.Context())); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if got := strings.Count(logs.String(), "would not resume"); got != 1 {
 		t.Errorf("warned %d times over 3 refused resumes, want once", got)
 	}
 	if tr.pausedAt.IsZero() {
 		t.Error("a refused resume released the hold anyway")
+	}
+}
+
+// watchFixture applies decisions to a fake device; production orchestration lives in execute.
+func watchFixture(ctx context.Context, m Monitor, devices ...*heldDevice) error {
+	observer := Observe(m)
+	for {
+		decision, err := observer.Next(ctx)
+		if err != nil || decision == Complete {
+			return err
+		}
+		switch decision {
+		case Pause:
+			err = devices[0].Pause(ctx)
+		case Resume:
+			err = devices[0].Resume(ctx)
+		}
+		if err := observer.Applied(ctx, decision, err); err != nil {
+			return err
+		}
+	}
+}
+
+func TestPlaybackControlRejectsOutOfOrderResults(t *testing.T) {
+	o := Observe(Monitor{Phase: Playing, Holdable: true})
+	if err := o.Applied(t.Context(), Resume, nil); err == nil {
+		t.Fatal("accepted a resume before a pause")
+	}
+	if err := o.Applied(t.Context(), Pause, nil); err != nil {
+		t.Fatal(err)
+	}
+	pausedAt := o.pausedAt
+	if err := o.Applied(t.Context(), Pause, nil); err == nil {
+		t.Fatal("accepted a second pause and reset its timing")
+	}
+	if o.pausedAt != pausedAt {
+		t.Fatal("invalid result changed the pause clock")
+	}
+}
+
+func TestResumeRetriesPreserveTheWholePause(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		o := Observe(Monitor{Phase: Playing, Holdable: true})
+		if err := o.Applied(t.Context(), Pause, nil); err != nil {
+			t.Fatal(err)
+		}
+		for range 3 {
+			time.Sleep(time.Second)
+			if err := o.Applied(t.Context(), Resume, errors.New("device busy")); err != nil {
+				t.Fatal(err)
+			}
+			h, err := o.read()
+			if err != nil || !h.paused {
+				t.Fatalf("refused resume released playback: %+v, %v", h, err)
+			}
+		}
+		// A command outcome is still recorded if cancellation arrives before it is collected.
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if err := o.Applied(ctx, Resume, nil); err != nil {
+			t.Fatal(err)
+		}
+		h, err := o.read()
+		if err != nil || h.paused || h.held != 3*time.Second || h.played != 0 {
+			t.Fatalf("pause accounting after retries: %+v, %v", h, err)
+		}
+	})
+}
+
+func TestRefusedPauseDisablesFurtherHolds(t *testing.T) {
+	o := Observe(Monitor{Phase: Playing, Holdable: true})
+	if err := o.Applied(t.Context(), Pause, errors.New("unsupported")); err != nil {
+		t.Fatal(err)
+	}
+	h, err := o.read()
+	if err != nil || h.paused || h.holdable {
+		t.Fatalf("refused pause: %+v, %v", h, err)
+	}
+	if err := o.Applied(t.Context(), Pause, nil); err == nil {
+		t.Fatal("accepted another pause after refusal")
 	}
 }

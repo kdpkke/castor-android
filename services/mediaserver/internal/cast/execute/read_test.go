@@ -55,8 +55,8 @@ func (b *fakeTranscript) LatestEnd() float64 {
 func (b *fakeTranscript) Done() bool { return b.lead == nil || b.lead.done }
 
 // subtitling burns in b, whatever the cast reads.
-func subtitling(b Transcript) Subtitles {
-	return func(context.Context) Transcript { return b }
+func subtitling(b Transcript) func(context.Context, string) Subtitles {
+	return func(context.Context, string) Subtitles { return func(context.Context) Transcript { return b } }
 }
 
 // TestASilentSourceRunsNoBurnInAtAll: a PCM tee of a source with no audio maps nothing and ffmpeg refuses.
@@ -66,8 +66,8 @@ func TestASilentSourceRunsNoBurnInAtAll(t *testing.T) {
 
 	program := programFromStream(t, origin.stream())
 	c := realCast(&fakeDevice{}, ffmpegPath, ffprobePath)
-	c.Subtitles = subtitling(&fakeTranscript{})
-	s := readingPipeline(t, c, recovery.Attempt{Program: program, Fetch: sourceFetchPlan(t, program, testReadDeadline)})
+	c.Transcription = subtitling(&fakeTranscript{})
+	s := readingAttempt(t, c, recovery.Attempt{Program: program, Fetch: sourceFetchPlan(t, program, testReadDeadline)})
 
 	followed, err := s.follow(program)
 	if err != nil {
@@ -96,9 +96,9 @@ func TestReleasingAReadStopsItsTranscriptionBeforeTheWorkDirGoes(t *testing.T) {
 
 	burn := &fakeTranscript{linger: 200 * time.Millisecond}
 	c := realCast(&fakeDevice{}, ffmpegPath, ffprobePath)
-	c.Subtitles = subtitling(burn)
+	c.Transcription = subtitling(burn)
 	program := programFromStream(t, origin.stream())
-	s := readingPipeline(t, c, recovery.Attempt{Program: program, Fetch: sourceFetchPlan(t, program, testReadDeadline)})
+	s := readingAttempt(t, c, recovery.Attempt{Program: program, Fetch: sourceFetchPlan(t, program, testReadDeadline)})
 
 	// Stands for the workspace, acquired before the read and so released after it.
 	var running int64
@@ -123,7 +123,7 @@ func TestReleasingAReadStopsItWhileItsSourceStillAnswers(t *testing.T) {
 	ffmpegPath, ffprobePath := requireFFmpegTools(t)
 	stream := &source.Stream{URL: quietOrigin(t, programHead(t, ffmpegPath)), ContentType: media.MPEGTS}
 	program := programFromStream(t, stream)
-	s := readingPipeline(t, realCast(&fakeDevice{}, ffmpegPath, ffprobePath), recovery.Attempt{Program: program, Fetch: sourceFetchPlan(t, program, time.Hour)})
+	s := readingAttempt(t, realCast(&fakeDevice{}, ffmpegPath, ffprobePath), recovery.Attempt{Program: program, Fetch: sourceFetchPlan(t, program, time.Hour)})
 
 	buf, err := s.read(t.TempDir(), program)
 	if err != nil {
@@ -153,7 +153,7 @@ func TestABurnInIsFedAndAwaitedByTheCastThatRunsIt(t *testing.T) {
 	defer cancel()
 	program := programFromStream(t, origin.stream())
 	c := realCast(dev, ffmpegPath, ffprobePath)
-	c.Subtitles = subtitling(burn)
+	c.Transcription = subtitling(burn)
 	out := c.Run(ctx, recovery.Attempt{Try: 1, Program: program, Fetch: sourceFetchPlan(t, program, testReadDeadline)})
 	if out.Err != nil {
 		t.Fatalf("casting with a burn: %v", out.Err)
@@ -170,10 +170,74 @@ func TestABurnInIsFedAndAwaitedByTheCastThatRunsIt(t *testing.T) {
 	}
 }
 
-// readingPipeline is an attempt's session, released when the test ends.
-func readingPipeline(t *testing.T, c Cast, a recovery.Attempt) *pipeline {
+// readingAttempt is an attempt's session, released when the test ends.
+func readingAttempt(t *testing.T, c Cast, a recovery.Attempt) *preparation {
 	t.Helper()
-	s := &pipeline{cast: c, attempt: a, ctx: t.Context(), releases: &releases{}}
+	s := testPreparation(t.Context(), c, a)
 	t.Cleanup(func() { _ = s.releases.release() })
 	return s
+}
+
+// A consumer may stop reading before it finishes its own shutdown. The read
+// must interrupt its writer itself before waiting for FFmpeg's PCM copy.
+type stalledTranscript struct {
+	fakeTranscript
+	started chan struct{}
+	finish  chan struct{}
+}
+
+func (b *stalledTranscript) Run(ctx context.Context, pcm io.ReadCloser) {
+	defer pcm.Close()
+	var first [1]byte
+	_, _ = pcm.Read(first[:])
+	close(b.started)
+	<-ctx.Done()
+	// Model transcription still finishing inference after cancellation.
+	<-b.finish
+}
+
+func TestReadOwnsPCMInterruption(t *testing.T) {
+	ffmpegPath, ffprobePath := requireFFmpegTools(t)
+	origin := serveFixture(t, ffmpegPath)
+	transcript := &stalledTranscript{started: make(chan struct{}), finish: make(chan struct{})}
+	c := realCast(&fakeDevice{}, ffmpegPath, ffprobePath)
+	c.Transcription = func(context.Context, string) Subtitles {
+		return func(context.Context) Transcript { return transcript }
+	}
+	program := programFromStream(t, origin.stream())
+	s := readingAttempt(t, c, recovery.Attempt{Program: program, Fetch: sourceFetchPlan(t, program, testReadDeadline)})
+	buf, err := s.read(t.TempDir(), program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-transcript.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("PCM did not start")
+	}
+	released := make(chan error, 1)
+	go func() { released <- s.releases.release() }()
+	select {
+	case <-buf.reader.Done():
+	case <-time.After(3 * time.Second):
+		close(transcript.finish)
+		t.Fatal("PCM writer waited for transcription shutdown")
+	}
+	close(transcript.finish)
+	select {
+	case err := <-released:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("read waited for its PCM consumer to close the pipe")
+	}
+}
+
+// testPreparation supplies the attempt-owned scope without a playback coordinator.
+func testPreparation(parent context.Context, c Cast, a recovery.Attempt) *preparation {
+	ctx, cancel := context.WithCancelCause(parent)
+	scope := &releases{}
+	scope.interrupt(func() { cancel(nil) })
+	return newPreparation(ctx, c, a, scope, make(chan error, 1))
 }

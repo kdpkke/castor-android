@@ -21,7 +21,7 @@ func input(t *testing.T, live bool) media.Input {
 
 func TestAPlaylistThatEndedIsFollowedToo(t *testing.T) {
 	follow := (Format{}).Timeline(&sourcetest.Document{Body: mediaPlaylist, Status: http.StatusOK}, input(t, false), media.TrackVideo)
-	w, err := follow.Window(t.Context())
+	w, err := follow.Source.Window(t.Context())
 	if err != nil || !w.Closed || len(w.Segments) == 0 {
 		t.Errorf("an ended playlist read as %+v (%v), want its closed list of segments", w, err)
 	}
@@ -29,7 +29,7 @@ func TestAPlaylistThatEndedIsFollowedToo(t *testing.T) {
 
 func TestARefusedReloadCarriesTheOriginsStatus(t *testing.T) {
 	follow := Format{}.Timeline(&sourcetest.Document{Status: http.StatusGone}, input(t, true), media.TrackVideo)
-	_, err := follow.Window(t.Context())
+	_, err := follow.Source.Window(t.Context())
 	if f, ok := errors.AsType[*timeline.Failure](err); !ok || f.Status != http.StatusGone {
 		t.Errorf("a 410 reload failed with %v, want the origin's status carried", err)
 	}

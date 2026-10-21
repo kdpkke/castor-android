@@ -31,7 +31,7 @@ type Process struct {
 	input *observedInput
 
 	// extra are the side outputs in pipe order, starting at firstExtraFD.
-	extra []*loopback
+	extra []*sideOutput
 
 	tail    *ringTail
 	markers *markerWatch
@@ -67,44 +67,47 @@ type Options struct {
 }
 
 // Start launches the command at path. The process is killed when ctx is cancelled.
-func Start(ctx context.Context, path string, command Command, opts Options) (*Process, error) {
+func Start(ctx context.Context, path string, command Command, opts Options) (p *Process, err error) {
 	// An unread tee blocks ffmpeg once the pipe fills, and a writer with no tee waits forever.
 	if tees := command.ExtraPipes > pcmFD-firstExtraFD; tees != (opts.PCM != nil) {
 		return nil, fmt.Errorf("a PCM tee routed (%t) and a PCM consumer given (%t) disagree", tees, opts.PCM != nil)
 	}
 
+	cmd := exec.CommandContext(ctx, path, slices.Clone(command.Args)...)
 	var (
-		extra       []*loopback
-		stderrRead  *os.File
-		stderrWrite *os.File
+		extra                   []*sideOutput
+		stdout                  io.ReadCloser
+		stderrRead, stderrWrite *os.File
 	)
-	closeExtra := func() {
-		for _, l := range extra {
-			_ = l.Close()
+	// Start owns every endpoint until launch succeeds. Parent write handles
+	// always close; the process and its drainers take the read ends on success.
+	defer func() {
+		for _, file := range cmd.ExtraFiles {
+			_ = file.Close()
 		}
-		for _, f := range []*os.File{stderrRead, stderrWrite} {
-			if f != nil {
-				_ = f.Close()
-			}
+		if stderrWrite != nil {
+			_ = stderrWrite.Close()
 		}
-	}
-	args := slices.Clone(command.Args)
-	for i := range command.ExtraPipes {
-		l, err := newLoopback()
 		if err != nil {
-			closeExtra()
-			return nil, err
-		}
-		extra = append(extra, l)
-		// A side output is routed to its pipe number in the argv, and travels over the loopback instead.
-		for j, arg := range args {
-			if arg == pipeURL(firstExtraFD+i) {
-				args[j] = l.url
+			for _, output := range extra {
+				_ = output.Close()
+			}
+			if stdout != nil {
+				_ = stdout.Close()
+			}
+			if stderrRead != nil {
+				_ = stderrRead.Close()
 			}
 		}
+	}()
+	for i := range command.ExtraPipes {
+		output, err := newSideOutput(cmd, firstExtraFD+i)
+		if err != nil {
+			return nil, fmt.Errorf("side output: %w", err)
+		}
+		extra = append(extra, output)
 	}
 
-	cmd := exec.CommandContext(ctx, path, args...)
 	stopped, scanned := new(atomic.Bool), make(chan struct{})
 	cmd.Cancel = sync.OnceValue(func() error { return kill(cmd.Process, scanned, stopped) })
 	var input *observedInput
@@ -114,25 +117,21 @@ func Start(ctx context.Context, path string, command Command, opts Options) (*Pr
 	}
 	cmd.Dir = opts.WorkDir
 
-	stdout, err := cmd.StdoutPipe()
+	stdout, err = cmd.StdoutPipe()
 	if err != nil {
-		closeExtra()
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 	// Our own pipe: os/exec closes it at Wait, losing buffered tail (ffmpeg's error path).
 	stderrRead, stderrWrite, err = os.Pipe()
 	if err != nil {
-		closeExtra()
 		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 	cmd.Stderr = stderrWrite
 	if err := cmd.Start(); err != nil {
-		closeExtra()
 		return nil, fmt.Errorf("starting ffmpeg: %w", err)
 	}
-	_ = stderrWrite.Close()
 
-	p := &Process{
+	p = &Process{
 		Stdout:  stdout,
 		cmd:     cmd,
 		input:   input,
@@ -210,10 +209,8 @@ func (p *Process) Wait() error {
 	err := p.cmd.Wait()
 	// Publish exit status for Evidence reads from other goroutines.
 	p.status.Store(int64(p.exitStatus()))
-	// An ffmpeg that died before opening a side output never will, so its reader is released to EOF.
-	for _, l := range p.extra {
-		l.stopAccepting()
-	}
+	// Release any platform transport still waiting for the exited child.
+	finishSideOutputs(p.extra)
 	// Then join progress (last sample still in pipe); step writes to work dir caller will remove.
 	<-p.drained
 	// And join stderr drain (ffmpeg's error path is still in the pipe).

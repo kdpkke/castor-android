@@ -93,7 +93,7 @@ func TestAPlayTimeoutNeedsConfirmationOfTheRequestedStream(t *testing.T) {
 				}, sinks: sinks}
 				u, _ := url.Parse(target)
 				started := time.Now()
-				err := s.Play(ctx, u, mediav1.Container_CONTAINER_MPEGTS, nil)
+				err := s.Play(ctx, device.Playback{URL: u, Container: mediav1.Container_CONTAINER_MPEGTS})
 				if (err == nil) != tt.want {
 					t.Fatalf("Play() = %v, want success %v; actions %v", err, tt.want, actions)
 				}

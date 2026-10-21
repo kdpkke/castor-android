@@ -27,11 +27,13 @@ func (e *Busy) Error() string {
 // Endpoint and discovery ID are aliases, so pinning a discovered device cannot
 // bypass ownership. Explicit nondefault ports identify separate endpoints.
 type lease struct {
-	dir      *Directory
-	device   Device
-	commands *semaphore.Weighted
-	lifetime context.Context
-	shutdown func() error
+	dir       *Directory
+	device    Device
+	commands  *semaphore.Weighted
+	lifetime  context.Context
+	shutdown  func() error
+	mu        sync.Mutex
+	observers sync.WaitGroup
 }
 
 var errLeaseClosed = errors.New("device lease is closed")
@@ -40,11 +42,14 @@ func newLease(dir *Directory) *lease {
 	lifetime, cancel := context.WithCancelCause(context.Background())
 	l := &lease{dir: dir, commands: semaphore.NewWeighted(1), lifetime: lifetime}
 	l.shutdown = sync.OnceValue(func() error {
+		l.mu.Lock()
 		cancel(errLeaseClosed)
+		l.mu.Unlock()
 		// Cancellation stops both queued and executing commands. Ownership stays
 		// held until those commands return and final device cleanup has completed.
 		_ = l.commands.Acquire(context.Background(), 1)
 		defer l.commands.Release(1)
+		l.observers.Wait()
 		err := l.device.Close()
 		l.release()
 		return err
@@ -148,8 +153,8 @@ func (l *lease) command(ctx context.Context, fn func(context.Context, Device) er
 	}
 	return fn(ctx, l.device)
 }
-func (l *lease) Play(ctx context.Context, u *url.URL, c mediav1.Container, captions []*mediav1.DeviceCommand_Caption) error {
-	return l.command(ctx, func(ctx context.Context, d Device) error { return d.Play(ctx, u, c, captions) })
+func (l *lease) Play(ctx context.Context, playback Playback) error {
+	return l.command(ctx, func(ctx context.Context, d Device) error { return d.Play(ctx, playback) })
 }
 func (l *lease) Stop(ctx context.Context) error {
 	return l.command(ctx, func(ctx context.Context, d Device) error { return d.Stop(ctx) })
@@ -162,6 +167,21 @@ func (l *lease) Resume(ctx context.Context) error {
 }
 func (l *lease) Capabilities() *mediav1.Capabilities { return l.device.Capabilities() }
 
-// AwaitEnd is observation and must not prevent Close from stopping playback.
-func (l *lease) AwaitEnd(ctx context.Context) error { return l.device.AwaitEnd(ctx) }
-func (l *lease) Close() error                       { return l.shutdown() }
+// AwaitEnd observes without occupying the command slot. Close cancels and joins
+// observers before releasing the device, just as it does executing commands.
+func (l *lease) AwaitEnd(ctx context.Context) error {
+	l.mu.Lock()
+	if err := context.Cause(l.lifetime); err != nil {
+		l.mu.Unlock()
+		return err
+	}
+	l.observers.Add(1)
+	l.mu.Unlock()
+	defer l.observers.Done()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	stop := context.AfterFunc(l.lifetime, func() { cancel(context.Cause(l.lifetime)) })
+	defer stop()
+	return l.device.AwaitEnd(ctx)
+}
+func (l *lease) Close() error { return l.shutdown() }

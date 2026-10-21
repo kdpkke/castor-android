@@ -94,6 +94,7 @@ func decode(out []byte, videoIndex, audioIndex int) (media.ProbeInfo, error) {
 			}
 			info.VideoHeights = append(info.VideoHeights, s.Height)
 			if videoSeen == videoIndex {
+				info.VideoPresent = true
 				// Dimensionless selected stream occupies real map index but establishes no picture envelope.
 				if s.Width > 0 && s.Height > 0 {
 					if secs, err := strconv.ParseFloat(s.StartTime, 64); info.StartKnown && err == nil && !math.IsNaN(secs) && !math.IsInf(secs, 0) && math.Abs(secs-info.Start.Seconds()) < float64(math.MaxInt64)/float64(time.Second) {
@@ -121,6 +122,7 @@ func decode(out []byte, videoIndex, audioIndex int) (media.ProbeInfo, error) {
 				Language: s.Tags.Language, Codec: media.Codec(s.CodecName), Channels: s.Channels, SampleRate: sampleRate, Default: s.Disposition.Default != 0,
 			})
 			if audioSeen == audioIndex {
+				info.AudioPresent = true
 				info.AudioCodec = media.Codec(s.CodecName)
 				info.AudioChannels = s.Channels
 				info.AudioSampleRate = sampleRate

@@ -79,37 +79,27 @@ func TestAnUnreadableConfigPathIsNotTreatedAsAMissingFile(t *testing.T) {
 	}
 }
 
-func TestUnknownKeysFailEvenInSectionsThisCommandDoesNotDecode(t *testing.T) {
-	for _, tc := range []struct{ doc, unknown string }{
-		{"api:\n  token: old-value\n", "api"},
-		{"network:\n  timeout: 2s\n", "network"},
-		{"resolver:\n  probe_max_concurrency: 2\n", "resolver"},
-		{"devices:\n  roku:\n    app_id: example\n", "devices"},
-		{"servers:\n  media:\n    tokne: typo\n", "servers.media.tokne"},
-		{"sources:\n  - proxies: [https://example.com]\n    templates:\n      movvie: /watch\n", "sources[0].templates.movvie"},
-	} {
-		path := write(t, tc.doc, "")
-		if _, err := read(path, defaulted()); err == nil || !strings.Contains(err.Error(), tc.unknown) {
-			t.Errorf("config returned %v, want an unknown-key error naming %s", err, tc.unknown)
-		}
+type ownedSections struct {
+	Cast struct {
+		MaxHeight uint32 `yaml:"max_height"`
+	} `yaml:"cast" settings:"strict"`
+}
+
+func TestUnknownKeysFailInACommandOwnedSection(t *testing.T) {
+	path := write(t, "cast:\n  max_heigth: 1080\nservers:\n  media:\n    token: secret\n", "")
+	if _, err := read(path, ownedSections{}); err == nil || !strings.Contains(err.Error(), "max_heigth") {
+		t.Errorf("config returned %v, want the unknown cast key", err)
 	}
-	t.Setenv("CASTOR_API__TOKEN", "old-value")
-	if _, err := read(filepath.Join(t.TempDir(), "config.yaml"), defaulted()); err == nil || !strings.Contains(err.Error(), "api") {
-		t.Errorf("old token environment variable returned %v, want an unknown-key error", err)
+	t.Setenv("CASTOR_CAST__MAX_HEIGTH", "720")
+	if _, err := read(filepath.Join(t.TempDir(), "config.yaml"), ownedSections{}); err == nil || !strings.Contains(err.Error(), "max_heigth") {
+		t.Errorf("environment returned %v, want the unknown cast key", err)
 	}
 }
 
-func TestUnknownEnvironmentNamespacesStillFail(t *testing.T) {
-	for _, tc := range []struct{ key, path string }{
-		{"CASTOR_WEB__PASSWORD", "web"},
-		{"CASTOR_TEST_CHROME", "test_chrome"},
-	} {
-		t.Run(tc.key, func(t *testing.T) {
-			t.Setenv(tc.key, "example")
-			if _, err := read(filepath.Join(t.TempDir(), "config.yaml"), defaulted()); err == nil || !strings.Contains(err.Error(), tc.path) {
-				t.Errorf("%s returned %v, want unknown-key error naming %s", tc.key, err, tc.path)
-			}
-		})
+func TestOtherCommandsSectionsAreIgnoredByAnOwnedSectionCheck(t *testing.T) {
+	path := write(t, "cast:\n  max_height: 1080\nservers:\n  media:\n    token: secret\n", "")
+	if _, err := read(path, ownedSections{}); err != nil {
+		t.Fatalf("unrelated media key was rejected: %v", err)
 	}
 }
 

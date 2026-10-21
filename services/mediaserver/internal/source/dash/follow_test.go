@@ -28,7 +28,7 @@ func window(t *testing.T, docs map[string]string, kind media.TrackKind, id strin
 		time.Sleep(time.Until(now))
 		follow := Format{}.Timeline(&sourcetest.Documents{ByPath: docs}, in, kind)
 		var err error
-		if w, err = follow.Window(t.Context()); err != nil {
+		if w, err = follow.Source.Window(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -226,7 +226,7 @@ func TestALivePresentationWithNoStartIsRefused(t *testing.T) {
     <SegmentTemplate timescale="1" duration="2" media="$Number$.m4s"/><Representation id="v" height="360"/></AdaptationSet></Period></MPD>`
 	in := media.Input{ID: media.PrimaryInputID, URL: sourcetest.URL(t, "https://cdn.example/live/manifest.mpd"), Representation: "v"}
 	f := Format{}.Timeline(&sourcetest.Document{Body: body, Status: http.StatusOK}, in, media.TrackVideo)
-	if _, err := f.Window(t.Context()); err == nil {
+	if _, err := f.Source.Window(t.Context()); err == nil {
 		t.Error("placed a live edge with no availabilityStartTime")
 	}
 }
@@ -272,7 +272,7 @@ func TestARepresentationNamingNothingIsRefused(t *testing.T) {
 	const body = mpdOpen + `type="static"><Period duration="PT2S"><AdaptationSet contentType="video"><Representation id="v" height="360"/></AdaptationSet></Period></MPD>`
 	in := media.Input{ID: media.PrimaryInputID, URL: sourcetest.URL(t, "https://cdn.example/live/manifest.mpd"), Representation: "v"}
 	f := Format{}.Timeline(&sourcetest.Document{Body: body, Status: http.StatusOK}, in, media.TrackVideo)
-	if _, err := f.Window(t.Context()); err == nil {
+	if _, err := f.Source.Window(t.Context()); err == nil {
 		t.Error("read the presentation itself as the representation's media")
 	}
 }

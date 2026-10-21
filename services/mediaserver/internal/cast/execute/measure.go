@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/stupside/castor/services/mediaserver/internal/cast/fetch"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/fetch"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
 
@@ -15,7 +15,8 @@ type facts struct {
 	measured bool
 }
 
-// measure probes subject once; failure means fallback to re-encode (zero ProbeInfo is copy-safe).
+// measure probes subject once; failure leaves presence unproven and prevents
+// treating missing codec parameters as evidence that a track can be omitted.
 func measure(ctx context.Context, subject string, p media.Prober) facts {
 	ctx, cancel := context.WithTimeout(ctx, probeBudget)
 	defer cancel()
@@ -31,14 +32,10 @@ func measure(ctx context.Context, subject string, p media.Prober) facts {
 
 // sounds is whether program's read is sure to carry sound: heard by the probe, or else declared or required by the source.
 func (f facts) sounds(p media.Program) bool {
-	if f.probe.AudioCodec != "" || f.measured {
-		return f.probe.AudioCodec != ""
+	if f.probe.HasAudio() || f.measured {
+		return f.probe.HasAudio()
 	}
-	if known, _ := p.Measurement(); known.AudioCodec != "" {
-		return true
-	}
-	track, ok := p.Track(media.TrackAudio)
-	return ok && !track.Optional
+	return p.RequiredTracks().Audio
 }
 
 // probeBudget bounds probe time; ffmpeg HLS demuxer walks whole 403-playlist (199s seen).

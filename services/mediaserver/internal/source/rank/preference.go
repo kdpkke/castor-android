@@ -9,9 +9,24 @@ import (
 )
 
 // height is what a probe measured of this candidate's picture, or zero when no measurement established one.
-func height(c *source.Stream) int {
+// For candidates that carry a ladder (master playlists), returns the best rendition height under the ceiling.
+func height(c *source.Stream, ceiling media.HeightCap) int {
 	if c.Probe == nil {
 		return 0
+	}
+	// For master playlists, the probe's VideoHeight may be the highest rendition.
+	// Use VideoHeights to find the best rendition under the ceiling.
+	if c.Ladder == source.LadderMultivariant && len(c.Probe.VideoHeights) > 0 {
+		best := 0
+		for _, h := range c.Probe.VideoHeights {
+			if ceiling.Admits(h) && h > best {
+				best = h
+			}
+		}
+		if best > 0 {
+			return best
+		}
+		// No rendition under ceiling; fall back to measured height (will be filtered by exceedsCap)
 	}
 	return c.Probe.VideoHeight
 }
@@ -43,7 +58,7 @@ func exceedsCap(c *source.Stream, ceiling media.HeightCap) bool {
 	if carriesLadder(c) || unreadLadder(c) {
 		return false
 	}
-	return !ceiling.Admits(height(c))
+	return !ceiling.Admits(height(c, ceiling))
 }
 
 func preference(a, b *source.Stream, ceiling media.HeightCap) int {
@@ -54,8 +69,8 @@ func preference(a, b *source.Stream, ceiling media.HeightCap) int {
 		// The only signal here about RECOVERY rather than the picture: a master carries rungs to fall back to.
 		source.CompareBool(carriesLadder(a), carriesLadder(b)),
 		// A height is evidence that the selected track is a picture; zero is unknown, not short.
-		source.CompareBool(height(a) > 0, height(b) > 0),
-		cmp.Compare(height(a), height(b)),
+		source.CompareBool(height(a, ceiling) > 0, height(b, ceiling) > 0),
+		cmp.Compare(height(a, ceiling), height(b, ceiling)),
 		cmp.Compare(a.Bitrate(), b.Bitrate()),
 		// Smaller is deliberately preferred only as a reproducible final tie-break.
 		cmp.Compare(b.URL.String(), a.URL.String()),

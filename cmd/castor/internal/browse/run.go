@@ -88,11 +88,14 @@ const (
 
 // Selection is the title the operator chose to cast.
 type Selection struct {
-	Kind    Kind
-	TMDBID  string
-	Title   string
-	Season  uint
-	Episode uint
+	Kind        Kind
+	TMDBID      string
+	Title       string
+	Synopsis    string
+	ImageURL    string
+	ReleaseDate string
+	Season      uint
+	Episode     uint
 }
 
 // pickTitle runs the browser until a title is chosen, or the operator leaves without one.

@@ -54,12 +54,12 @@ func (m model) delegateResults(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) pickResult(r tmdb.SearchResult) (tea.Model, tea.Cmd) {
 	switch r.MediaType {
 	case tmdb.MediaMovie:
-		m.sel = &Selection{Kind: KindMovie, TMDBID: strconv.Itoa(r.ID), Title: r.DisplayTitle()}
+		m.sel = &Selection{Kind: KindMovie, TMDBID: strconv.Itoa(r.ID), Title: r.DisplayTitle(), Synopsis: r.Overview, ImageURL: tmdb.ImageURL(r.PosterPath), ReleaseDate: r.ReleaseDate}
 		return m, tea.Quit
 	case tmdb.MediaTV:
 		m.loading = true
 		m.err = nil
-		return m, tea.Batch(m.drill.begin(r.ID, r.DisplayTitle()), m.spin.Tick)
+		return m, tea.Batch(m.drill.begin(r.ID, r.DisplayTitle(), r.PosterPath), m.spin.Tick)
 	}
 	return m, nil
 }

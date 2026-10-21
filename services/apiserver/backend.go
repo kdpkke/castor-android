@@ -12,11 +12,13 @@ import (
 
 // backend is what the API server casts with, bound to c: every device family castor casts to, and the media server at media.
 func (c *Config) backend(media transport.Endpoint, scraping transport.Endpoint) Backend {
+	families := []device.Family{dlna.Family{}, chromecast.Family{}, roku.Family{Config: c.Servers.API.Devices.Roku}}
 	return Backend{
 		Devices: device.Registry{
-			Families: []device.Family{dlna.Family{}, chromecast.Family{}, roku.Family{Config: c.Servers.API.Devices.Roku}},
+			Families: families,
 			Timeout:  c.Servers.API.Network.Timeout,
 		},
+		Discover: device.NetworkDiscovery(families),
 		Media:    mediaclient.New(media.Client(), media.URL),
 		Scraping: scrapingclient.New(scraping.Client(), scraping.URL),
 	}

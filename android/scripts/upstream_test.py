@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -117,6 +118,66 @@ class IntegrationTest(unittest.TestCase):
         with patch.object(upstream, "api", return_value=pull), self.assertRaisesRegex(RuntimeError, "branch changed"):
             upstream.complete("owner/android", head, self.android, 7)
         self.assertTrue(upstream.git("ls-remote", "origin", "refs/heads/main").startswith(self.android))
+
+    def prepare_fixture(self):
+        upstream.git("tag", "v1.0.0", self.base)
+        upstream.git("tag", "v2.0.0", self.release)
+        # The upstream branch has moved beyond the published release.
+        upstream.git("switch", "upstream")
+        self.write_commit("unreleased.txt", "not released\n", "unreleased work")
+        unpublished = upstream.git("rev-parse", "HEAD")
+        upstream.git("switch", "main")
+        self.write_commit("android/upstream.json", json.dumps({
+            "repository": upstream.UPSTREAM, "tag": "v1.0.0",
+            "commit": self.base, "integrationBase": self.base,
+        }) + "\n", "track initial release")
+        base = upstream.git("rev-parse", "HEAD")
+        remote = self.root / "remote.git"
+        upstream.git("init", "--bare", str(remote))
+        upstream.git("remote", "add", "origin", str(remote))
+        upstream.git("push", "origin", "main")
+        real_run = upstream.run
+
+        def local_run(*args, **kwargs):
+            if args[:2] == ("gh", "api"):
+                releases = [{"tag_name": "v2.0.0", "draft": False, "prerelease": False}]
+                return upstream.subprocess.CompletedProcess(args, 0, json.dumps([releases]), "")
+            if args[:3] == ("git", "fetch", "--no-tags"):
+                self.assertEqual(args[3], "https://github.com/stupside/castor.git")
+                args = (*args[:3], str(self.work), *args[4:])
+            return real_run(*args, **kwargs)
+
+        return local_run, base, unpublished
+
+    def test_prepare_commits_only_the_published_release_and_keeps_main_unchanged(self):
+        local_run, base, unpublished = self.prepare_fixture()
+        with patch.object(upstream, "run", side_effect=local_run), \
+                patch.object(upstream, "api", return_value=[{"state": "open", "number": 7}]), \
+                patch.object(upstream, "output") as result:
+            upstream.prepare("owner/android")
+        head = upstream.git("rev-parse", "HEAD")
+        result.assert_called_once_with(ready=True, head=head, base=base, pr=7, automatic=True)
+        lock = json.loads(Path("android/upstream.json").read_text())
+        self.assertEqual(lock["tag"], "v2.0.0")
+        self.assertEqual(lock["commit"], self.release)
+        self.assertEqual(lock["integrationBase"], self.release)
+        self.assertEqual(Path("core.txt").read_text(), "core v2\n")
+        self.assertEqual(Path("android.txt").read_text(), "phone client\n")
+        self.assertFalse(Path("unreleased.txt").exists())
+        self.assertNotEqual(upstream.run("git", "merge-base", "--is-ancestor", unpublished, head, check=False).returncode, 0)
+        self.assertTrue(upstream.git("ls-remote", "origin", "refs/heads/main").startswith(base))
+        self.assertTrue(upstream.git("ls-remote", "origin", "refs/heads/upstream-release/v2.0.0").startswith(head))
+
+    def test_prepare_rejects_a_moved_recorded_tag_before_publishing(self):
+        local_run, base, _ = self.prepare_fixture()
+        upstream.git("tag", "--force", "v1.0.0", self.release)
+        with patch.object(upstream, "run", side_effect=local_run), \
+                patch.object(upstream, "api") as api, \
+                self.assertRaisesRegex(RuntimeError, "recorded upstream tag moved"):
+            upstream.prepare("owner/android")
+        api.assert_not_called()
+        self.assertTrue(upstream.git("ls-remote", "origin", "refs/heads/main").startswith(base))
+        self.assertEqual(upstream.git("ls-remote", "origin", "refs/heads/upstream-release/v2.0.0"), "")
 
 
 if __name__ == "__main__":

@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/stupside/castor/services/mediaserver/internal/media"
@@ -16,18 +18,19 @@ import (
 
 // feed is one source's ledger, merged each time its playlist is asked for; castor reads every resource it lists.
 type feed struct {
+	// unwrapped records a segment decoded during this reading.
+	unwrapped atomic.Bool
 	name      string
 	source    timeline.Source
+	decoder   timeline.Decoder
 	repackage Repackage
 
 	// refreshing serialises origin reads, so a slow reload never holds up a segment the reader asks for meanwhile.
 	refreshing sync.Mutex
 
-	mu     sync.Mutex
-	ledger ledger
-	render []byte
-	// refused preserves an unanswered final refusal even when ffmpeg exits successfully.
-	refused error
+	mu      sync.Mutex
+	ledger  ledger
+	current playlistResult
 	// repackaging is decided once, before the first render, since a playlist cannot take back a MAP it has named.
 	repackaging *bool
 	carriage    map[timeline.Map]bool
@@ -47,46 +50,52 @@ type feed struct {
 	took ring
 }
 
-// newFeed follows source under name; repackage, when set, serves fMP4 as MPEG-TS.
-func newFeed(ctx context.Context, name string, source timeline.Source, repackage Repackage) *feed {
-	return &feed{name: name, source: source, repackage: repackage, carriage: map[timeline.Map]bool{}, slots: map[int64]*slot{}, reached: -1, life: ctx}
+// playlistResult is the published response. A refusal replaces the playlist;
+// only a successful reload can publish media again.
+type playlistResult struct {
+	body []byte
+	err  error
 }
 
-// refresh reads the origin's window and merges it.
-func (f *feed) refresh(ctx context.Context) error {
+// newFeed follows source under name; repackage, when set, serves fMP4 as MPEG-TS.
+func newFeed(ctx context.Context, name string, reading timeline.Reading, repackage Repackage) *feed {
+	return &feed{name: name, source: reading.Source, decoder: reading.Decoder, repackage: repackage, carriage: map[timeline.Map]bool{}, slots: map[int64]*slot{}, reached: -1, life: ctx}
+}
+
+// refresh reads and merges one window, returning its published result before another reload can replace it.
+func (f *feed) refresh(ctx context.Context) (playlistResult, error) {
 	f.refreshing.Lock()
 	defer f.refreshing.Unlock()
 	f.mu.Lock()
 	closed := f.ledger.Closed()
 	f.mu.Unlock()
 	if closed {
-		return nil
+		return f.result(), nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, patience)
 	defer cancel()
 	w, err := f.source.Window(ctx)
+	if err == nil {
+		err = f.decide(ctx, w)
+	}
 	if err != nil {
 		if refusal(err) != 0 {
 			f.mu.Lock()
-			f.refused = err
+			f.current = playlistResult{err: err}
 			f.mu.Unlock()
 		}
-		return err
-	}
-	if err := f.decide(ctx, w); err != nil {
-		return err
+		return f.result(), err
 	}
 	f.mu.Lock()
-	f.refused = nil
 	merged := f.ledger.Merge(w)
-	f.render = f.ledger.Render(f.view)
+	f.current = playlistResult{body: f.ledger.Render(f.view)}
 	f.pruneResources()
 	f.mu.Unlock()
 	if merged.Restarts > 0 || merged.Gaps > 0 {
 		slog.WarnContext(ctx, "the origin's timeline broke; castor marked a seam and carried on",
 			"input", f.name, "restarts", merged.Restarts, "gaps", merged.Gaps)
 	}
-	return nil
+	return f.result(), nil
 }
 
 // startTries is how often a feed's first window is asked for: an origin's passing failure must not cost the link.
@@ -97,7 +106,7 @@ func (f *feed) start() error {
 	ctx := f.life
 	var err error
 	for try := range startTries {
-		if err = f.refresh(ctx); err == nil || refusal(err) != 0 || try == startTries-1 {
+		if _, err = f.refresh(ctx); err == nil || refusal(err) != 0 || try == startTries-1 {
 			break
 		}
 		select {
@@ -166,7 +175,7 @@ func (f *feed) view(s timeline.Segment, sequence int64) timeline.Segment {
 		seen.Map = &timeline.Map{URI: fmt.Sprintf("%s/init/%d", f.name, f.inits.id(*s.Map))}
 	}
 	// Castor decrypts what it can; any other key it relays, for the reader to apply.
-	if s.Key != (timeline.Key{}) && !decryptable(s.Key) {
+	if s.Key != (timeline.Key{}) && !f.decoder.ConsumesKey(s.Key) {
 		seen.Key = s.Key
 		seen.Key.URI = fmt.Sprintf("%s/key/%d", f.name, f.keys.id(s.Key.URI))
 	}
@@ -174,24 +183,21 @@ func (f *feed) view(s timeline.Segment, sequence int64) timeline.Segment {
 }
 
 func (f *feed) playlist(w http.ResponseWriter, r *http.Request) {
-	err := f.refresh(r.Context())
-	f.mu.Lock()
-	render := f.render
-	f.mu.Unlock()
-	switch status := refusal(err); {
-	case status != 0:
-		http.Error(w, err.Error(), status)
+	result, err := f.refresh(r.Context())
+	switch {
+	case result.err != nil:
+		http.Error(w, result.err.Error(), refusal(result.err))
 		return
-	case err != nil && render == nil:
+	case err != nil && result.body == nil:
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	case err != nil:
-		// A reload the origin could not answer ends ffmpeg's read, so the last render stands in for it.
 		slog.DebugContext(r.Context(), "the origin could not answer a reload; answering from the last render",
 			"input", f.name, "error", err)
 	}
 	w.Header().Set("Content-Type", media.HLS)
-	_, _ = w.Write(render)
+	w.Header().Set("Content-Length", strconv.Itoa(len(result.body)))
+	_, _ = w.Write(result.body)
 }
 
 // final is an origin's no, as opposed to a moment it could not answer.
@@ -233,4 +239,11 @@ func (f *feed) wait() {
 	f.work.Wait()
 	f.initsHeld.reads.Wait()
 	f.keysHeld.reads.Wait()
+}
+
+// result is shared by HTTP serving and the final read outcome.
+func (f *feed) result() playlistResult {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.current
 }

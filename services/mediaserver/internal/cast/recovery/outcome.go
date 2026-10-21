@@ -7,6 +7,21 @@ import (
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
 
+// Interrupted records why an attempt was canceled separately from failures
+// observed while joining its work and releasing its resources.
+type Interrupted struct {
+	Cause   error
+	Failure error
+}
+
+func (e *Interrupted) Error() string { return errors.Join(e.Cause, e.Failure).Error() }
+func (e *Interrupted) Unwrap() []error {
+	if e.Failure == nil {
+		return []error{e.Cause}
+	}
+	return []error{e.Cause, e.Failure}
+}
+
 // Outcome is what one attempt did: whether it worked, and the material to say why not.
 type Outcome struct {
 	Err error
@@ -18,11 +33,15 @@ type Outcome struct {
 // attribute decides whose account of a failure the cast reports: a verdict is left alone.
 func attribute(err, readErr error) error {
 	_, judged := errors.AsType[*health.Fault](err)
+	if _, interrupted := errors.AsType[*Interrupted](err); interrupted {
+		return err
+	}
 	switch {
 	case err == nil || readErr == nil || judged:
 		return err
 	case errors.Is(err, readErr):
-		return readErr
+		// The existing chain may also contain independent cleanup failures.
+		return err
 	default:
 		return errors.Join(readErr, err)
 	}

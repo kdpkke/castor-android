@@ -2,6 +2,9 @@
 package hls
 
 import (
+	"context"
+	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
@@ -11,7 +14,10 @@ import (
 )
 
 // Format is HLS as a source.Format.
-type Format struct{}
+type Format struct {
+	// ProbeRendition measures a variant when its master omits RESOLUTION.
+	ProbeRendition func(context.Context, *url.URL, http.Header) (media.ProbeInfo, error)
+}
 
 var _ source.Format = Format{}
 

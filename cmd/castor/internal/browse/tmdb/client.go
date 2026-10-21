@@ -56,6 +56,14 @@ func New(cfg Config) *Client {
 // posterSize is the width the browser shows posters at.
 const posterSize = "w500"
 
+// ImageURL is the public image address a receiver can fetch without the TMDB API key.
+func ImageURL(path string) string {
+	if path == "" {
+		return ""
+	}
+	return imageBase + posterSize + path
+}
+
 // Poster streams a poster at posterSize; caller closes it.
 func (c *Client) Poster(ctx context.Context, posterPath string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.images+posterSize+posterPath, nil)

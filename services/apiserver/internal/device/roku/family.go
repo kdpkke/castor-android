@@ -27,7 +27,9 @@ const (
 	devAppID       = "dev"
 	devUser        = "rokudev"
 	httpTimeout    = 10 * time.Second
-	ecpPort        = "8060"
+	// Leave time in the directory's discovery window to fetch owner-set names.
+	searchTimeout = 3 * time.Second
+	ecpPort       = "8060"
 )
 
 // Config is the operator's Roku settings: a published channel to launch, or the developer password to sideload castor's.
@@ -56,8 +58,22 @@ func (Family) Discover(ctx context.Context) []device.Info {
 		return nil
 	}
 	defer hc.Close()
+	return discover(ctx, func(searchCtx context.Context) ([]*http.Response, error) {
+		return ssdp.RawSearch(searchCtx, hc, searchTarget, discoverySends)
+	}, &http.Client{Timeout: httpTimeout})
+}
 
-	responses, err := ssdp.RawSearch(ctx, hc, searchTarget, discoverySends)
+// discover keeps SSDP's wait separate from the name lookups. RawSearch normally
+// uses its entire context deadline before returning the responses it collected.
+func discover(ctx context.Context, search func(context.Context) ([]*http.Response, error), client *http.Client) []device.Info {
+	searchWindow := searchTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		// Reserve the last third of a shorter caller window for device-info.
+		searchWindow = min(searchWindow, time.Until(deadline)*2/3)
+	}
+	searchCtx, cancel := context.WithTimeout(ctx, searchWindow)
+	responses, err := search(searchCtx)
+	cancel()
 	if err != nil {
 		slog.WarnContext(ctx, "roku discovery", "error", err)
 		return nil
@@ -75,7 +91,6 @@ func (Family) Discover(ctx context.Context) []device.Info {
 	nctx, cancel := context.WithTimeout(ctx, httpTimeout)
 	defer cancel()
 
-	client := &http.Client{Timeout: httpTimeout}
 	devices := make([]device.Info, len(ids))
 	var wg sync.WaitGroup
 	for i, id := range ids {

@@ -84,10 +84,10 @@ func (p sourceProber) Probe(ctx context.Context) (media.ProbeInfo, media.Reach, 
 		}
 	}
 
-	if hasVideo && info.VideoCodec == "" && !video.Optional {
+	if hasVideo && !info.HasVideo() && !video.Optional {
 		return info, media.ReachOpened, fmt.Errorf("selected video track V:%d is absent from input %d", video.Index, videoInput)
 	}
-	if hasAudio && info.AudioCodec == "" && !audio.Optional {
+	if hasAudio && !info.HasAudio() && !audio.Optional {
 		return info, media.ReachOpened, fmt.Errorf("selected audio track a:%d is absent from input %d", audio.Index, audioInput)
 	}
 	return info, media.ReachOpened, nil

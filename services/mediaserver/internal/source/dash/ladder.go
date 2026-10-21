@@ -67,9 +67,6 @@ func ladder(p placed, probe *media.ProbeInfo) []source.Rendition {
 		for i := range rungs {
 			if rungs[i].Height == 0 && probe.VideoHeights[i] > 0 {
 				rungs[i].Height = probe.VideoHeights[i]
-				if rungs[i].Declared != nil {
-					rungs[i].Declared.VideoHeight = rungs[i].Height
-				}
 			}
 		}
 	}

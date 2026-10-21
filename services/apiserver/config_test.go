@@ -14,7 +14,7 @@ import (
 
 func TestAPIServiceSettingsLoadFromNestedSections(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("servers:\n  api:\n    network:\n      timeout: 3s\n    devices:\n      roku:\n        app_id: channel-123\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("servers:\n  api:\n    url: http://localhost:8400\n    token: secret\n    network:\n      timeout: 3s\n    devices:\n      roku:\n        app_id: channel-123\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	load := func() *Config {
@@ -32,7 +32,7 @@ func TestAPIServiceSettingsLoadFromNestedSections(t *testing.T) {
 		}
 		return got
 	}
-	if got := load(); got.Servers.API.Network.Timeout != 3*time.Second || got.Servers.API.Devices.Roku.AppID != "channel-123" {
+	if got := load(); got.Servers.API.URL != "http://localhost:8400" || got.Servers.API.Token != "secret" || got.Servers.API.Network.Timeout != 3*time.Second || got.Servers.API.Devices.Roku.AppID != "channel-123" {
 		t.Errorf("nested API settings = %+v", got.Servers.API)
 	}
 	t.Setenv("CASTOR_SERVERS__API__NETWORK__TIMEOUT", "4s")

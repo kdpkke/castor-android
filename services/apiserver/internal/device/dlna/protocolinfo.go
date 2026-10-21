@@ -3,7 +3,6 @@ package dlna
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -27,27 +26,56 @@ type sinkEntry struct {
 	features string
 }
 
-// negotiateCaps asks the device what it accepts over ConnectionManager GetProtocolInfo, refusing a device that does not say.
+// negotiateCaps asks the device what it accepts over ConnectionManager GetProtocolInfo.
+// Renderers without usable answers retain the conservative MPEG-TS path from 1.9.x.
 func negotiateCaps(ctx context.Context, loc *goupnp.RootDevice, u *url.URL) (*mediav1.Capabilities, map[mediav1.Container]sinkEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	manager, err := findService(loc, u, "ConnectionManager")
 	if err != nil {
-		return nil, nil, fmt.Errorf("the device cannot say what it plays: %w", err)
+		slog.WarnContext(ctx, "DLNA ConnectionManager unavailable; using conservative capabilities", "error", err)
+		caps, sinks := fallbackCaps()
+		return caps, sinks, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, capsTimeout)
+	queryCtx, cancel := context.WithTimeout(ctx, capsTimeout)
 	defer cancel()
 
 	response := &struct{ Source, Sink string }{}
 	if err := manager.SOAPClient.PerformActionCtx(
-		ctx, manager.Service.ServiceType, "GetProtocolInfo", nil, response); err != nil {
-		return nil, nil, fmt.Errorf("asking the device what it plays: %w", err)
+		queryCtx, manager.Service.ServiceType, "GetProtocolInfo", nil, response); err != nil {
+		if ctx.Err() != nil {
+			return nil, nil, fmt.Errorf("asking the device what it plays: %w", err)
+		}
+		slog.WarnContext(ctx, "DLNA GetProtocolInfo failed; using conservative capabilities", "error", err)
+		caps, sinks := fallbackCaps()
+		return caps, sinks, nil
 	}
 	caps, sinks := parseSinkProtocolInfo(response.Sink)
 	if len(caps.Formats) == 0 {
-		return nil, nil, errors.New("the device advertises no complete supported playback envelope in its sink")
+		slog.WarnContext(ctx, "DLNA sink contains no supported playback envelope; using conservative capabilities")
+		caps, sinks := fallbackCaps()
+		return caps, sinks, nil
 	}
 	slog.InfoContext(ctx, "negotiated device capabilities", "formats", len(caps.Formats))
 
 	return caps, sinks, nil
+}
+
+// fallbackCaps provides one valid stream for renderers whose sink cannot be
+// queried. It deliberately omits receiver-specific headers and captions.
+func fallbackCaps() (*mediav1.Capabilities, map[mediav1.Container]sinkEntry) {
+	const container = mediav1.Container_CONTAINER_MPEGTS
+	return &mediav1.Capabilities{
+		Provenance: "DLNA compatibility fallback: MPEG-TS, H.264 and stereo AAC (receiver support unverified)",
+		Formats: []*mediav1.FormatSupport{{
+			Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: mediav1.ProgressiveSupport_CONTAINER_MPEGTS}},
+			Tracks: &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{
+				Video: device.H264Support(),
+				Audio: &mediav1.AudioSupport{Codec: mediav1.AudioCodec_AUDIO_CODEC_AAC, MaxChannels: 2},
+			}},
+		}},
+	}, map[mediav1.Container]sinkEntry{container: {mime: device.MIME(container), features: "*"}}
 }
 
 // audioSupportFor builds the copy envelope for an audio codec.
@@ -76,10 +104,10 @@ func parseSinkProtocolInfo(sink string) (*mediav1.Capabilities, map[mediav1.Cont
 			captions = append(captions, mediav1.CaptionFormat_CAPTION_FORMAT_VTT)
 		}
 		ct, cok := containerFromMIME(mime)
-		v, vok := codecFromProfile(mime, pn)
+		video := videoFromProfile(mime, pn)
 		a, aok := audioFromProfile(mime, pn)
 		// A separate audio-only profile says nothing about this video container.
-		if !cok || !vok || !aok {
+		if !cok || video == nil || !aok {
 			if cok {
 				if _, exists := sinks[ct]; !exists {
 					sinks[ct] = sinkEntry{mime: fields[2], features: fields[3]}
@@ -87,12 +115,14 @@ func parseSinkProtocolInfo(sink string) (*mediav1.Capabilities, map[mediav1.Cont
 			}
 			continue
 		}
-		video := device.VideoSupport(v)
-		if strings.Contains(pn, "_BL_") {
-			video.Profiles = []mediav1.Profile{mediav1.Profile_PROFILE_BASELINE, mediav1.Profile_PROFILE_CONSTRAINED_BASELINE}
+		if h264 := video.GetH264(); h264 != nil && strings.Contains(pn, "_BL_") {
+			h264.Profiles = []mediav1.H264Support_Profile{mediav1.H264Support_PROFILE_BASELINE, mediav1.H264Support_PROFILE_CONSTRAINED_BASELINE}
 		}
-		if strings.Contains(pn, "_MP_") {
-			video.Profiles = []mediav1.Profile{mediav1.Profile_PROFILE_MAIN}
+		if h264 := video.GetH264(); h264 != nil && strings.Contains(pn, "_MP_") {
+			h264.Profiles = []mediav1.H264Support_Profile{mediav1.H264Support_PROFILE_MAIN}
+		}
+		if hevc := video.GetHevc(); hevc != nil && strings.Contains(pn, "_MP_") {
+			hevc.Profiles = []mediav1.HEVCSupport_Profile{mediav1.HEVCSupport_PROFILE_MAIN}
 		}
 		progressive := mediav1.ProgressiveSupport_CONTAINER_MP4
 		if ct == mediav1.Container_CONTAINER_MPEGTS {
@@ -125,15 +155,18 @@ func parseSinkProtocolInfo(sink string) (*mediav1.Capabilities, map[mediav1.Cont
 
 }
 
-// codecFromProfile reads the DLNA.ORG_PN token (already upper-cased), failing that the MIME type.
-func codecFromProfile(mime, pn string) (mediav1.VideoCodec, bool) {
+// videoFromProfile reads the DLNA.ORG_PN token (already upper-cased), failing that the MIME type.
+func videoFromProfile(mime, pn string) *mediav1.VideoSupport {
 	switch {
 	case strings.Contains(pn, "HEVC") || strings.Contains(pn, "H265") || strings.Contains(mime, "hevc") || strings.Contains(mime, "h265"):
-		return mediav1.VideoCodec_VIDEO_CODEC_HEVC, true
+		return &mediav1.VideoSupport{Codec: &mediav1.VideoSupport_Hevc{Hevc: &mediav1.HEVCSupport{
+			Profiles:  []mediav1.HEVCSupport_Profile{mediav1.HEVCSupport_PROFILE_MAIN, mediav1.HEVCSupport_PROFILE_MAIN_10},
+			BitDepths: []uint32{8, 10},
+		}}}
 	case strings.Contains(pn, "AVC") || strings.Contains(pn, "H264") || strings.Contains(mime, "avc") || strings.Contains(mime, "h264"):
-		return mediav1.VideoCodec_VIDEO_CODEC_H264, true
+		return device.H264Support()
 	}
-	return mediav1.VideoCodec_VIDEO_CODEC_UNSPECIFIED, false
+	return nil
 }
 
 func audioFromProfile(mime, pn string) (mediav1.AudioCodec, bool) {

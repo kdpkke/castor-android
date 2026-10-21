@@ -44,12 +44,13 @@ type Program struct {
 	Offsets    map[InputID]time.Duration
 	EndPolicy  EndPolicy
 
-	measurement *ProbeInfo
+	observation *Observation
+	declaration *programDeclaration
 }
 
 // NewProgram validates and clones so mutations of caller's slices/URLs/headers cannot change it.
 func NewProgram(program Program) (Program, error) {
-	program.measurement = nil
+	program.observation, program.declaration = nil, nil
 	p := program.Clone()
 	if err := p.Validate(); err != nil {
 		return Program{}, err
@@ -57,26 +58,31 @@ func NewProgram(program Program) (Program, error) {
 	return p, nil
 }
 
-// Measurement reports the probe result, copied so callers cannot mutate.
+// Measurement reports a successful observation only while its original
+// bindings still match this program. The returned facts are copied.
 func (p *Program) Measurement() (ProbeInfo, bool) {
-	if p.measurement == nil {
+	if p.observation == nil {
 		return ProbeInfo{}, false
 	}
-	return p.measurement.Clone(), true
+	return p.observation.For(*p)
 }
 
 // SetMeasurement replaces the probe facts for the program's current bindings.
 func (p *Program) SetMeasurement(info ProbeInfo) {
-	cloned := info.Clone()
-	p.measurement = &cloned
+	observed := Observe(*p, info)
+	p.SetObservation(observed)
+}
+
+// SetObservation carries a probe's original bindings through ranking and
+// resolution. Measurement refuses it if this program selects different media.
+func (p *Program) SetObservation(observed Observation) {
+	p.observation = &observed
 }
 
 // MeasuredHeight is the probed height, or zero when no measurement established one.
 func (p *Program) MeasuredHeight() int {
-	if p.measurement == nil {
-		return 0
-	}
-	return p.measurement.VideoHeight
+	info, _ := p.Measurement()
+	return info.VideoHeight
 }
 
 // SameBindings reports whether two programs read the same media (same resources, identities, tracks).
@@ -86,11 +92,15 @@ func (p Program) SameBindings(other Program) bool {
 	}
 	for i, input := range p.Inputs {
 		against := other.Inputs[i]
-		if input.ID != against.ID || urlString(input.URL) != urlString(against.URL) || input.Representation != against.Representation {
+		if input.ID != against.ID || urlString(input.URL) != urlString(against.URL) ||
+			input.Representation != against.Representation ||
+			input.ContentType != against.ContentType ||
+			!maps.EqualFunc(input.Headers, against.Headers, slices.Equal) {
 			return false
 		}
 	}
-	return slices.Equal(p.Tracks, other.Tracks)
+	return slices.Equal(p.Tracks, other.Tracks) && p.ClockInput == other.ClockInput &&
+		p.EndPolicy == other.EndPolicy && maps.Equal(p.Offsets, other.Offsets)
 }
 
 // urlString names a URL for comparison (nil = empty string; Validate refuses that anyway).
@@ -241,9 +251,8 @@ func (p Program) Clone() Program {
 		clone.Inputs[i].URL = p.Inputs[i].URL.Clone()
 		clone.Inputs[i].Headers = p.Inputs[i].Headers.Clone()
 	}
-	if p.measurement != nil {
-		info := p.measurement.Clone()
-		clone.measurement = &info
-	}
+	// Evidence owns immutable snapshots; cloning a program preserves those
+	// bindings instead of rebinding old facts to the clone's future selection.
+	clone.observation, clone.declaration = p.observation, p.declaration
 	return clone
 }

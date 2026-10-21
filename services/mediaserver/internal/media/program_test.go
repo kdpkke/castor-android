@@ -1,6 +1,7 @@
 package media
 
 import (
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -42,5 +43,19 @@ func TestProgramValidationRejectsInvalidReferences(t *testing.T) {
 	valid := Program{Inputs: []Input{validInput}, Tracks: []TrackRef{validTrack}, ClockInput: validClock, EndPolicy: validEnd}
 	if err := valid.Validate(); err != nil {
 		t.Errorf("Validate() = %v on a well-formed program", err)
+	}
+}
+
+func TestProgramBindingsIncludeReplayHeaders(t *testing.T) {
+	base := Program{
+		Inputs: []Input{{ID: PrimaryInputID, URL: &url.URL{Scheme: "https", Host: "cdn.example", Path: "/movie.m3u8"}}},
+		Tracks: []TrackRef{{Input: PrimaryInputID, Kind: TrackVideo}}, ClockInput: PrimaryInputID, EndPolicy: EndAtLongest,
+	}
+	withHeader := base.Clone()
+	withHeader.Inputs[0].Headers = http.Header{"Referer": {"https://one.example/"}}
+	otherHeader := withHeader.Clone()
+	otherHeader.Inputs[0].Headers.Set("Referer", "https://two.example/")
+	if base.SameBindings(withHeader) || withHeader.SameBindings(otherHeader) {
+		t.Fatal("same URL with different replay headers was treated as the same measured input")
 	}
 }

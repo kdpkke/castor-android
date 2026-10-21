@@ -40,9 +40,9 @@ func get(ctx context.Context, hc *http.Client, u *url.URL, limit int64) ([]byte,
 	return io.ReadAll(io.LimitReader(resp.Body, limit))
 }
 
-func (s *session) Play(ctx context.Context, streamURL *url.URL, container mediav1.Container, captions []*mediav1.DeviceCommand_Caption) error {
+func (s *session) Play(ctx context.Context, playback device.Playback) error {
 	var format string
-	switch container {
+	switch playback.Container {
 	case mediav1.Container_CONTAINER_MP4:
 		format = "mp4"
 	case mediav1.Container_CONTAINER_MKV:
@@ -50,10 +50,10 @@ func (s *session) Play(ctx context.Context, streamURL *url.URL, container mediav
 	case mediav1.Container_CONTAINER_HLS:
 		format = "hls"
 	default:
-		return fmt.Errorf("roku does not support container %v", container)
+		return fmt.Errorf("roku does not support container %v", playback.Container)
 	}
 	q := url.Values{}
-	q.Set(paramURL, streamURL.String())
+	q.Set(paramURL, playback.URL.String())
 	q.Set(paramFormat, format)
 
 	u := s.ecp.JoinPath("launch", s.appID)
@@ -165,7 +165,7 @@ func (s *session) AwaitEnd(ctx context.Context) error {
 func (s *session) Capabilities() *mediav1.Capabilities {
 	caps := &mediav1.Capabilities{Provenance: "Castor Roku channel defaults; model/firmware limits unverified", SelfFetch: true}
 	for _, audio := range []mediav1.AudioCodec{mediav1.AudioCodec_AUDIO_CODEC_AAC, mediav1.AudioCodec_AUDIO_CODEC_AC3, mediav1.AudioCodec_AUDIO_CODEC_EAC3} {
-		tracks := &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: device.VideoSupport(mediav1.VideoCodec_VIDEO_CODEC_H264), Audio: &mediav1.AudioSupport{Codec: audio, MaxChannels: 6}}}
+		tracks := &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: device.H264Support(), Audio: &mediav1.AudioSupport{Codec: audio, MaxChannels: 6}}}
 		caps.Formats = append(caps.Formats, &mediav1.FormatSupport{Transport: &mediav1.FormatSupport_Hls{Hls: &mediav1.HLSSupport{}}, Tracks: tracks})
 		for _, container := range []mediav1.ProgressiveSupport_Container{mediav1.ProgressiveSupport_CONTAINER_MP4, mediav1.ProgressiveSupport_CONTAINER_MKV} {
 			caps.Formats = append(caps.Formats, &mediav1.FormatSupport{Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: container}}, Tracks: tracks})

@@ -11,7 +11,6 @@ import (
 
 	"github.com/stupside/castor/internal/settings"
 	"github.com/stupside/castor/internal/transport"
-	"github.com/stupside/castor/services/mediaserver/internal/mediaroute"
 )
 
 // Command is `castor media-server`: the media server alone, serving the API servers that reach it and their devices until interrupted.
@@ -44,7 +43,7 @@ func Command() *cli.Command {
 func onePort(srv *Server, token string) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/", transport.Authorized(srv.API, token))
-	mux.Handle(mediaroute.Pattern, srv.Media)
+	mux.Handle("/media/", srv.Media)
 	return mux
 }
 

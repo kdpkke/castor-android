@@ -196,9 +196,9 @@ func TestFreshManifestDoesNotInheritOldCompanionTracks(t *testing.T) {
 func TestResolveDescribesTheChosenRungFromWhatTheMasterDeclared(t *testing.T) {
 	for _, tt := range []struct {
 		codecs string
-		want   *media.ProbeInfo
+		want   *media.Declaration
 	}{
-		{"avc1.640028,mp4a.40.2", &media.ProbeInfo{VideoCodec: media.CodecH264, VideoProfile: "High", VideoHeight: 1080, VideoBitDepth: 8, VideoLevel: 40, AudioCodec: media.CodecAAC}},
+		{"avc1.640028,mp4a.40.2", &media.Declaration{VideoCodec: media.CodecH264, VideoProfile: "High", VideoHeight: 1080, VideoBitDepth: 8, VideoLevel: 40, AudioCodec: media.CodecAAC}},
 		// Main 10 does not fix the bit depth, so it declares too little to act on.
 		{"hvc1.2.4.L120.90,mp4a.40.2", nil},
 		{"mp4a.40.2", nil},
@@ -211,7 +211,10 @@ func TestResolveDescribesTheChosenRungFromWhatTheMasterDeclared(t *testing.T) {
 				"/master.m3u8": master,
 				"/video.m3u8":  mediaPlaylist,
 			}}, stream)
-			got, measured := resolved.Program.Measurement()
+			if observed, ok := resolved.Program.Measurement(); ok {
+				t.Fatalf("manifest declaration became an observation: %+v", observed)
+			}
+			got, measured := resolved.Program.Declaration()
 			if tt.want == nil {
 				if measured {
 					t.Errorf("measurement = %+v, want none for %q", got, tt.codecs)

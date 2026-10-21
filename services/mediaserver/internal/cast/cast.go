@@ -3,17 +3,16 @@ package cast
 import (
 	"context"
 	"errors"
-	"net/url"
 	"time"
 
 	"github.com/looplab/fsm"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
 
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"github.com/stupside/castor/internal/castid"
 	"github.com/stupside/castor/internal/latest"
 	"github.com/stupside/castor/services/mediaserver/internal/lend"
-	"github.com/stupside/castor/services/mediaserver/internal/mediaroute"
 )
 
 var (
@@ -37,22 +36,22 @@ type cast struct {
 	now     *latest.Value[view]
 	done    chan struct{} // closes once the cast has ended
 
-	line       *lend.Line
-	deliveries *mediaroute.Deliveries
+	line      *lend.Line
+	publisher output.Publisher
 }
 
 // newCast awaits its device for undriven, and no longer than parent lasts; lending it one starts the cast.
-func newCast(parent context.Context, id string, reach *url.URL, caster Caster, src *mediav1.Source) *cast {
+func newCast(parent context.Context, id string, publisher output.Publisher, caster Caster, src *mediav1.Source) *cast {
 	ctx, cancel := context.WithCancelCause(castid.With(parent, id))
 	c := &cast{
-		id:         id,
-		ctx:        ctx,
-		cancel:     cancel,
-		caster:     caster,
-		source:     originOf(src),
-		done:       make(chan struct{}),
-		line:       lend.NewLine(),
-		deliveries: mediaroute.NewDeliveries(reach, id),
+		id:        id,
+		ctx:       ctx,
+		cancel:    cancel,
+		caster:    caster,
+		source:    originOf(src),
+		done:      make(chan struct{}),
+		line:      lend.NewLine(),
+		publisher: publisher,
 	}
 	c.machine = c.lifecycle()
 	c.now = latest.New(view{status: &castorv1.CastStatus{State: &castorv1.CastStatus_Measuring{Measuring: &castorv1.MeasuringStatus{}}}})

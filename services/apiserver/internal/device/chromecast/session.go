@@ -11,6 +11,7 @@ import (
 	castmedia "github.com/vishen/go-chromecast/cast"
 
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
+	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"github.com/stupside/castor/services/apiserver/internal/device"
 )
 
@@ -29,8 +30,8 @@ type session struct {
 var _ device.Device = (*session)(nil)
 
 // Play returns the receiver's own verdict on the LOAD, so a refused URL fails the hand-off; a dropped connection is gone.
-func (s *session) Play(ctx context.Context, streamURL *url.URL, container mediav1.Container, captions []*mediav1.DeviceCommand_Caption) error {
-	if err := s.play(ctx, streamURL, device.MIME(container), captions); err != nil {
+func (s *session) Play(ctx context.Context, playback device.Playback) error {
+	if err := s.play(ctx, playback.URL, device.MIME(playback.Container), playback.Captions, playback.Info); err != nil {
 		select {
 		case <-s.ch.gone:
 			return &device.Gone{Device: s.name, Observed: "the Cast connection closed before the media loaded", Err: err}
@@ -41,7 +42,7 @@ func (s *session) Play(ctx context.Context, streamURL *url.URL, container mediav
 	return nil
 }
 
-func (s *session) play(ctx context.Context, streamURL *url.URL, contentType string, captions []*mediav1.DeviceCommand_Caption) error {
+func (s *session) play(ctx context.Context, streamURL *url.URL, contentType string, captions []*mediav1.DeviceCommand_Caption, info *castorv1.MediaInfo) error {
 	transport, err := s.mediaReceiver(ctx)
 	if err != nil {
 		return fmt.Errorf("starting the chromecast's media receiver: %w", err)
@@ -60,10 +61,14 @@ func (s *session) play(ctx context.Context, streamURL *url.URL, contentType stri
 		Type: msgLoad, Autoplay: true,
 		Media: mediaItem{MediaItem: castmedia.MediaItem{ContentId: streamURL.String(), ContentType: contentType, StreamType: "BUFFERED"}},
 	}
+	load.Media.Metadata = castmedia.MediaMetadata{Title: info.GetTitle(), Subtitle: info.GetSynopsis(), ReleaseDate: info.GetReleaseDate()}
+	if imageURL := info.GetImageUrl(); imageURL != "" {
+		load.Media.Metadata.Images = []castmedia.Image{{URL: imageURL}}
+	}
 	load.Media.Tracks, load.ActiveTrackIds = textTracks(captions)
 	reply, err := s.ch.request(ctx, transport, nsMedia, load)
 	if err == nil {
-		err = loadVerdict(reply)
+		err = loadVerdict(reply, streamURL.String())
 	}
 	if err != nil {
 		s.watchMu.Lock()
@@ -139,8 +144,8 @@ func (s *session) transportCommand(ctx context.Context, msg string) error {
 	return nil
 }
 
-// loadVerdict reads the answer to LOAD: a media status accepts it unless the player already failed.
-func loadVerdict(reply []byte) error {
+// loadVerdict accepts the requested stream only when the receiver's answer does not identify a different one.
+func loadVerdict(reply []byte, contentID string) error {
 	var response castmedia.MediaStatusResponse
 	if err := json.Unmarshal(reply, &response); err != nil {
 		return fmt.Errorf("undecodable answer to LOAD: %w", err)
@@ -151,10 +156,21 @@ func loadVerdict(reply []byte) error {
 	if len(response.Status) == 0 {
 		return errors.New("chromecast answered LOAD without a media status")
 	}
+	var matched bool
+	var other string
 	for _, status := range response.Status {
+		got := status.Media.ContentId
+		if got != "" && got != contentID {
+			other = got
+			continue
+		}
+		matched = matched || got == contentID
 		if status.PlayerState == stateIdle && status.IdleReason == idleError {
 			return errors.New("chromecast refused the media: the receiver went idle with an error")
 		}
+	}
+	if !matched && other != "" {
+		return fmt.Errorf("chromecast answered LOAD with a different stream %q", other)
 	}
 	return nil
 }
@@ -212,7 +228,7 @@ func (s *session) Capabilities() *mediav1.Capabilities {
 		for _, audio := range []mediav1.AudioCodec{mediav1.AudioCodec_AUDIO_CODEC_AAC, mediav1.AudioCodec_AUDIO_CODEC_AC3, mediav1.AudioCodec_AUDIO_CODEC_EAC3, mediav1.AudioCodec_AUDIO_CODEC_MP3} {
 			caps.Formats = append(caps.Formats, &mediav1.FormatSupport{
 				Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: container}},
-				Tracks:    &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: device.VideoSupport(mediav1.VideoCodec_VIDEO_CODEC_H264), Audio: &mediav1.AudioSupport{Codec: audio, MaxChannels: 6}}},
+				Tracks:    &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: device.H264Support(), Audio: &mediav1.AudioSupport{Codec: audio, MaxChannels: 6}}},
 				Captions:  []mediav1.CaptionFormat{mediav1.CaptionFormat_CAPTION_FORMAT_VTT},
 			})
 		}
@@ -221,13 +237,13 @@ func (s *session) Capabilities() *mediav1.Capabilities {
 	for _, audio := range []mediav1.AudioCodec{mediav1.AudioCodec_AUDIO_CODEC_AAC, mediav1.AudioCodec_AUDIO_CODEC_AC3, mediav1.AudioCodec_AUDIO_CODEC_EAC3, mediav1.AudioCodec_AUDIO_CODEC_MP3} {
 		caps.Formats = append(caps.Formats, &mediav1.FormatSupport{
 			Transport: &mediav1.FormatSupport_Hls{Hls: &mediav1.HLSSupport{Subtitles: mediav1.HLSSupport_SUBTITLES_WEBVTT}},
-			Tracks:    &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: device.VideoSupport(mediav1.VideoCodec_VIDEO_CODEC_H264), Audio: &mediav1.AudioSupport{Codec: audio, MaxChannels: 6}}},
+			Tracks:    &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: device.H264Support(), Audio: &mediav1.AudioSupport{Codec: audio, MaxChannels: 6}}},
 			Captions:  []mediav1.CaptionFormat{mediav1.CaptionFormat_CAPTION_FORMAT_VTT},
 		})
 	}
 	caps.Formats = append(caps.Formats, &mediav1.FormatSupport{
 		Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: mediav1.ProgressiveSupport_CONTAINER_WEBM}},
-		Tracks:    &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: device.VideoSupport(mediav1.VideoCodec_VIDEO_CODEC_VP8), Audio: &mediav1.AudioSupport{Codec: mediav1.AudioCodec_AUDIO_CODEC_VORBIS}}},
+		Tracks:    &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: &mediav1.VideoSupport{Codec: &mediav1.VideoSupport_Vp8{Vp8: &mediav1.VP8Support{}}}, Audio: &mediav1.AudioSupport{Codec: mediav1.AudioCodec_AUDIO_CODEC_VORBIS}}},
 		Captions:  []mediav1.CaptionFormat{mediav1.CaptionFormat_CAPTION_FORMAT_VTT},
 	})
 	return caps

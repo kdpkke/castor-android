@@ -13,10 +13,11 @@ import (
 
 // cast is one cast this server runs, and where it stands for its watchers.
 type cast struct {
-	id      string
-	device  *castorv1.Device
-	source  *castorv1.Source
-	started time.Time
+	id        string
+	device    *castorv1.Device
+	source    *castorv1.Source
+	mediaInfo *castorv1.MediaInfo
+	started   time.Time
 	// stop ends the cast; its cause is why, errStopped when asked.
 	stop context.CancelCauseFunc
 	now  *latest.Value[view]
@@ -28,8 +29,13 @@ type view struct {
 	ended  *castorv1.Ended
 }
 
-func newCast(id string, device *castorv1.Device, source *castorv1.Source, stop context.CancelCauseFunc) *cast {
-	return &cast{id: id, device: device, source: source, started: time.Now(), stop: stop, now: latest.New(view{status: &castorv1.CastStatus{State: &castorv1.CastStatus_Connecting{Connecting: &emptypb.Empty{}}}})}
+func newCast(id string, device *castorv1.Device, req *castorv1.CastRequest, stop context.CancelCauseFunc) *cast {
+	return &cast{
+		id: id, device: device,
+		source: proto.CloneOf(req.GetSource()), mediaInfo: proto.CloneOf(req.GetMediaInfo()),
+		started: time.Now(), stop: stop,
+		now: latest.New(view{status: &castorv1.CastStatus{State: &castorv1.CastStatus_Connecting{Connecting: &emptypb.Empty{}}}}),
+	}
 }
 
 // show publishes a new status snapshot until the owner publishes completion.

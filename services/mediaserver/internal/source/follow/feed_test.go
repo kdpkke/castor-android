@@ -38,6 +38,11 @@ type reply struct {
 	err    error
 }
 
+// testFeed uses an undecorated timeline, as the synthetic origins in relay tests do.
+func testFeed(ctx context.Context, name string, origin timeline.Source, repackage Repackage) *feed {
+	return newFeed(ctx, name, timeline.Reading{Source: origin, Decoder: timeline.IdentityDecoder{}}, repackage)
+}
+
 func (*scripted) Read(context.Context, string, timeline.Range) (io.ReadCloser, error) {
 	return nil, errors.New("scripted origins serve no media")
 }
@@ -50,7 +55,7 @@ func (s *scripted) Window(context.Context) (timeline.Window, error) {
 
 func serving(t *testing.T, s timeline.Source, repackage Repackage) *server {
 	t.Helper()
-	server, err := serve(newFeed(t.Context(), "primary", s, repackage))
+	server, err := serve(testFeed(t.Context(), "primary", s, repackage))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,12 +121,12 @@ func TestAFeedStartsThroughAPassingFailureButNotARefusal(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		busy := &timeline.Failure{Status: http.StatusServiceUnavailable, Err: errors.New("busy")}
 		passing := &scripted{replies: []reply{{err: busy}, {err: errors.New("connection reset")}, {window: listed("a", 0, 3)}}}
-		if err := newFeed(t.Context(), "primary", passing, nil).start(); err != nil {
+		if err := testFeed(t.Context(), "primary", passing, nil).start(); err != nil {
 			t.Errorf("start = %v after a 503 and a reset, want the window the origin answered next", err)
 		}
 
 		gone := &scripted{replies: []reply{{err: &timeline.Failure{Status: http.StatusGone, Err: errors.New("expired")}}, {window: listed("a", 0, 3)}}}
-		if err := newFeed(t.Context(), "primary", gone, nil).start(); err == nil || gone.asked != 1 {
+		if err := testFeed(t.Context(), "primary", gone, nil).start(); err == nil || gone.asked != 1 {
 			t.Errorf("start = %v after %d reads, want the origin's 410 at once", err, gone.asked)
 		}
 	})

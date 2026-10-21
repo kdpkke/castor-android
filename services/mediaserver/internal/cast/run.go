@@ -27,25 +27,39 @@ func (c *cast) play(caps media.Capabilities) error {
 		return err
 	}
 	c.fire(eventRank, func(next *view) { next.status.GetMeasuring().Castable = new(uint32(len(ready))) })
-	device := lend.NewDevice(c.line, caps, c.deliveries.Reached, func() { c.cancel(lend.ErrLenderLeft) })
-	return c.caster.Play(c.ctx, device, c.deliveries, ready, c)
+	device := lend.NewDevice(c.line, caps, func() { c.cancel(lend.ErrLenderLeft) })
+	return c.caster.Play(c.ctx, device, c.publisher, ready, c)
 }
 
-// outcome is how a cast that returned err ended: why its context ended if it did, stopped when nobody said why.
+// outcome preserves failures discovered while joining a canceled cast.
 func outcome(ctx context.Context, err error) error {
-	switch cause := context.Cause(ctx); {
-	case cause == nil:
+	cause := context.Cause(ctx)
+	if cause == nil {
 		return err
-	case errors.Is(cause, context.Canceled):
-		return errStopped
-	default:
+	}
+	if errors.Is(cause, context.Canceled) {
+		cause = errStopped
+	}
+	if err == nil || err == context.Canceled {
 		return cause
 	}
+	if errors.Is(err, cause) {
+		return err
+	}
+	return errors.Join(cause, err)
 }
 
 // Attempting shows the cast on its try-th attempt.
 func (c *cast) Attempting(try int) {
-	c.fire(eventAttempt, func(next *view) { next.status.GetCasting().Attempt = uint32(try) })
+	c.fire(eventAttempt, func(next *view) {
+		if next.status.GetCasting() == nil {
+			measured := next.status.GetMeasuring()
+			next.status.State = &castorv1.CastStatus_Casting{Casting: &castorv1.CastingStatus{
+				Streams: measured.GetStreams(), Castable: measured.GetCastable(),
+			}}
+		}
+		next.status.GetCasting().Attempt = uint32(try)
+	})
 }
 
 // Revising shows the action the cast is revising its attempt with, and why.

@@ -68,12 +68,6 @@ func measuredHeights(doc document, probe *media.ProbeInfo) map[int]int {
 // rendition translates one variant without dropping its companion audio; a probe of this very master wins over RESOLUTION, since it numbers variants as the master does.
 func rendition(doc document, v variant, measured int, languages []string) source.Rendition {
 	height := cmp.Or(measured, v.height)
-	declared := v.declared
-	if declared != nil && declared.VideoHeight != height {
-		stated := declared.Clone()
-		stated.VideoHeight = height
-		declared = &stated
-	}
 	audio := doc.audioFor(v, languages)
 	return source.Rendition{
 		URL:           v.url,
@@ -82,6 +76,6 @@ func rendition(doc document, v variant, measured int, languages []string) source
 		Captions:      doc.captionsFor(v),
 		Bitrate:       media.Bitrate(v.bandwidth),
 		Height:        height,
-		Declared:      declared,
+		Declared:      v.declared,
 	}
 }

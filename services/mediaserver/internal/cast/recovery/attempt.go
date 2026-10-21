@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/stupside/castor/services/mediaserver/internal/cast/compose"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/fetch"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/fetch"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"github.com/stupside/castor/services/mediaserver/internal/source"
 )

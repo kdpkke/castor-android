@@ -35,7 +35,7 @@ type variant struct {
 	hasVideo bool
 
 	// declared is the codec envelope the master stated for this variant (a declaration, not measurement).
-	declared *media.ProbeInfo
+	declared *media.Declaration
 }
 
 // document is a parsed HLS document reduced to what a cast needs.

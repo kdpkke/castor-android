@@ -1,14 +1,15 @@
 package cast
 
 import (
+	"testing"
+
 	"connectrpc.com/connect"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"golang.org/x/sync/semaphore"
-	"testing"
 )
 
 func TestWatchRejectsAtCapacityBeforeFindingCast(t *testing.T) {
-	s := &Service{watchers: semaphore.NewWeighted(256), resolutions: semaphore.NewWeighted(16)}
+	s := &Service{ctx: t.Context(), watchers: semaphore.NewWeighted(256), resolutions: semaphore.NewWeighted(16)}
 	for range 256 {
 		if !s.watchers.TryAcquire(1) {
 			t.Fatal("cannot occupy capacity")
@@ -22,7 +23,7 @@ func TestWatchRejectsAtCapacityBeforeFindingCast(t *testing.T) {
 }
 
 func TestResolveRejectsAtCapacity(t *testing.T) {
-	s := &Service{watchers: semaphore.NewWeighted(256), resolutions: semaphore.NewWeighted(16)}
+	s := &Service{ctx: t.Context(), watchers: semaphore.NewWeighted(256), resolutions: semaphore.NewWeighted(16)}
 	for range 16 {
 		if !s.resolutions.TryAcquire(1) {
 			t.Fatal("cannot occupy capacity")

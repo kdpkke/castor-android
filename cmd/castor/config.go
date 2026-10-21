@@ -6,22 +6,47 @@ import (
 	"github.com/stupside/castor/cmd/castor/internal/browse/tmdb"
 	"github.com/stupside/castor/cmd/castor/internal/cast"
 	"github.com/stupside/castor/cmd/castor/internal/sources"
+	"github.com/stupside/castor/internal/settings"
 )
 
 // Config is the command line's sections of castor's configuration.
 type Config struct {
-	Device  cast.Device   `yaml:"device"`
-	Sources sources.Sites `yaml:"sources" validate:"dive"`
-	TMDB    tmdb.Config   `yaml:"tmdb"`
-	Servers struct {
-		API apiConfig `yaml:"api"`
-	} `yaml:"servers"`
+	Device  cast.Device   `yaml:"device" settings:"strict"`
+	Sources sources.Sites `yaml:"sources" settings:"strict" validate:"dive"`
+	TMDB    tmdb.Config   `yaml:"tmdb" settings:"strict"`
+	Servers apiServers    `yaml:"servers"`
 }
 
-// apiConfig is castor's API elsewhere, and the token it asks for; unset, the commands run one in their own process.
+type apiServers struct {
+	API settings.Endpoint `yaml:"api"`
+}
+
+// Commands decode only the sections they need. A dry run never needs a device,
+// while a direct URL never needs source templates or a catalog key.
 type apiConfig struct {
-	URL   string `yaml:"url" validate:"omitempty,http_url"`
-	Token string `yaml:"token"`
+	Servers apiServers `yaml:"servers"`
+}
+
+type targetConfig struct {
+	Device  cast.Device `yaml:"device" settings:"strict"`
+	Servers apiServers  `yaml:"servers"`
+}
+
+type pageCastConfig struct {
+	Device  cast.Device   `yaml:"device" settings:"strict"`
+	Sources sources.Sites `yaml:"sources" settings:"strict" validate:"dive"`
+	Servers apiServers    `yaml:"servers"`
+}
+
+type pageDryRunConfig struct {
+	Sources sources.Sites `yaml:"sources" settings:"strict" validate:"dive"`
+	Servers apiServers    `yaml:"servers"`
+}
+
+type interactiveDryRunConfig struct {
+	Sources sources.Sites `yaml:"sources" settings:"strict" validate:"dive"`
+	TMDB    tmdb.Config   `yaml:"tmdb" settings:"strict"`
+	Servers apiServers    `yaml:"servers"`
 }
 
 // browsable refuses an interactive cast that has no catalog to browse.

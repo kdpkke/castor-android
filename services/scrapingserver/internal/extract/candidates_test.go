@@ -42,3 +42,38 @@ func TestCandidatesPreserveCaptureEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestDeduplicateKeepsDistinctReplayHeaders(t *testing.T) {
+	const url = "https://cdn.example/master.m3u8"
+	first := &castorv1.StreamCandidate{Stream: &castorv1.Stream{Url: url, Headers: map[string]string{"Cookie": "viewer=first"}}, SourcePage: "https://site.example/first"}
+	second := &castorv1.StreamCandidate{Stream: &castorv1.Stream{Url: url, Headers: map[string]string{"Cookie": "viewer=second"}}, SourcePage: "https://site.example/second"}
+	better := &castorv1.StreamCandidate{Stream: &castorv1.Stream{Url: url, Headers: map[string]string{"Cookie": "viewer=first"}, ContentType: hlsMIME}, Ladder: castorv1.Ladder_LADDER_MULTIVARIANT}
+
+	got := deduplicate([]*castorv1.StreamCandidate{first, second, better})
+	if len(got) != 2 {
+		t.Fatalf("got %d candidates, want both access paths", len(got))
+	}
+	if got[0].GetStream().GetHeaders()["Cookie"] != "viewer=first" || got[1].GetStream().GetHeaders()["Cookie"] != "viewer=second" {
+		t.Fatalf("lost access paths: %v", got)
+	}
+	if got[0].GetLadder() != castorv1.Ladder_LADDER_MULTIVARIANT || got[0].GetStream().GetContentType() != hlsMIME {
+		t.Fatalf("lost later document evidence: %v", got[0])
+	}
+	if first.GetLadder() != castorv1.Ladder_LADDER_UNSPECIFIED || first.GetStream().GetContentType() != "" {
+		t.Fatal("deduplication changed its input")
+	}
+}
+
+func TestDeduplicatePrefersMultivariantEvidence(t *testing.T) {
+	const url = "https://cdn.example/playlist.m3u8"
+	first := &castorv1.StreamCandidate{Stream: &castorv1.Stream{Url: url}, Ladder: castorv1.Ladder_LADDER_SOLE}
+	later := &castorv1.StreamCandidate{Stream: &castorv1.Stream{Url: url}, Ladder: castorv1.Ladder_LADDER_MULTIVARIANT}
+
+	got := deduplicate([]*castorv1.StreamCandidate{first, later})
+	if len(got) != 1 || got[0].GetLadder() != castorv1.Ladder_LADDER_MULTIVARIANT {
+		t.Fatalf("lost multivariant evidence: %v", got)
+	}
+	if first.GetLadder() != castorv1.Ladder_LADDER_SOLE {
+		t.Fatal("deduplication changed its input")
+	}
+}

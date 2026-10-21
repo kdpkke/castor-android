@@ -150,8 +150,8 @@ func TestReturningFromDrilldownFitsTheTerminal(t *testing.T) {
 type shelf struct{}
 
 var (
-	matrix = tmdb.SearchResult{ID: 603, MediaType: tmdb.MediaMovie, Title: "The Matrix", ReleaseDate: "1999-03-31", Overview: "A hacker learns the truth about his reality.", VoteAverage: 8.2}
-	office = tmdb.SearchResult{ID: 2316, MediaType: tmdb.MediaTV, Name: "The Office", FirstAirDate: "2005-03-24", Overview: "A mockumentary about office life.", VoteAverage: 8.6}
+	matrix = tmdb.SearchResult{ID: 603, MediaType: tmdb.MediaMovie, Title: "The Matrix", ReleaseDate: "1999-03-31", Overview: "A hacker learns the truth about his reality.", PosterPath: "/matrix.jpg", VoteAverage: 8.2}
+	office = tmdb.SearchResult{ID: 2316, MediaType: tmdb.MediaTV, Name: "The Office", FirstAirDate: "2005-03-24", Overview: "A mockumentary about office life.", PosterPath: "/office.jpg", VoteAverage: 8.6}
 )
 
 func (shelf) Search(context.Context, string) ([]tmdb.SearchResult, error) {
@@ -216,7 +216,7 @@ func TestEnterOnATrendingMovieCastsIt(t *testing.T) {
 
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	if got, want := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(model).sel, (Selection{Kind: KindMovie, TMDBID: "603", Title: "The Matrix"}); got == nil || *got != want {
+	if got, want := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(model).sel, (Selection{Kind: KindMovie, TMDBID: "603", Title: "The Matrix", Synopsis: "A hacker learns the truth about his reality.", ImageURL: "https://image.tmdb.org/t/p/w500/matrix.jpg", ReleaseDate: "1999-03-31"}); got == nil || *got != want {
 		t.Errorf("selected %+v, want %+v", got, want)
 	}
 }
@@ -234,7 +234,7 @@ func TestAShowIsDrilledIntoUntilAnEpisodeIsChosen(t *testing.T) {
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyDown})
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	want := Selection{Kind: KindEpisode, TMDBID: "2316", Title: "The Office · S01E02 · Diversity Day", Season: 1, Episode: 2}
+	want := Selection{Kind: KindEpisode, TMDBID: "2316", Title: "The Office · S01E02 · Diversity Day", ImageURL: "https://image.tmdb.org/t/p/w500/office.jpg", ReleaseDate: "2005-03-29", Season: 1, Episode: 2}
 	if got := tm.FinalModel(t, teatest.WithFinalTimeout(5*time.Second)).(model).sel; got == nil || *got != want {
 		t.Errorf("selected %+v, want %+v", got, want)
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/output/adapters"
 	"testing"
 	"time"
 
@@ -39,7 +38,7 @@ func TestTheOutcomeCarriesWhatTheRecoveryLoopClassifies(t *testing.T) {
 	})
 }
 
-// The evidence is read off how the pipeline ended, never off flags a step set on the way.
+// The evidence is read off how the attempt ended, never off flags a step set on the way.
 func TestTheEvidenceIsWhatThePipelineReturned(t *testing.T) {
 	refusal := errors.New("SOAP 714")
 	reader := &pull{done: make(chan struct{}), proc: finished(t)}
@@ -79,7 +78,7 @@ func TestACancelledAttemptSaysSo(t *testing.T) {
 		want bool
 	}{{ctx, true}, {t.Context(), false}} {
 		dev := &fakeDevice{caps: chromecastLike(media.MP4), ended: true}
-		out := Cast{Timelines: direct{}, Outputs: adapters.Default(), MaxHeight: 1080, Device: dev}.Run(tc.ctx,
+		out := Cast{Timelines: direct{}, Outputs: testOutputs(), MaxHeight: 1080, Device: dev}.Run(tc.ctx,
 			recovery.Attempt{Program: programFromStream(t, handoffStream())})
 		if out.Evidence.Cancelled != tc.want {
 			t.Errorf("Cancelled = %v under a context cancelled %v", out.Evidence.Cancelled, tc.want)

@@ -15,15 +15,15 @@ import (
 )
 
 // Timeline translates the one representation a DASH input reads into the segments castor republishes.
-func (Format) Timeline(c source.Client, in media.Input, reads media.TrackKind) timeline.Source {
+func (Format) Timeline(c source.Client, in media.Input, reads media.TrackKind) timeline.Reading {
 	if in.Representation == "" {
-		return nil
+		return timeline.Reading{}
 	}
-	return &follower{
+	return timeline.Reading{Source: &follower{
 		Client:  c,
 		Headers: in.Headers,
 		url:     in.URL, kind: reads, id: in.Representation,
-	}
+	}, Decoder: timeline.IdentityDecoder{}}
 }
 
 // follower reads the presentation afresh each window, keeping what it learned once: the track it matches and the clock.

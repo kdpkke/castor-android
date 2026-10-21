@@ -11,8 +11,8 @@ import (
 )
 
 // Timeline follows every media playlist: castor reads its segments ahead of the reader, several at once.
-func (Format) Timeline(c source.Client, in media.Input, _ media.TrackKind) timeline.Source {
-	return follower{Client: c, Headers: in.Headers, url: in.URL}
+func (Format) Timeline(c source.Client, in media.Input, _ media.TrackKind) timeline.Reading {
+	return timeline.Reading{Source: follower{Client: c, Headers: in.Headers, url: in.URL}, Decoder: Decoder{}}
 }
 
 // follower reads the origin's current window of one media playlist, and the media it lists.

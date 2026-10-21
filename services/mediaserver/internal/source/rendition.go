@@ -28,7 +28,7 @@ type Rendition struct {
 	Height int
 
 	// Declared is the codec envelope the source declared for this rung.
-	Declared *media.ProbeInfo
+	Declared *media.Declaration
 }
 
 // Caption is one text rendition a source published: a WebVTT playlist, in a language.

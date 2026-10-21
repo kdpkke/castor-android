@@ -36,7 +36,10 @@ var (
 	libx264 = Encoder{Name: "libx264", Codec: media.CodecH264, Flags: softwareFlags}
 	libx265 = Encoder{Name: "libx265", Codec: media.CodecHEVC, Flags: slices.Concat(softwareFlags, []string{"-x265-params", "log-level=error"})}
 
-	h264VideoToolbox = Encoder{Name: "h264_videotoolbox", Codec: media.CodecH264, Hardware: true, Flags: videotoolboxFlags}
+	// VideoToolbox can emit SEI that its FFmpeg wrapper cannot parse when it
+	// merges embedded A53 captions. Drop that caption side data on re-encode
+	// instead of aborting the video stream.
+	h264VideoToolbox = Encoder{Name: "h264_videotoolbox", Codec: media.CodecH264, Hardware: true, Flags: slices.Concat(videotoolboxFlags, []string{"-a53cc", "0"})}
 	hevcVideoToolbox = Encoder{Name: "hevc_videotoolbox", Codec: media.CodecHEVC, Hardware: true, Flags: videotoolboxFlags}
 	h264NVENC        = Encoder{Name: "h264_nvenc", Codec: media.CodecH264, Hardware: true, Flags: []string{"-preset", "p4", "-pix_fmt", "yuv420p"}}
 	hevcNVENC        = Encoder{Name: "hevc_nvenc", Codec: media.CodecHEVC, Hardware: true, Flags: []string{"-preset", "p4", "-pix_fmt", "yuv420p"}}

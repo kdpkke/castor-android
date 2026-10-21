@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -37,7 +38,7 @@ func (d *leaseDevice) Stop(context.Context) error { d.family.stops.Add(1); retur
 
 func TestLeaseAliasesAndStaleClose(t *testing.T) {
 	f := &leaseFamily{}
-	d := NewDirectory(Registry{Families: []Family{f}, Timeout: time.Second})
+	d := directoryWithFamilies(Registry{Families: []Family{f}, Timeout: time.Second})
 	target := Info{Type: "push", ID: "receiver", Address: "http://192.0.2.1:1234/desc"}
 	first, err := d.Connect(t.Context(), target)
 	if err != nil {
@@ -76,7 +77,7 @@ func TestLeaseAliasesAndStaleClose(t *testing.T) {
 }
 func TestFailedAndCanceledConnectReleaseLease(t *testing.T) {
 	f := &leaseFamily{}
-	d := NewDirectory(Registry{Families: []Family{f}, Timeout: time.Second})
+	d := directoryWithFamilies(Registry{Families: []Family{f}, Timeout: time.Second})
 	target := Info{Type: "push", Address: "192.0.2.1"}
 	f.fail.Store(true)
 	if _, err := d.Connect(t.Context(), target); err == nil {
@@ -99,7 +100,7 @@ func TestFailedAndCanceledConnectReleaseLease(t *testing.T) {
 }
 func TestConcurrentLeaseAdmission(t *testing.T) {
 	f := &leaseFamily{}
-	d := NewDirectory(Registry{Families: []Family{f}, Timeout: time.Second})
+	d := directoryWithFamilies(Registry{Families: []Family{f}, Timeout: time.Second})
 	var wg sync.WaitGroup
 	admitted := make(chan Device, 64)
 	for range 64 {
@@ -139,7 +140,7 @@ func (d *closingDevice) Close() error {
 	return errors.New("close failed")
 }
 func TestLeaseHeldUntilFailedCleanupFinishes(t *testing.T) {
-	d := NewDirectory(Registry{})
+	d := directoryWithFamilies(Registry{})
 	target := Info{Type: "push", Address: "192.0.2.1"}
 	dev := &closingDevice{started: make(chan struct{}), finish: make(chan struct{})}
 	l := newLease(d)
@@ -166,7 +167,7 @@ func TestLeaseHeldUntilFailedCleanupFinishes(t *testing.T) {
 
 func TestHostnameAndIPShareLease(t *testing.T) {
 	f := &leaseFamily{}
-	d := NewDirectory(Registry{Families: []Family{f}, Timeout: time.Second})
+	d := directoryWithFamilies(Registry{Families: []Family{f}, Timeout: time.Second})
 	d.resolve = func(context.Context, string) ([]net.IPAddr, error) {
 		return []net.IPAddr{{IP: net.ParseIP("192.0.2.1")}}, nil
 	}
@@ -181,7 +182,7 @@ func TestHostnameAndIPShareLease(t *testing.T) {
 }
 func TestUnresolvableIdentityCannotBypassLease(t *testing.T) {
 	f := &leaseFamily{}
-	d := NewDirectory(Registry{Families: []Family{f}, Timeout: time.Second})
+	d := directoryWithFamilies(Registry{Families: []Family{f}, Timeout: time.Second})
 	d.resolve = func(context.Context, string) ([]net.IPAddr, error) { return nil, errors.New("no DNS answer") }
 	if _, err := d.Connect(t.Context(), Info{Type: "push", Address: "receiver.local:1234"}); err == nil {
 		t.Fatal("unresolved alias admitted")
@@ -193,7 +194,7 @@ func TestUnresolvableIdentityCannotBypassLease(t *testing.T) {
 
 func TestPinnedKnownIdentitySurvivesAddressChange(t *testing.T) {
 	f := &leaseFamily{}
-	d := NewDirectory(Registry{Families: []Family{f}, Timeout: time.Second})
+	d := directoryWithFamilies(Registry{Families: []Family{f}, Timeout: time.Second})
 	known := Info{Type: "push", ID: "receiver", Address: "192.0.2.1"}
 	d.seen[known.id()] = observation{info: known, at: time.Now()}
 	first, err := d.Connect(t.Context(), Info{Type: "push", Address: known.Address})
@@ -244,7 +245,7 @@ func (d *cancelOnCloseDevice) Pause(ctx context.Context) error {
 func (d *cancelOnCloseDevice) Close() error { close(d.closed); return nil }
 
 func TestLeaseCloseCancelsOwnedCommandsBeforeFinalCleanup(t *testing.T) {
-	dir := NewDirectory(Registry{})
+	dir := directoryWithFamilies(Registry{})
 	dev := &cancelOnCloseDevice{started: make(chan struct{}), closed: make(chan struct{})}
 	l := newLease(dir)
 	l.device = dev
@@ -270,4 +271,51 @@ func TestLeaseCloseCancelsOwnedCommandsBeforeFinalCleanup(t *testing.T) {
 	if err := l.Resume(t.Context()); !errors.Is(err, errLeaseClosed) {
 		t.Fatalf("closed lease accepted command: %v", err)
 	}
+}
+
+type observedDevice struct {
+	idle
+	started  chan struct{}
+	canceled chan struct{}
+	release  chan struct{}
+	closed   chan struct{}
+}
+
+func (d *observedDevice) AwaitEnd(ctx context.Context) error {
+	close(d.started)
+	<-ctx.Done()
+	close(d.canceled)
+	<-d.release
+	return context.Cause(ctx)
+}
+func (d *observedDevice) Close() error { close(d.closed); return nil }
+
+func TestLeaseCloseCancelsAndJoinsObservers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		dev := &observedDevice{started: make(chan struct{}), canceled: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{})}
+		l := newLease(directoryWithFamilies(Registry{}))
+		l.device = dev
+		result := make(chan error, 1)
+		go func() { result <- l.AwaitEnd(t.Context()) }()
+		<-dev.started
+		finished := make(chan error, 1)
+		go func() { finished <- l.Close() }()
+		<-dev.canceled
+		synctest.Wait()
+		select {
+		case <-dev.closed:
+			t.Fatal("device closed while observer was running")
+		default:
+		}
+		close(dev.release)
+		if err := <-finished; err != nil {
+			t.Fatal(err)
+		}
+		if err := <-result; !errors.Is(err, errLeaseClosed) {
+			t.Fatalf("observation lost cancellation cause: %v", err)
+		}
+		if err := l.AwaitEnd(t.Context()); !errors.Is(err, errLeaseClosed) {
+			t.Fatalf("closed lease accepted observer: %v", err)
+		}
+	})
 }

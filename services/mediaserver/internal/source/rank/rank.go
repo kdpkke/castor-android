@@ -2,7 +2,6 @@
 package rank
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -16,7 +15,7 @@ import (
 )
 
 // Probes measures one candidate.
-type Probes func(*source.Stream) media.Prober
+type Probes func(context.Context, *source.Stream) (source.Inspection, error)
 
 type Ranker struct {
 	cfg Config
@@ -61,7 +60,7 @@ func (r *Ranker) Rank(ctx context.Context, streams []*source.Stream) (rankedStre
 	order := ranked(pool, r.maxHeight)
 	best := order[0]
 	slog.InfoContext(ctx, "best stream selected", "url", best.URL.String(),
-		"bitrate", int64(best.Bitrate()), "height", height(best), "last_resort", best.LastResort,
+		"bitrate", int64(best.Bitrate()), "height", height(best, r.maxHeight), "last_resort", best.LastResort,
 		"alternatives", len(order)-1)
 	return order, nil
 }
@@ -78,7 +77,7 @@ func (r *Ranker) Measure(ctx context.Context, stream *source.Stream) (measured *
 	verdict := admit(one)
 	one.LastResort = verdict.lastResort
 	slog.InfoContext(ctx, "direct link measured", "url", one.URL.String(),
-		"bitrate", int64(one.Bitrate()), "height", height(one.Stream),
+		"bitrate", int64(one.Bitrate()), "height", height(one.Stream, r.maxHeight),
 		"reason", string(verdict.reason), "last_resort", one.LastResort)
 	return one.Stream, nil
 }
@@ -122,16 +121,18 @@ func (r *Ranker) measureAll(ctx context.Context, streams []*source.Stream) []mea
 		wg.Go(func() {
 			defer func() { <-slots }()
 			slog.DebugContext(ctx, "probing stream", "url", s.URL, "index", i+1, "total", len(streams))
-			info, reach, err := r.probes(s).Probe(ctx)
+			inspection, err := r.probes(ctx, s)
+			info, reach := inspection.Info, inspection.Reach
 			// Carried, never re-derived: the ladder was read from a body only the browser held.
 			next := *s
-			next.Probe, next.LastResort = nil, false
+			next.Probe, next.Observation, next.LastResort = nil, nil, false
 			if err != nil {
 				slog.WarnContext(ctx, "probe failed", "url", s.URL, "reach", reach, "error", err)
 			} else {
 				next.Probe = &info
+				next.Observation = inspection.Observation
 				// A container the URL did not name is one the probe just established.
-				next.ContentType = cmp.Or(next.ContentType, info.ContentType)
+				next.ContentType = s.MeasuredContentType(info)
 			}
 			out[i] = measured{Stream: &next, reach: reach}
 		})

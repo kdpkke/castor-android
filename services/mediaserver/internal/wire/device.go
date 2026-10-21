@@ -11,12 +11,6 @@ import (
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
 
-var videoCodecs = map[mediav1.VideoCodec]media.Codec{
-	mediav1.VideoCodec_VIDEO_CODEC_H264: media.CodecH264,
-	mediav1.VideoCodec_VIDEO_CODEC_HEVC: media.CodecHEVC,
-	mediav1.VideoCodec_VIDEO_CODEC_VP8:  media.CodecVP8,
-}
-
 var audioCodecs = map[mediav1.AudioCodec]media.Codec{
 	mediav1.AudioCodec_AUDIO_CODEC_AAC:    media.CodecAAC,
 	mediav1.AudioCodec_AUDIO_CODEC_AC3:    media.CodecAC3,
@@ -25,12 +19,16 @@ var audioCodecs = map[mediav1.AudioCodec]media.Codec{
 	mediav1.AudioCodec_AUDIO_CODEC_VORBIS: media.CodecVorbis,
 }
 
-var profiles = map[mediav1.Profile]media.Profile{
-	mediav1.Profile_PROFILE_BASELINE:             media.ProfileBaseline,
-	mediav1.Profile_PROFILE_CONSTRAINED_BASELINE: media.ProfileConstrainedBaseline,
-	mediav1.Profile_PROFILE_MAIN:                 media.ProfileMain,
-	mediav1.Profile_PROFILE_MAIN_10:              media.ProfileMain10,
-	mediav1.Profile_PROFILE_HIGH:                 media.ProfileHigh,
+var h264Profiles = map[mediav1.H264Support_Profile]media.Profile{
+	mediav1.H264Support_PROFILE_BASELINE:             media.ProfileBaseline,
+	mediav1.H264Support_PROFILE_CONSTRAINED_BASELINE: media.ProfileConstrainedBaseline,
+	mediav1.H264Support_PROFILE_MAIN:                 media.ProfileMain,
+	mediav1.H264Support_PROFILE_HIGH:                 media.ProfileHigh,
+}
+
+var hevcProfiles = map[mediav1.HEVCSupport_Profile]media.Profile{
+	mediav1.HEVCSupport_PROFILE_MAIN:    media.ProfileMain,
+	mediav1.HEVCSupport_PROFILE_MAIN_10: media.ProfileMain10,
 }
 
 // Container is contentType on the wire, unspecified for one the contract does not name.
@@ -107,6 +105,14 @@ func FromCapabilities(c *mediav1.Capabilities) media.Capabilities {
 			continue
 		}
 		envelope := media.FormatSupport{Transport: transport}
+		if hls := f.GetHls(); hls != nil {
+			for _, segment := range hls.GetExtraSegmentFormats() {
+				switch segment {
+				case mediav1.HLSSupport_EXTRA_SEGMENT_FORMAT_TIKTIKPX:
+					envelope.ExtraSegments = append(envelope.ExtraSegments, media.HLSExtraSegmentTIKTIKPX)
+				}
+			}
+		}
 		if video != nil {
 			v, ok := fromVideo(video)
 			if !ok {
@@ -136,24 +142,44 @@ func FromCapabilities(c *mediav1.Capabilities) media.Capabilities {
 }
 
 func fromVideo(v *mediav1.VideoSupport) (media.VideoSupport, bool) {
-	codec, ok := videoCodecs[v.GetCodec()]
-	if !ok {
-		return media.VideoSupport{}, false
-	}
-	vs := media.VideoSupport{Codec: codec, MaxLevel: int(v.GetMaxLevel())}
-	for _, p := range v.GetProfiles() {
-		if profile, ok := profiles[p]; ok {
-			vs.Profiles = append(vs.Profiles, profile)
+	switch codec := v.GetCodec().(type) {
+	case *mediav1.VideoSupport_H264:
+		if codec.H264 == nil {
+			return media.VideoSupport{}, false
+		}
+		vs := media.VideoSupport{Codec: media.CodecH264, MaxLevel: int(codec.H264.GetMaxLevel())}
+		for _, p := range codec.H264.GetProfiles() {
+			if profile, ok := h264Profiles[p]; ok {
+				vs.Profiles = append(vs.Profiles, profile)
+			}
+		}
+		if len(codec.H264.GetProfiles()) > 0 && len(vs.Profiles) == 0 {
+			return media.VideoSupport{}, false
+		}
+		return vs, true
+	case *mediav1.VideoSupport_Hevc:
+		if codec.Hevc == nil {
+			return media.VideoSupport{}, false
+		}
+		vs := media.VideoSupport{Codec: media.CodecHEVC, MaxLevel: int(codec.Hevc.GetMaxLevel())}
+		for _, p := range codec.Hevc.GetProfiles() {
+			if profile, ok := hevcProfiles[p]; ok {
+				vs.Profiles = append(vs.Profiles, profile)
+			}
+		}
+		if len(codec.Hevc.GetProfiles()) > 0 && len(vs.Profiles) == 0 {
+			return media.VideoSupport{}, false
+		}
+		for _, depth := range codec.Hevc.GetBitDepths() {
+			vs.BitDepths = append(vs.BitDepths, int(depth))
+		}
+		return vs, true
+	case *mediav1.VideoSupport_Vp8:
+		if codec.Vp8 != nil {
+			return media.VideoSupport{Codec: media.CodecVP8}, true
 		}
 	}
-	// No profile left would read as any profile, wider than the device said.
-	if len(v.GetProfiles()) > 0 && len(vs.Profiles) == 0 {
-		return media.VideoSupport{}, false
-	}
-	for _, b := range v.GetBitDepths() {
-		vs.BitDepths = append(vs.BitDepths, int(b))
-	}
-	return vs, true
+	return media.VideoSupport{}, false
 }
 
 // FromDeviceError is how the wire says a device failed, a *media.Gone for one that went away.

@@ -30,3 +30,16 @@ func TestTheRichestRungUnderTheCapIsPicked(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamOrderDoesNotStandInForVariantIdentity(t *testing.T) {
+	doc := document{multivariant: true, variants: []variant{
+		{program: 0, url: &url.URL{Path: "/a"}, hasVideo: true},
+		{program: 1, url: &url.URL{Path: "/b"}, hasVideo: true},
+	}}
+	probe := &media.ProbeInfo{VideoHeights: []int{1080, 360}}
+	for _, rung := range ladder(doc, probe) {
+		if rung.Height != 0 {
+			t.Fatalf("stream order was mistaken for a variant height: %+v", rung)
+		}
+	}
+}

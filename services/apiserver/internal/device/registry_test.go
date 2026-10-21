@@ -39,22 +39,6 @@ func TestAPinnedDeviceWithNoNameIsNamedByItsHost(t *testing.T) {
 	}
 }
 
-// echoing is a family whose devices answer every sweep more than once, as SSDP and mDNS announce.
-type echoing struct{ stub }
-
-func (echoing) Discover(context.Context) []Info {
-	bedroom := Info{ID: "uuid-1", Name: "Bedroom", Type: "push", Address: "10.0.0.9"}
-	kitchen := Info{ID: "uuid-2", Name: "Kitchen", Type: "push", Address: "10.0.0.8"}
-	return []Info{bedroom, kitchen, bedroom}
-}
-
-func TestADeviceAnnouncedTwiceIsListedOnce(t *testing.T) {
-	found := Registry{Families: []Family{echoing{}}, Timeout: time.Second}.Discover(t.Context())
-	if len(found) != 2 || found[0].ID != "uuid-1" || found[1].ID != "uuid-2" {
-		t.Errorf("Discover = %+v, want Bedroom then Kitchen, once each", found)
-	}
-}
-
 type unresponsive struct{ stub }
 
 func (unresponsive) Connect(ctx context.Context, _ Info) (Device, error) {

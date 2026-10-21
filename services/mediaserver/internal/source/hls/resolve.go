@@ -12,9 +12,9 @@ import (
 )
 
 // Resolve narrows the source to the rendition to read and builds the program around it.
-func (Format) Resolve(ctx context.Context, env source.Env, s source.Subject) (source.Resolution, error) {
+func (f Format) Resolve(ctx context.Context, env source.Env, s source.Subject) (source.Resolution, error) {
 	stream := s.Stream
-	origin, chosen, primaryRelaxed, err := inspect(ctx, env, stream, s.Origin, s.Chosen)
+	origin, chosen, primaryRelaxed, err := inspect(ctx, env, stream, s.Origin, s.Chosen, f.ProbeRendition)
 	if err != nil {
 		return source.Resolution{Origin: origin}, err
 	}
@@ -67,7 +67,7 @@ func (Format) Resolve(ctx context.Context, env source.Env, s source.Subject) (so
 }
 
 // inspect narrows a source to the single rendition to read and returns what the source published; relaxed is also true whenever that stays unknown, which licenses no self-fetch.
-func inspect(ctx context.Context, env source.Env, stream source.Stream, origin source.Origin, settled source.Rendition) (_ source.Origin, _ source.Rendition, relaxed bool, _ error) {
+func inspect(ctx context.Context, env source.Env, stream source.Stream, origin source.Origin, settled source.Rendition, probeRendition func(context.Context, *url.URL, http.Header) (media.ProbeInfo, error)) (_ source.Origin, _ source.Rendition, relaxed bool, _ error) {
 	doc, status, err := readPlaylist(ctx, env.Client, stream.URL, stream.Headers)
 	if err != nil {
 		slog.WarnContext(ctx, "HLS playlist resolution failed, using original", "error", err, "status", status)
@@ -80,6 +80,20 @@ func inspect(ctx context.Context, env source.Env, stream source.Stream, origin s
 	}
 	languages := env.AudioLanguages
 	origin.Renditions = ladder(doc, stream.Probe, languages...)
+	if env.MaxHeight > 0 && probeRendition != nil {
+		for i := range origin.Renditions {
+			rung := &origin.Renditions[i]
+			if rung.Height != 0 || rung.URL == nil {
+				continue
+			}
+			info, err := probeRendition(ctx, rung.URL, env.Client.Replay(rung.URL, stream.Headers))
+			if err != nil || info.VideoHeight <= 0 {
+				slog.WarnContext(ctx, "rendition height unavailable", "url", rung.URL, "error", err)
+				continue
+			}
+			rung.Height = info.VideoHeight
+		}
+	}
 	if len(origin.Renditions) == 0 {
 		return origin, source.Rendition{}, false, fmt.Errorf("HLS playlist offers no video rendition")
 	}

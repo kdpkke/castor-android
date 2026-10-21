@@ -14,20 +14,19 @@ import (
 
 func TestSourceCaptionSelectionDoesNotEnableTranscription(t *testing.T) {
 	selection := &castorv1.SubtitleSelection{Mode: &castorv1.SubtitleSelection_Preferences{Preferences: &castorv1.SubtitlePreferences{Languages: []string{"en"}}}}
-	e := &engine{}
-	if got := e.subtitles(selection, "en"); got != nil {
+	cfg := defaults()
+	if got := transcription(cfg.Servers.Media.Whisper, selection); got != nil {
 		t.Fatal("selecting source captions started transcription")
 	}
 	selection.GetPreferences().TranscribeIfMissing = true
-	if got := e.subtitles(selection, "en"); got == nil {
+	if got := transcription(cfg.Servers.Media.Whisper, selection); got == nil {
 		t.Fatal("explicit transcription did not enable the fallback")
 	}
 	disabled := &castorv1.SubtitleSelection{Mode: &castorv1.SubtitleSelection_Disabled{Disabled: &emptypb.Empty{}}}
-	if got := e.subtitles(disabled, "en"); got != nil {
+	if got := transcription(cfg.Servers.Media.Whisper, disabled); got != nil {
 		t.Fatal("disabled subtitles started transcription")
 	}
 
-	cfg := defaults()
 	create := cfg.backend()
 	for _, tc := range []struct {
 		transcribe bool
@@ -38,7 +37,7 @@ func TestSourceCaptionSelectionDoesNotEnableTranscription(t *testing.T) {
 	} {
 		selected := &castorv1.SubtitleSelection{Mode: &castorv1.SubtitleSelection_Preferences{Preferences: &castorv1.SubtitlePreferences{Languages: []string{"en"}, TranscribeIfMissing: tc.transcribe}}}
 		got := create(&mediav1.PlaybackSettings{Subtitles: selected}).(caster)
-		if enabled := got.engine.subtitles(got.asked.GetSubtitles(), "en") != nil; enabled != tc.want {
+		if enabled := got.transcription != nil; enabled != tc.want {
 			t.Errorf("transcribe=%v: fallback enabled=%v, want %v", tc.transcribe, enabled, tc.want)
 		}
 	}
@@ -80,15 +79,15 @@ func TestBackendKeepsOriginCredentialsWithinEachCast(t *testing.T) {
 	a := create(&mediav1.PlaybackSettings{}).(caster)
 	b := create(&mediav1.PlaybackSettings{}).(caster)
 	u, _ := url.Parse("https://origin.test/login")
-	if _, _, _, err := a.engine.client.Fetch(t.Context(), u, nil); err != nil {
+	if _, _, _, err := a.client.Fetch(t.Context(), u, nil); err != nil {
 		t.Fatal(err)
 	}
 	u.Path = "/media"
-	body, _, _, err := b.engine.client.Fetch(t.Context(), u, http.Header{"Cookie": {"session=cast-B"}})
+	body, _, _, err := b.client.Fetch(t.Context(), u, http.Header{"Cookie": {"session=cast-B"}})
 	if err != nil || body != "session=cast-B" {
 		t.Fatalf("cast B sent %q: %v", body, err)
 	}
-	body, _, _, err = a.engine.client.Fetch(t.Context(), u, nil)
+	body, _, _, err = a.client.Fetch(t.Context(), u, nil)
 	if err != nil || body != "session=cast-A" {
 		t.Fatalf("cast A lost its own session: %q: %v", body, err)
 	}

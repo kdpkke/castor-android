@@ -1,16 +1,74 @@
 package follow
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/iotest"
 
 	"github.com/stupside/castor/services/mediaserver/internal/source/timeline"
 )
+
+func TestRepublishedVODFramesLargeHTTPBodies(t *testing.T) {
+	window := listed("segment-", 0, 299)
+	window.Closed = true
+	origin := &stored{window: window, resources: map[string][]byte{}}
+	segment := bytes.Repeat([]byte("media"), 1024)
+	for _, s := range window.Segments {
+		origin.resources[s.URI] = segment
+	}
+	feed := testFeed(t.Context(), "primary", origin, nil)
+	t.Cleanup(feed.wait)
+
+	playlist := httptest.NewRecorder()
+	feed.playlist(playlist, httptest.NewRequest(http.MethodGet, "/primary.m3u8", nil))
+	if got, want := playlist.Header().Get("Content-Length"), strconv.Itoa(playlist.Body.Len()); got != want || playlist.Body.Len() <= 2048 {
+		t.Errorf("playlist Content-Length = %q for %d bytes, want %s", got, playlist.Body.Len(), want)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/primary/0", nil)
+	request.SetPathValue("sequence", "0")
+	response := httptest.NewRecorder()
+	feed.segment(response, request)
+	if got, want := response.Header().Get("Content-Length"), strconv.Itoa(len(segment)); got != want || !bytes.Equal(response.Body.Bytes(), segment) {
+		t.Errorf("segment Content-Length = %q for %d bytes, want %s and the complete segment", got, response.Body.Len(), want)
+	}
+
+	fragments := fragmented("avc1")
+	fragments.resources["https://origin.example/0.m4s"] = segment
+	repackaged := testFeed(t.Context(), "primary", fragments, labelled)
+	t.Cleanup(repackaged.wait)
+	if err := repackaged.start(); err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/primary/0.ts", nil)
+	request.SetPathValue("sequence", "0.ts")
+	response = httptest.NewRecorder()
+	repackaged.segment(response, request)
+	if got, want := response.Header().Get("Content-Length"), strconv.Itoa(response.Body.Len()); got != want || !bytes.HasPrefix(response.Body.Bytes(), []byte("TS:")) || response.Body.Len() <= 2048 {
+		t.Errorf("repackaged segment Content-Length = %q for %d bytes, want %s and a complete MPEG-TS body", got, response.Body.Len(), want)
+	}
+}
+
+func TestRepublishedInputsRequireTheirPublicationURL(t *testing.T) {
+	server := serving(t, fragmented("avc1"), labelled)
+	for _, path := range []string{"/primary.m3u8", "/unknown/primary.m3u8", server.base.Path + "wrong/primary.m3u8"} {
+		at := *server.base
+		at.Path = path
+		if status, _ := fetch(t, at.String()); status != http.StatusNotFound {
+			t.Errorf("unpublished path %s answered %d, want 404", path, status)
+		}
+	}
+	if status, body := fetch(t, server.URL("primary").String()); status != http.StatusOK || !strings.HasPrefix(body, "#EXTM3U") {
+		t.Fatalf("published playlist: status %d, body %q", status, body)
+	}
+}
 
 func TestASegmentCastorNoLongerHoldsIsGone(t *testing.T) {
 	server := serving(t, fragmented("avc1"), labelled)

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -55,12 +56,70 @@ func read[T any](path string, defaults T) (*T, error) {
 	if err := k.Load(env.Provider(envPrefix, ".", envKey), nil); err != nil {
 		return nil, fmt.Errorf("loading environment overrides: %w", err)
 	}
-	if err := checkKeys(k.Raw(), configKeys, ""); err != nil {
+	if err := checkOwnedSections(k, reflect.TypeFor[T](), ""); err != nil {
 		return nil, err
 	}
 
 	cfg := &defaults
-	if err := k.UnmarshalWithConf("", cfg, koanf.UnmarshalConf{
+	if err := unmarshal(k, "", cfg, false); err != nil {
+		return nil, fmt.Errorf("unmarshaling config: %w", err)
+	}
+	if err := validator.New().Struct(cfg); err != nil {
+		return nil, fmt.Errorf("validating config: %w", err)
+	}
+	return cfg, nil
+}
+
+// checkOwnedSections uses the config type's settings:"strict" tags to reject
+// unknown keys only in sections that this command owns. Other commands may have
+// additional fields in the same configuration file.
+func checkOwnedSections(k *koanf.Koanf, typ reflect.Type, parent string) error {
+	for typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	if typ.Kind() != reflect.Struct {
+		return nil
+	}
+	for field := range typ.Fields() {
+		if !field.IsExported() {
+			continue
+		}
+		name, options, _ := strings.Cut(field.Tag.Get("yaml"), ",")
+		if name == "-" {
+			continue
+		}
+		if name == "" && options == "inline" {
+			if err := checkOwnedSections(k, field.Type, parent); err != nil {
+				return err
+			}
+			continue
+		}
+		if name == "" {
+			name = strings.ToLower(field.Name)
+		}
+		path := name
+		if parent != "" {
+			path = parent + "." + name
+		}
+		if field.Tag.Get("settings") == "strict" {
+			if !k.Exists(path) {
+				continue
+			}
+			destination := reflect.New(field.Type).Interface()
+			if err := unmarshal(k, path, destination, true); err != nil {
+				return fmt.Errorf("checking %s: %w", path, err)
+			}
+			continue
+		}
+		if err := checkOwnedSections(k, field.Type, path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func unmarshal(k *koanf.Koanf, path string, destination any, strict bool) error {
+	return k.UnmarshalWithConf(path, destination, koanf.UnmarshalConf{
 		Tag: "yaml",
 		DecoderConfig: &mapstructure.DecoderConfig{
 			DecodeHook: mapstructure.ComposeDecodeHookFunc(
@@ -70,14 +129,9 @@ func read[T any](path string, defaults T) (*T, error) {
 			),
 			WeaklyTypedInput: true,
 			SquashTagOption:  "inline",
+			ErrorUnused:      strict,
 		},
-	}); err != nil {
-		return nil, fmt.Errorf("unmarshaling config: %w", err)
-	}
-	if err := validator.New().Struct(cfg); err != nil {
-		return nil, fmt.Errorf("validating config: %w", err)
-	}
-	return cfg, nil
+	})
 }
 
 // envKey maps CASTOR_SECTION__FIELD to the koanf key section.field.

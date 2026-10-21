@@ -7,7 +7,7 @@ import (
 )
 
 func TestLiveResourceNamesExpireWithoutReuse(t *testing.T) {
-	f := newFeed(t.Context(), "v", nil, nil)
+	f := testFeed(t.Context(), "v", nil, nil)
 	f.repackaging = new(false)
 	for i := range 10000 {
 		m := timeline.Map{URI: fmt.Sprintf("init-%d", i)}

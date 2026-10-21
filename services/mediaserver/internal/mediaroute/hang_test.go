@@ -2,7 +2,6 @@ package mediaroute
 
 import (
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,14 +9,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stupside/castor/services/mediaserver/internal/cast/container"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/deliver"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/container"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output/progressive"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output/storage"
+
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
 
 // TestAStreamWithNothingToServeIsHeldOpenThroughTheRoute: a device waiting on a read that runs behind finds its request unanswered, not ended.
 func TestAStreamWithNothingToServeIsHeldOpenThroughTheRoute(t *testing.T) {
-	sp, err := deliver.NewSpool(filepath.Join(t.TempDir(), "spool.ts"))
+	sp, err := storage.NewSpool(filepath.Join(t.TempDir(), "spool.ts"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,23 +27,20 @@ func TestAStreamWithNothingToServeIsHeldOpenThroughTheRoute(t *testing.T) {
 	if _, err := sp.Write(first); err != nil {
 		t.Fatal(err)
 	}
-	deliveries := NewDeliveries(&url.URL{Scheme: "http", Host: "unused"}, "cast")
-	srv, err := deliver.OpenSpooledStream(t.Context(), deliver.Opening{
+	publications := NewPublisher(&url.URL{Scheme: "http", Host: "unused"})
+	srv := progressive.ServeSpool(output.Opening{
 		Format:        container.Format{ContentType: media.MPEGTS, Extension: ".ts"},
-		Listeners:     deliveries,
 		WriteDeadline: time.Minute,
-	}, sp, make(chan struct{}))
+	}, sp)
+	pub, err := publications.Publish(t.Context(), srv.Handler())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = srv.Close(); sp.CloseWrite(nil) })
+	t.Cleanup(func() { _ = pub.Close(); sp.CloseWrite(nil); _ = sp.Close() })
 
-	_, port, _ := net.SplitHostPort(srv.URL().Host)
-	mux := http.NewServeMux()
-	mux.Handle(Pattern, Handler(func(cast, p string) bool { return p == port }))
-	front := httptest.NewTestServer(t, mux)
+	front := httptest.NewTestServer(t, publications)
 
-	resp, err := front.Client().Get(front.URL + "/media/cast/" + port + srv.URL().Path)
+	resp, err := front.Client().Get(front.URL + pub.URL(srv.Path()).Path)
 	if err != nil {
 		t.Fatal(err)
 	}

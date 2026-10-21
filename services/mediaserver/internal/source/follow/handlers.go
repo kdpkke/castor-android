@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -44,13 +45,14 @@ func (f *feed) segment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	_, _ = w.Write(body)
 }
 
 // repackaged serves an fMP4 fragment as MPEG-TS, its init section ahead of it.
 func (f *feed) repackaged(ctx context.Context, w http.ResponseWriter, s timeline.Segment, fragment []byte) {
 	carries, err := f.carries(ctx, *s.Map)
-	if err == nil && (!carries || (s.Key != timeline.Key{} && !decryptable(s.Key))) {
+	if err == nil && (!carries || (s.Key != timeline.Key{} && !f.decoder.ConsumesKey(s.Key))) {
 		// The playlist already names it as MPEG-TS, so a segment that cannot become one is a loss to report.
 		err = errors.New("the segment's tracks or encryption cannot be carried as MPEG-TS")
 	}
@@ -64,16 +66,34 @@ func (f *feed) repackaged(ctx context.Context, w http.ResponseWriter, s timeline
 		return
 	}
 	w.Header().Set("Content-Type", media.MPEGTS)
-	out := &committing{w: w}
-	if err := f.repackage(ctx, io.MultiReader(bytes.NewReader(init), bytes.NewReader(fragment)), out); err != nil && ctx.Err() == nil {
-		slog.WarnContext(ctx, "castor could not repackage a segment", "input", f.name, "uri", s.URI, "error", err)
-		if !out.started {
-			failed(w, err)
-			return
-		}
-		// The status is already committed; abort the response so a reader sees truncation and retries.
-		panic(http.ErrAbortHandler)
+	// The output size is known only after repackaging; hold it on disk so the
+	// reader receives a complete, length-delimited response or an error status.
+	file, err := os.CreateTemp("", "castor-hls-segment-*.ts")
+	if err != nil {
+		failed(w, err)
+		return
 	}
+	defer func() {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+	}()
+	if err := f.repackage(ctx, io.MultiReader(bytes.NewReader(init), bytes.NewReader(fragment)), file); err != nil {
+		if ctx.Err() == nil {
+			slog.WarnContext(ctx, "castor could not repackage a segment", "input", f.name, "uri", s.URI, "error", err)
+			failed(w, err)
+		}
+		return
+	}
+	info, err := file.Stat()
+	if err == nil {
+		_, err = file.Seek(0, io.SeekStart)
+	}
+	if err != nil {
+		failed(w, err)
+		return
+	}
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+	_, _ = io.Copy(w, file)
 }
 
 // init serves an init section the playlist names, decrypted when the origin encrypted it whole.
@@ -92,6 +112,7 @@ func (f *feed) init(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", media.MP4)
+	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
 	_, _ = w.Write(b)
 }
 
@@ -111,6 +132,7 @@ func (f *feed) key(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
 	_, _ = w.Write(b)
 }
 
@@ -125,17 +147,6 @@ func servable(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
-}
-
-// committing notes whether a response has begun, so a failure before its first byte can still answer with a status.
-type committing struct {
-	w       http.ResponseWriter
-	started bool
-}
-
-func (c *committing) Write(b []byte) (int, error) {
-	c.started = c.started || len(b) > 0
-	return c.w.Write(b)
 }
 
 // failed answers with the origin's own refusal, and a bad gateway for anything the origin never said.

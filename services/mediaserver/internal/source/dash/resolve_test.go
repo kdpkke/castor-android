@@ -64,8 +64,8 @@ func TestARungThatStatesNoHeightInheritsItsSetsAndCannotSlipPastTheCap(t *testin
 	if got := resolved.Rendition; got.Representation != "hd" {
 		t.Errorf("chosen %+v, want the 1080 H.264 rung: the 2160 one inherits its set's height, and equal rungs prefer H.264", got)
 	}
-	got, measured := resolved.Program.Measurement()
-	want := media.ProbeInfo{VideoCodec: media.CodecH264, VideoProfile: "High", VideoHeight: 1080, VideoBitDepth: 8, VideoLevel: 40}
+	got, measured := resolved.Program.Declaration()
+	want := media.Declaration{VideoCodec: media.CodecH264, VideoProfile: "High", VideoHeight: 1080, VideoBitDepth: 8, VideoLevel: 40}
 	if !measured || !reflect.DeepEqual(got, want) {
 		t.Errorf("measurement = %+v, want the chosen representation's declaration %+v", got, want)
 	}

@@ -83,14 +83,14 @@ func TestVisibleIframeNavigationWaitsForItsDocumentAndPreservesReferrer(t *testi
 			t.Fatal("permission query no longer supplies a usable PermissionStatus")
 		}
 	})
-	var src string
-	if err := chromedp.Run(s.ctx, chromedp.Evaluate(iframeSrcJS, &src)); err != nil {
+	var frames []frameCandidate
+	if err := chromedp.Run(s.ctx, chromedp.Evaluate(iframeSrcJS, &frames)); err != nil {
 		t.Fatal(err)
 	}
-	if src != ts.URL+"/child" {
-		t.Fatalf("visible iframe selection = %q", src)
+	if len(frames) != 1 || frames[0].Src != ts.URL+"/child" {
+		t.Fatalf("visible iframe selection = %v", frames)
 	}
-	if err := openFrame(s.ctx, src, ts.URL+"/parent"); err != nil {
+	if err := openFrame(s.ctx, frames[0].Src, ts.URL+"/parent"); err != nil {
 		t.Fatal(err)
 	}
 	var body string
@@ -126,11 +126,97 @@ func TestOffscreenLazyIframeIsDiscovered(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	var src string
-	if err := chromedp.Run(s.ctx, chromedp.Evaluate(iframeSrcJS, &src)); err != nil {
+	var frames []frameCandidate
+	if err := chromedp.Run(s.ctx, chromedp.Evaluate(iframeSrcJS, &frames)); err != nil {
 		t.Fatal(err)
 	}
-	if src != ts.URL+"/child" {
-		t.Fatalf("offscreen frame=%q", src)
+	if len(frames) != 1 || frames[0].Src != ts.URL+"/child" {
+		t.Fatalf("offscreen frame=%v", frames)
+	}
+}
+
+func TestNavigatesPastLargerFrameAndClicksVideo(t *testing.T) {
+	chrome := os.Getenv("TEST_CASTOR_CHROME")
+	if chrome == "" {
+		t.Skip("set TEST_CASTOR_CHROME to exercise real browser navigation")
+	}
+	ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		switch r.URL.Path {
+		case "/":
+			fmt.Fprint(w, `<iframe src="/ad" style="width:1000px;height:600px"></iframe><iframe src="/player" style="width:640px;height:360px"></iframe>`)
+		case "/ad":
+			fmt.Fprint(w, `<body>advertisement</body>`)
+		case "/player":
+			fmt.Fprint(w, `<video style="width:640px;height:360px" onclick="fetch('/master.m3u8')"></video>`)
+		case "/master.m3u8":
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			fmt.Fprint(w, "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nmovie.m3u8\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	ts.Start()
+	defer ts.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
+	defer cancel()
+	s, err := newSession(ctx, BrowserConfig{ChromePath: chrome, Headless: true, Timeout: 10 * time.Second}, ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := navigateIframe(s.ctx, s.collector.hasMaster); err != nil {
+		t.Fatal(err)
+	}
+	streams, err := s.collector.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(streams) != 1 || streams[0].GetStream().GetUrl() != ts.URL+"/master.m3u8" {
+		t.Fatalf("streams = %v", streams)
+	}
+}
+
+func TestClicksSameOriginFrameWithoutLeavingParent(t *testing.T) {
+	chrome := os.Getenv("TEST_CASTOR_CHROME")
+	if chrome == "" {
+		t.Skip("set TEST_CASTOR_CHROME to exercise real browser navigation")
+	}
+	ts := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		switch r.URL.Path {
+		case "/":
+			fmt.Fprint(w, `<iframe src="/player" style="width:640px;height:360px"></iframe>`)
+		case "/player":
+			fmt.Fprint(w, `<video style="width:500px;height:280px" onclick="fetch('/master.m3u8')"></video>`)
+		case "/master.m3u8":
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			fmt.Fprint(w, "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nmovie.m3u8\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	ts.Start()
+	defer ts.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	s, err := newSession(ctx, BrowserConfig{ChromePath: chrome, Headless: true, Timeout: 10 * time.Second}, ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := clickPlayer(s.ctx); err != nil {
+		t.Fatal(err)
+	}
+	streams, err := s.collector.Wait(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var at string
+	if err := chromedp.Run(s.ctx, chromedp.Location(&at)); err != nil {
+		t.Fatal(err)
+	}
+	if at != ts.URL+"/" || len(streams) != 1 || streams[0].GetStream().GetUrl() != ts.URL+"/master.m3u8" {
+		t.Fatalf("page=%q streams=%v", at, streams)
 	}
 }

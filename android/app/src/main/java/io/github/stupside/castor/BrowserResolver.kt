@@ -73,7 +73,8 @@ class BrowserResolver(context: Context) {
     if (!capturing || !isHttp(url) || url.length > 8192 || candidates.size >= 1600) return
     val type =
       when (URI(url).path.orEmpty().substringAfterLast('.').lowercase()) {
-        "m3u8" -> "application/vnd.apple.mpegurl"
+        // Use Castor's canonical identity so inspection selects its HLS decoder.
+        "m3u8" -> "application/x-mpegURL"
         "mpd" -> "application/dash+xml"
         "mp4",
         "m4v" -> "video/mp4"

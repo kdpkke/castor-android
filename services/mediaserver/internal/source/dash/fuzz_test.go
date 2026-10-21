@@ -21,7 +21,7 @@ func FuzzPresentationWindow(f *testing.F) {
 		defer cancel()
 		in := media.Input{URL: &url.URL{Scheme: "https", Host: "origin.test", Path: "/m.mpd"}, Representation: "v"}
 		client := &sourcetest.Documents{ByPath: map[string]string{"/m.mpd": body}}
-		window, err := (Format{}).Timeline(client, in, media.TrackVideo).Window(ctx)
+		window, err := (Format{}).Timeline(client, in, media.TrackVideo).Source.Window(ctx)
 		if err == nil && len(window.Segments) > maxWindowSegments {
 			t.Fatalf("expanded %d segments beyond budget", len(window.Segments))
 		}

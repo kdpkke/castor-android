@@ -25,6 +25,7 @@ import (
 
 // linger keeps an ended cast findable, so a watcher that arrives late still learns how it ended.
 const linger = 5 * time.Minute
+const resolutionCapacity = 16
 
 var (
 	errStopped  = errors.New("cast stopped")
@@ -58,10 +59,18 @@ type Service struct {
 func New(defaults *mediav1.PlaybackSettings, devices Devices, media *mediaclient.Client, scraping Resolver) *Service {
 	// Casts outlive the request that started them, and end only once the server shuts down.
 	running, shut := context.WithCancelCause(context.Background())
-	return &Service{watchers: semaphore.NewWeighted(256), resolutions: semaphore.NewWeighted(16), ctx: running, shut: shut, media: media, scraping: scraping, defaults: proto.CloneOf(defaults), devices: devices, casts: registry.New[*cast](linger)}
+	return &Service{watchers: semaphore.NewWeighted(256), resolutions: semaphore.NewWeighted(resolutionCapacity), ctx: running, shut: shut, media: media, scraping: scraping, defaults: proto.CloneOf(defaults), devices: devices, casts: registry.New[*cast](linger)}
 }
 
 func (s *Service) Cast(ctx context.Context, req *castorv1.CastRequest) (*castorv1.CastResponse, error) {
+	if s.ctx.Err() != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, errShutdown)
+	}
+	// Target discovery is accepted service work even before a cast is registered.
+	if !s.resolutions.TryAcquire(1) {
+		return nil, connect.NewError(connect.CodeResourceExhausted, errors.New("concurrent resolutions capacity exhausted"))
+	}
+	defer s.resolutions.Release(1)
 	if s.ctx.Err() != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, errShutdown)
 	}
@@ -82,7 +91,7 @@ func (s *Service) Cast(ctx context.Context, req *castorv1.CastRequest) (*castorv
 	asked := s.asked(req.GetPreferences())
 	id := castid.New()
 	run, stop := context.WithCancelCause(castid.With(telemetry.WithTrace(s.ctx, ctx), id))
-	c := newCast(id, target.Public(), proto.CloneOf(req.GetSource()), stop)
+	c := newCast(id, target.Public(), req, stop)
 	done := make(chan struct{})
 	if err := s.casts.Add(c.id, c, done); err != nil {
 		stop(nil)
@@ -121,6 +130,9 @@ func result(ended *castorv1.Ended) string {
 func (s *Service) Drain(ctx context.Context) {
 	s.shut(errShutdown)
 	s.casts.Drain(ctx)
+	if s.resolutions.Acquire(ctx, resolutionCapacity) == nil {
+		s.resolutions.Release(resolutionCapacity)
+	}
 }
 
 // asked is what a cast asks: the server's defaults, overridden field by field by the request's.
@@ -144,10 +156,20 @@ func (s *Service) asked(p *castorv1.Preferences) *mediav1.PlaybackSettings {
 }
 
 func (s *Service) Resolve(ctx context.Context, req *castorv1.ResolveRequest) (*castorv1.ResolveResponse, error) {
+	if s.ctx.Err() != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, errShutdown)
+	}
 	if !s.resolutions.TryAcquire(1) {
 		return nil, connect.NewError(connect.CodeResourceExhausted, errors.New("concurrent resolutions capacity exhausted"))
 	}
 	defer s.resolutions.Release(1)
+	if s.ctx.Err() != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, errShutdown)
+	}
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	stop := context.AfterFunc(s.ctx, func() { cancel(errShutdown) })
+	defer stop()
 	source, err := s.resolve(ctx, req.GetSource())
 	if err != nil {
 		return nil, err

@@ -11,15 +11,15 @@ import (
 	"github.com/stupside/castor/internal/settings"
 )
 
-func TestDesktopToolPathsStillUseTheInstalledNames(t *testing.T) {
+func TestDesktopToolPathsStillUseInstalledNames(t *testing.T) {
 	want := FFmpegConfig{Path: "ffmpeg", ProbePath: "ffprobe"}
 	if got := defaults().Servers.Media.FFmpeg; got != want {
 		t.Fatalf("default tool paths = %#v, want %#v", got, want)
 	}
 }
 
-func TestNativePackageToolPathsReachTheConfiguration(t *testing.T) {
-	want := FFmpegConfig{Path: "/data/app/castor/lib/arm64/libffmpeg.so", ProbePath: "/data/app/castor/lib/arm64/libffprobe.so"}
+func TestConfiguredToolPaths(t *testing.T) {
+	want := FFmpegConfig{Path: "/opt/castor/ffmpeg", ProbePath: "/opt/castor/ffprobe"}
 	t.Setenv("CASTOR_SERVERS__MEDIA__FFMPEG__PATH", want.Path)
 	t.Setenv("CASTOR_SERVERS__MEDIA__FFMPEG__PROBE_PATH", want.ProbePath)
 	cmd := &cli.Command{Flags: []cli.Flag{settings.Flag}}

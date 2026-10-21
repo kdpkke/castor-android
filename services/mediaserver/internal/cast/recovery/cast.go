@@ -2,7 +2,6 @@
 package recovery
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -12,7 +11,8 @@ import (
 	"github.com/stupside/castor/services/mediaserver/internal/source"
 )
 
-// Runner runs one attempt and returns what it did.
+// Runner runs one attempt and returns only after joining its work and releasing
+// its resources. Recovery may start the next attempt as soon as Run returns.
 type Runner interface {
 	Run(ctx context.Context, a Attempt) Outcome
 }
@@ -29,6 +29,9 @@ func Cast(ctx context.Context, in Intent, run Runner, resolver SourceResolver) e
 	}
 	a, ok := nextReadable(ctx, in, resolver, Attempt{Try: 1, candidate: -1, Delivery: in.Delivery})
 	if !ok {
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
+		}
 		return fmt.Errorf("none of the %d links could be resolved", len(in.Candidates))
 	}
 
@@ -39,6 +42,9 @@ func Cast(ctx context.Context, in Intent, run Runner, resolver SourceResolver) e
 	var tried []string
 
 	for {
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
+		}
 		slog.InfoContext(ctx, "attempt", "try", a.Try, "candidate", a.candidate+1, "candidates", len(in.Candidates))
 		in.Turns.Attempting(a.Try)
 
@@ -51,8 +57,13 @@ func Cast(ctx context.Context, in Intent, run Runner, resolver SourceResolver) e
 
 		f := classify(a, out, tried)
 		if f.kind == cancelled {
-			// The cause says why the cast was cancelled; the attempt's error is only the broken pipe that followed.
-			return cmp.Or(context.Cause(ctx), out.Err)
+			// Cancellation explains why work stopped; it must not erase a
+			// separate failure returned after the attempt joined its resources.
+			cause := context.Cause(ctx)
+			if cause == nil || errors.Is(out.Err, cause) {
+				return out.Err
+			}
+			return errors.Join(cause, out.Err)
 		}
 
 		revisionCtx, finish := telemetry.Start(ctx, telemetry.Recovery)

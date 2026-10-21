@@ -2,6 +2,19 @@ package media
 
 import "testing"
 
+func TestAnUnidentifiedTrackCannotAuthorizePlayback(t *testing.T) {
+	caps := Capabilities{Formats: []FormatSupport{{Transport: TransportMP4,
+		Video: VideoSupport{Codec: CodecH264}, Audio: AudioSupport{Codec: CodecAAC}}}}
+	for _, info := range []ProbeInfo{
+		{VideoPresent: true, AudioCodec: CodecAAC},
+		{AudioPresent: true, VideoCodec: CodecH264, VideoBitDepth: 8},
+	} {
+		if caps.CanPlayIn(MP4, info) || caps.CanPlaySourceIn(MP4, info) {
+			t.Fatalf("an unidentified stream was treated as absent: %+v", info)
+		}
+	}
+}
+
 func TestDeviceCanCopyVideo(t *testing.T) {
 	envelope := Capabilities{Formats: []FormatSupport{{Transport: TransportMP4, Video: VideoSupport{Codec: CodecH264, Profiles: []Profile{"Constrained Baseline", "Baseline", "Main", "High"}}}}}
 	base := ProbeInfo{VideoCodec: CodecH264, VideoProfile: "High", VideoHeight: 1080, VideoBitDepth: 8}
@@ -55,5 +68,24 @@ func TestAudioOnlyCapabilities(t *testing.T) {
 	}
 	if caps.CanPlayIn(MPEGTS, ProbeInfo{}) {
 		t.Fatal("unprobed empty media accepted")
+	}
+}
+
+func TestWrappedHLSRequiresOneCompatibleEnvelope(t *testing.T) {
+	device := Capabilities{Formats: []FormatSupport{
+		{Transport: TransportHLS, Video: VideoSupport{Codec: CodecH264}},
+		{Transport: TransportHLS, Video: VideoSupport{Codec: CodecHEVC}, ExtraSegments: []HLSExtraSegmentFormat{HLSExtraSegmentTIKTIKPX}},
+	}}
+	plain := ProbeInfo{VideoCodec: CodecH264, VideoBitDepth: 8}
+	if !device.CanPlaySourceIn(HLS, plain) {
+		t.Fatal("ordinary HLS rejected")
+	}
+	plain.SourceUnwrapped = true
+	if device.CanPlaySourceIn(HLS, plain) {
+		t.Fatal("combined incompatible HLS envelopes")
+	}
+	wrappedHEVC := ProbeInfo{VideoCodec: CodecHEVC, VideoBitDepth: 8, SourceUnwrapped: true}
+	if !device.CanPlaySourceIn(HLS, wrappedHEVC) {
+		t.Fatal("wrapped HLS rejected by a compatible envelope")
 	}
 }

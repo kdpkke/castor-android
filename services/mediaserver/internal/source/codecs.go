@@ -81,11 +81,11 @@ func DeclaresSound(codecs string) bool {
 }
 
 // DeclaredEnvelope is the codecs a list states for a picture of height, nil unless it names exactly one picture and at most one sound castor knows.
-func DeclaredEnvelope(codecs string, height int) *media.ProbeInfo {
+func DeclaredEnvelope(codecs string, height int) *media.Declaration {
 	if strings.TrimSpace(codecs) == "" {
 		return nil
 	}
-	envelope := media.ProbeInfo{VideoHeight: height}
+	envelope := media.Declaration{VideoHeight: height}
 	video, audio := 0, 0
 	for entry := range strings.SplitSeq(codecs, ",") {
 		entry = strings.ToLower(strings.TrimSpace(entry))

@@ -21,28 +21,26 @@ const (
 
 var errIdle = errors.New("the origin sent nothing for too long")
 
-// read fetches a segment whole, decrypted when the origin encrypted it.
+// read fetches a segment whole, then decrypts and unwraps its media payload.
 func (f *feed) read(ctx context.Context, s timeline.Segment) ([]byte, error) {
 	b, err := f.pull(ctx, s.URI, s.Range, segmentLimit)
 	if err != nil {
-		return nil, err
+		return b, err
 	}
-	if decryptable(s.Key) {
-		b, err = f.decrypt(ctx, b, s.Key)
-		if err != nil {
-			return nil, err
-		}
+	body, wrapped, err := f.decoder.Segment(ctx, s, b, f.keyBytes)
+	if wrapped {
+		f.unwrapped.Store(true)
 	}
-	return unwrapPixels(b)
+	return body, err
 }
 
 func (f *feed) initBytes(ctx context.Context, m timeline.Map) ([]byte, error) {
 	return f.initsHeld.get(ctx, f.life, m, func(ctx context.Context) ([]byte, error) {
 		b, err := f.pull(ctx, m.URI, m.Range, source.DocumentLimit)
-		if err != nil || !decryptable(m.Key) {
+		if err != nil {
 			return b, err
 		}
-		return f.decrypt(ctx, b, m.Key)
+		return f.decoder.Map(ctx, m, b, f.keyBytes)
 	})
 }
 
@@ -51,15 +49,6 @@ func (f *feed) keyBytes(ctx context.Context, uri string) ([]byte, error) {
 	return f.keysHeld.get(ctx, f.life, uri, func(ctx context.Context) ([]byte, error) {
 		return f.pull(ctx, uri, timeline.Range{}, source.DocumentLimit)
 	})
-}
-
-// decrypt fetches the raw AES key through the segment's origin session.
-func (f *feed) decrypt(ctx context.Context, sealed []byte, key timeline.Key) ([]byte, error) {
-	secret, err := f.keyBytes(ctx, key.URI)
-	if err != nil {
-		return nil, fmt.Errorf("reading the key: %w", err)
-	}
-	return decryptAES128(sealed, secret, key.IV)
 }
 
 // pull reads a resource whole, giving up once the origin goes quiet for patience, and refusing more than limit bytes.

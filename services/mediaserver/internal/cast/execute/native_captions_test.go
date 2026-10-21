@@ -2,7 +2,6 @@ package execute
 
 import (
 	"context"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/output/adapters"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,8 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stupside/castor/services/mediaserver/internal/cast/deliver/hls"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/transcode"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output/hls"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"github.com/stupside/castor/services/mediaserver/internal/subtitle"
 )
@@ -27,10 +27,10 @@ func TestGeneratedNativeCaptionsCopyVideoAndServeAnHLSRendition(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, buf := bufferedCast(t, ffmpegPath, ffprobePath)
-	s.cast.FFmpegPath = ffmpegPath
-	s.cast.Listeners = loopback{}
-	s.cast.Device = &fakeDevice{caps: chromecastLike(media.HLS, media.MP4)}
-	s.cast.Device.(*fakeDevice).caps.Formats[0].Transport = media.TransportHLSWebVTT
+	s.FFmpegPath = ffmpegPath
+	s.Publisher = loopback{}
+	s.capabilities = chromecastLike(media.HLS, media.MP4)
+	s.capabilities.Formats[0].Transport = media.TransportHLSWebVTT
 	offset := time.Duration(0)
 	buf.captionVideoOffset = &offset
 	if _, err := buf.reader.spool.Write(body); err != nil {
@@ -50,7 +50,7 @@ func TestGeneratedNativeCaptionsCopyVideoAndServeAnHLSRendition(t *testing.T) {
 	if opts.Format.ContentType != media.HLS || opts.Video.Name() != "copy" {
 		t.Fatalf("native captions selected %s / %s", opts.Format.ContentType, opts.Video.Name())
 	}
-	cmd, err := transcode.EncodeArgs(opts.EncodeOptions)
+	cmd, err := encoding.EncodeArgs(opts.EncodeOptions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,15 +64,15 @@ func TestGeneratedNativeCaptionsCopyVideoAndServeAnHLSRendition(t *testing.T) {
 	if err := awaitArtifact(t.Context(), d); err != nil {
 		t.Fatalf("%v: %v", err, d.output.Evidence())
 	}
-	master := getCaptionArtifact(t, t.Context(), d.sink.URL())
-	if !strings.Contains(master, "TYPE=SUBTITLES") || !strings.HasSuffix(d.sink.URL().Path, "/master.m3u8") {
+	master := getCaptionArtifact(t, t.Context(), d.URL())
+	if !strings.Contains(master, "TYPE=SUBTITLES") || !strings.HasSuffix(d.URL().Path, "/master.m3u8") {
 		t.Fatalf("not handed a subtitle-enabled master: %s", master)
 	}
-	captions := getCaptionArtifact(t, t.Context(), d.sink.URL().ResolveReference(&url.URL{Path: "captions.m3u8"}))
+	captions := getCaptionArtifact(t, t.Context(), d.URL().ResolveReference(&url.URL{Path: "captions.m3u8"}))
 	var text strings.Builder
 	for line := range strings.SplitSeq(captions, "\n") {
 		if strings.HasSuffix(line, ".vtt") {
-			text.WriteString(getCaptionArtifact(t, t.Context(), d.sink.URL().ResolveReference(&url.URL{Path: line})))
+			text.WriteString(getCaptionArtifact(t, t.Context(), d.URL().ResolveReference(&url.URL{Path: line})))
 		}
 	}
 	if !strings.Contains(text.String(), "Generated caption.") || !strings.Contains(text.String(), "X-TIMESTAMP-MAP") {
@@ -83,14 +83,15 @@ func TestGeneratedNativeCaptionsCopyVideoAndServeAnHLSRendition(t *testing.T) {
 func TestStaticVTTSupportDoesNotSelectProgressiveSubtitleDelivery(t *testing.T) {
 	caps := chromecastLike(media.HLS, media.MP4)
 	caps.Formats[0].Captions = []media.CaptionFormat{media.CaptionVTT}
-	s := &pipeline{cast: Cast{Machinery: Machinery{Outputs: adapters.Default()}, Device: &fakeDevice{caps: caps}}}
+	s := testPreparation(t.Context(), Cast{Outputs: testOutputs(), Device: &fakeDevice{caps: caps}}, recovery.Attempt{})
+	t.Cleanup(func() { _ = s.releases.release() })
 	offset := time.Duration(0)
 	f := feed{buffered: &buffered{transcript: &fakeTranscript{}, captionVideoOffset: &offset}}
 	if _, ok := s.nativeOutput(f); ok {
 		t.Fatal("static VTT support incorrectly enabled streaming captions")
 	}
 	caps.Formats = []media.FormatSupport{{Transport: media.TransportMP4, Captions: []media.CaptionFormat{media.CaptionVTT}}}
-	s.cast.Device = &fakeDevice{caps: caps}
+	s.capabilities = caps
 	if _, ok := s.nativeOutput(f); ok {
 		t.Fatal("native captions selected for MP4 with static VTT captions")
 	}
@@ -117,7 +118,8 @@ func getCaptionArtifact(t *testing.T, ctx context.Context, u *url.URL) string {
 func TestNativeCaptionsRequireVideoInsideFirstFragment(t *testing.T) {
 	caps := chromecastLike(media.HLS, media.MP4)
 	caps.Formats[0].Transport = media.TransportHLSWebVTT
-	s := &pipeline{cast: Cast{Machinery: Machinery{Outputs: adapters.Default()}, Device: &fakeDevice{caps: caps}}}
+	s := testPreparation(t.Context(), Cast{Outputs: testOutputs(), Device: &fakeDevice{caps: caps}}, recovery.Attempt{})
+	t.Cleanup(func() { _ = s.releases.release() })
 	for _, tt := range []struct {
 		name   string
 		offset *time.Duration
@@ -147,9 +149,9 @@ func TestSixSecondVideoDelaySelectsBurnBeforeEncoding(t *testing.T) {
 		t.Fatalf("ffmpeg: %v %s", err, out)
 	}
 	s, buf := bufferedCast(t, ffmpegPath, ffprobePath)
-	s.cast.Device = &fakeDevice{caps: chromecastLike(media.HLS, media.MP4)}
-	s.cast.Device.(*fakeDevice).caps.Formats[0].Transport = media.TransportHLSWebVTT
-	info, _, err := s.cast.Probes.File(path).Probe(t.Context())
+	s.capabilities = chromecastLike(media.HLS, media.MP4)
+	s.capabilities.Formats[0].Transport = media.TransportHLSWebVTT
+	info, _, err := s.Probes.File(path).Probe(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +179,7 @@ func TestSixSecondVideoDelaySelectsBurnBeforeEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	args, err := transcode.EncodeArgs(opts.EncodeOptions)
+	args, err := encoding.EncodeArgs(opts.EncodeOptions)
 	if err != nil {
 		t.Fatal(err)
 	}

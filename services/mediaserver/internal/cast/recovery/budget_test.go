@@ -2,8 +2,9 @@ package recovery
 
 import (
 	"errors"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
 	"testing"
+
+	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
 )
 
 func TestResourceExhaustionHasNoRecoveryStrategy(t *testing.T) {

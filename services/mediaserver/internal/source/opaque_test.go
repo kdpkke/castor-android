@@ -19,6 +19,12 @@ func TestDirectFileAudioPreferencesSelectTheTrackAndPreventHandoff(t *testing.T)
 			},
 		},
 	}
+	program, err := ProgramFor(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := media.Observe(program, *stream.Probe)
+	stream.Observation = &observed
 	for _, tc := range []struct {
 		preferences []string
 		index       int

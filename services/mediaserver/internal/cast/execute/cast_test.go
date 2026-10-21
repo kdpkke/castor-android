@@ -3,7 +3,6 @@ package execute
 import (
 	"context"
 	"errors"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/output/adapters"
 	"io"
 	"net"
 	"net/http"
@@ -15,8 +14,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stupside/castor/services/mediaserver/internal/cast/fetch"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/fetch"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
+	hlsoutput "github.com/stupside/castor/services/mediaserver/internal/cast/output/hls"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output/progressive"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
@@ -24,6 +26,7 @@ import (
 	"github.com/stupside/castor/services/mediaserver/internal/source"
 	"github.com/stupside/castor/services/mediaserver/internal/source/dash"
 	"github.com/stupside/castor/services/mediaserver/internal/source/hls"
+	"github.com/stupside/castor/services/mediaserver/internal/testhttp"
 )
 
 // fakeDevice plays what it is handed; if drain is set, it fetches the served stream and keeps it in served.
@@ -51,8 +54,12 @@ func finished(t *testing.T) *ffmpeg.Process {
 // loopback serves deliveries where these tests' devices reach them.
 type loopback struct{}
 
-func (loopback) Listen(context.Context) (net.Listener, error) {
-	return net.Listen("tcp", "127.0.0.1:0")
+func (loopback) Publish(ctx context.Context, h http.Handler) (output.Publication, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
+	return testhttp.Publish(ctx, ln, h), nil
 }
 
 var _ Device = (*fakeDevice)(nil)
@@ -213,7 +220,7 @@ var formats = source.Formats{hls.Format{}, dash.Format{}}
 // realCast is a cast on dev over the real ffmpeg tools, served where these tests' devices reach it.
 func realCast(dev Device, ffmpegPath, ffprobePath string) Cast {
 	return Cast{
-		Outputs:    adapters.Default(),
+		Outputs:    testOutputs(),
 		FFmpegPath: ffmpegPath,
 		Binary:     ffmpeg.Inspect(ffmpegPath),
 		Encoders:   ffmpeg.Encoders(ffmpegPath),
@@ -221,7 +228,7 @@ func realCast(dev Device, ffmpegPath, ffprobePath string) Cast {
 		Timelines:  direct{},
 		InputArgs:  formats.InputArgs,
 		Device:     dev,
-		Listeners:  loopback{},
+		Publisher:  loopback{},
 		MaxHeight:  1080,
 	}
 }
@@ -310,8 +317,13 @@ func programFromStream(t *testing.T, stream *source.Stream) media.Program {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if stream.Observation == nil && stream.Probe != nil {
+		program.SetMeasurement(*stream.Probe)
+	}
 	return program
 }
 
 func (*fakeDevice) Pause(context.Context) error  { return nil }
 func (*fakeDevice) Resume(context.Context) error { return nil }
+
+func testOutputs() output.Factory { return output.Factory{progressive.Adapter{}, hlsoutput.Adapter{}} }

@@ -5,7 +5,7 @@
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb";
-import type { SubtitleSelection, WatchRequestSchema, WatchResponseSchema } from "../../v1/cast_pb";
+import type { AudioSelection, SubtitleSelection, WatchRequestSchema, WatchResponseSchema } from "../../v1/cast_pb";
 import { file_castor_v1_cast } from "../../v1/cast_pb";
 import type { Delivery, Stream, StreamCandidate } from "../../v1/stream_pb";
 import { file_castor_v1_stream } from "../../v1/stream_pb";
@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file castor/media/v1/cast.proto.
  */
 export const file_castor_media_v1_cast: GenFile = /*@__PURE__*/
-  fileDesc("ChpjYXN0b3IvbWVkaWEvdjEvY2FzdC5wcm90bxIPY2FzdG9yLm1lZGlhLnYxIqQBCgxTdGFydFJlcXVlc3QSJgoHY2FzdF9pZBgBIAEoCUIVukgSchAyDl5bQS1aMi03XXsyNn0kEi8KBnNvdXJjZRgCIAEoCzIXLmNhc3Rvci5tZWRpYS52MS5Tb3VyY2VCBrpIA8gBARI7CghzZXR0aW5ncxgDIAEoCzIhLmNhc3Rvci5tZWRpYS52MS5QbGF5YmFja1NldHRpbmdzQga6SAPIAQEiywEKEFBsYXliYWNrU2V0dGluZ3MSMQoIZGVsaXZlcnkYASABKA4yEy5jYXN0b3IudjEuRGVsaXZlcnlCCrpIB4IBBBABIAASGwoKbWF4X2hlaWdodBgCIAEoDUIHukgEKgIoAhI3CglzdWJ0aXRsZXMYAyABKAsyHC5jYXN0b3IudjEuU3VidGl0bGVTZWxlY3Rpb25CBrpIA8gBARIuCg5hdWRpb19sYW5ndWFnZRgEIAEoCUIWukgTchEyD14oW2Etel17MiwzfSk/JCIPCg1TdGFydFJlc3BvbnNlIicKC1N0b3BSZXF1ZXN0EhgKB2Nhc3RfaWQYASABKAlCB7pIBHICEAEiDgoMU3RvcFJlc3BvbnNlIrcBCgZTb3VyY2USIwoGc3RyZWFtGAEgASgLMhEuY2FzdG9yLnYxLlN0cmVhbUgAEjIKB3N0cmVhbXMYAiABKAsyHy5jYXN0b3IubWVkaWEudjEuU291cmNlLlN0cmVhbXNIABpDCgdTdHJlYW1zEjgKB3N0cmVhbXMYASADKAsyGi5jYXN0b3IudjEuU3RyZWFtQ2FuZGlkYXRlQgu6SAiSAQUIARDADEIPCgZzb3VyY2USBbpIAggBMtgBCgtDYXN0U2VydmljZRJGCgVTdGFydBIdLmNhc3Rvci5tZWRpYS52MS5TdGFydFJlcXVlc3QaHi5jYXN0b3IubWVkaWEudjEuU3RhcnRSZXNwb25zZRJDCgRTdG9wEhwuY2FzdG9yLm1lZGlhLnYxLlN0b3BSZXF1ZXN0Gh0uY2FzdG9yLm1lZGlhLnYxLlN0b3BSZXNwb25zZRI8CgVXYXRjaBIXLmNhc3Rvci52MS5XYXRjaFJlcXVlc3QaGC5jYXN0b3IudjEuV2F0Y2hSZXNwb25zZTABYgZwcm90bzM", [file_buf_validate_validate, file_castor_v1_cast, file_castor_v1_stream]);
+  fileDesc("ChpjYXN0b3IvbWVkaWEvdjEvY2FzdC5wcm90bxIPY2FzdG9yLm1lZGlhLnYxIqQBCgxTdGFydFJlcXVlc3QSJgoHY2FzdF9pZBgBIAEoCUIVukgSchAyDl5bQS1aMi03XXsyNn0kEi8KBnNvdXJjZRgCIAEoCzIXLmNhc3Rvci5tZWRpYS52MS5Tb3VyY2VCBrpIA8gBARI7CghzZXR0aW5ncxgDIAEoCzIhLmNhc3Rvci5tZWRpYS52MS5QbGF5YmFja1NldHRpbmdzQga6SAPIAQEixQEKEFBsYXliYWNrU2V0dGluZ3MSMQoIZGVsaXZlcnkYASABKA4yEy5jYXN0b3IudjEuRGVsaXZlcnlCCrpIB4IBBBABIAASGwoKbWF4X2hlaWdodBgCIAEoDUIHukgEKgIoAhI3CglzdWJ0aXRsZXMYAyABKAsyHC5jYXN0b3IudjEuU3VidGl0bGVTZWxlY3Rpb25CBrpIA8gBARIoCgVhdWRpbxgEIAEoCzIZLmNhc3Rvci52MS5BdWRpb1NlbGVjdGlvbiIPCg1TdGFydFJlc3BvbnNlIicKC1N0b3BSZXF1ZXN0EhgKB2Nhc3RfaWQYASABKAlCB7pIBHICEAEiDgoMU3RvcFJlc3BvbnNlIrcBCgZTb3VyY2USIwoGc3RyZWFtGAEgASgLMhEuY2FzdG9yLnYxLlN0cmVhbUgAEjIKB3N0cmVhbXMYAiABKAsyHy5jYXN0b3IubWVkaWEudjEuU291cmNlLlN0cmVhbXNIABpDCgdTdHJlYW1zEjgKB3N0cmVhbXMYASADKAsyGi5jYXN0b3IudjEuU3RyZWFtQ2FuZGlkYXRlQgu6SAiSAQUIARDADEIPCgZzb3VyY2USBbpIAggBMtgBCgtDYXN0U2VydmljZRJGCgVTdGFydBIdLmNhc3Rvci5tZWRpYS52MS5TdGFydFJlcXVlc3QaHi5jYXN0b3IubWVkaWEudjEuU3RhcnRSZXNwb25zZRJDCgRTdG9wEhwuY2FzdG9yLm1lZGlhLnYxLlN0b3BSZXF1ZXN0Gh0uY2FzdG9yLm1lZGlhLnYxLlN0b3BSZXNwb25zZRI8CgVXYXRjaBIXLmNhc3Rvci52MS5XYXRjaFJlcXVlc3QaGC5jYXN0b3IudjEuV2F0Y2hSZXNwb25zZTABYgZwcm90bzM", [file_buf_validate_validate, file_castor_v1_cast, file_castor_v1_stream]);
 
 /**
  * @generated from message castor.media.v1.StartRequest
@@ -70,11 +70,9 @@ export type PlaybackSettings = Message<"castor.media.v1.PlaybackSettings"> & {
   subtitles?: SubtitleSelection | undefined;
 
   /**
-   * audio_language is the language to play where a source offers several, empty for the source's default.
-   *
-   * @generated from field: string audio_language = 4;
+   * @generated from field: castor.v1.AudioSelection audio = 4;
    */
-  audioLanguage: string;
+  audio?: AudioSelection | undefined;
 };
 
 /**

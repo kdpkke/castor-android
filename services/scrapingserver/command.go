@@ -10,13 +10,13 @@ import (
 )
 
 type ServerConfig struct {
-	Listen string `yaml:"listen" validate:"required,hostname_port|startswith=:"`
-	Token  string `yaml:"token"`
+	settings.Endpoint `yaml:",inline"`
+	Listen            string `yaml:"listen" validate:"required,hostname_port|startswith=:"`
 }
 
 type ServiceConfig struct {
 	Servers struct {
-		Scraping ScrapingConfig `yaml:"scraping" validate:"required"`
+		Scraping ScrapingConfig `yaml:"scraping" settings:"strict" validate:"required"`
 	} `yaml:"servers" validate:"required"`
 }
 

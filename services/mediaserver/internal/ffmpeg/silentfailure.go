@@ -30,6 +30,11 @@ var silentFailures = []silentFailure{
 		lost:   true,
 	},
 	{
+		// The HLS demuxer can stop on a segment I/O error and still exit 0.
+		marker: "Error during demuxing: Input/output error",
+		lost:   true,
+	},
+	{
 		// Exits non-zero; free to catch early.
 		marker: "Malformed AAC bitstream detected",
 	},

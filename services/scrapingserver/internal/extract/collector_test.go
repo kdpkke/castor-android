@@ -248,6 +248,23 @@ func TestLateBrowserHeadersReachTheCaptureWithoutChangingEarlierSnapshots(t *tes
 	}
 }
 
+func TestRepeatedURLKeepsEachRequestsReplayHeadersAndDocument(t *testing.T) {
+	c := testCollector(t)
+	const raw = "https://cdn.example/master.m3u8"
+	for _, request := range []struct{ id, cookie string }{{"first", "viewer=first"}, {"second", "viewer=second"}} {
+		c.listen(&network.EventRequestWillBeSent{RequestID: network.RequestID(request.id), Request: &network.Request{URL: raw}})
+		c.listen(&network.EventRequestWillBeSentExtraInfo{RequestID: network.RequestID(request.id), Headers: network.Headers{"Cookie": request.cookie}})
+	}
+	c.noteDocument("second", masterDocument)
+	entries := c.entries()
+	if len(entries) != 2 || entries[0].GetStream().GetHeaders()["Cookie"] != "viewer=first" || entries[1].GetStream().GetHeaders()["Cookie"] != "viewer=second" {
+		t.Fatalf("same-URL requests lost separate replay headers: %v", entries)
+	}
+	if entries[0].GetLadder() != castorv1.Ladder_LADDER_UNSPECIFIED || entries[1].GetLadder() != castorv1.Ladder_LADDER_MULTIVARIANT {
+		t.Fatalf("document evidence went to another request: %v", entries)
+	}
+}
+
 func TestRedirectHeadersBelongToTheirOwnHop(t *testing.T) {
 	for _, late := range []bool{false, true} {
 		t.Run(fmt.Sprintf("late-extra=%v", late), func(t *testing.T) {

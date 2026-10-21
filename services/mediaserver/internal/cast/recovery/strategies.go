@@ -51,6 +51,9 @@ var switchCandidate = strategy{
 // nextReadable resolves the links after a's in rank order, moving past any that cannot be resolved.
 func nextReadable(ctx context.Context, in Intent, resolver SourceResolver, a Attempt) (Attempt, bool) {
 	for next := a.candidate + 1; next < len(in.Candidates); next++ {
+		if ctx.Err() != nil {
+			return a, false
+		}
 		link := in.Candidates[next]
 		resolved, err := resolver.Resolve(ctx, link, source.Rendition{})
 		if err != nil {

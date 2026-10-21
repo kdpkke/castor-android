@@ -41,7 +41,7 @@ jobs:
         run: |
           eval "$(make env)"
           go test -short ./cmd/... ./internal/... ./services/... ./e2e/...
-          go test -race ./services/mediaserver/internal/source/follow ./services/mediaserver/internal/cast/deliver
+          go test -race ./services/mediaserver/internal/source/follow ./services/mediaserver/internal/cast/output/... ./services/mediaserver/internal/cast/execute
           go vet ./cmd/... ./internal/... ./services/... ./e2e/...
 
   native:

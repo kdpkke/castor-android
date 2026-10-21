@@ -1,10 +1,11 @@
 package cast
 
 import (
+	"testing"
+
 	"connectrpc.com/connect"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"golang.org/x/sync/semaphore"
-	"testing"
 )
 
 func TestWatchRejectsAtCapacityBeforeFindingCast(t *testing.T) {

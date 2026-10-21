@@ -50,12 +50,12 @@ const (
 )
 
 // Play hands over one video resource, announcing the caption to show beside it when there is one.
-func (s *session) Play(ctx context.Context, streamURL *url.URL, container mediav1.Container, captions []*mediav1.DeviceCommand_Caption) error {
-	entry, ok := s.sinks[container]
+func (s *session) Play(ctx context.Context, playback device.Playback) error {
+	entry, ok := s.sinks[playback.Container]
 	if !ok {
-		return fmt.Errorf("the device does not advertise container %v", container)
+		return fmt.Errorf("the device does not advertise container %v", playback.Container)
 	}
-	metadata, err := buildDIDLMetadata(streamURL, entry, shownCaption(captions))
+	metadata, err := buildDIDLMetadata(playback.URL, entry, shownCaption(playback.Captions), playback.Info)
 	if err != nil {
 		return fmt.Errorf("building DIDL-Lite metadata: %w", err)
 	}
@@ -65,7 +65,7 @@ func (s *session) Play(ctx context.Context, streamURL *url.URL, container mediav
 		InstanceID         string
 		CurrentURI         string
 		CurrentURIMetaData string
-	}{"0", streamURL.String(), metadata}
+	}{"0", playback.URL.String(), metadata}
 	if err := retryTransportLocked(ctx, func() error {
 		return s.action(ctx, "SetAVTransportURI", setURI)
 	}); err != nil {
@@ -81,7 +81,7 @@ func (s *session) Play(ctx context.Context, streamURL *url.URL, container mediav
 	}); err != nil {
 		// A renderer may start playing without acknowledging Play before its deadline.
 		// Do not tear down that stream, or resend Play, if its state confirms the handover.
-		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && s.playingStream(ctx, streamURL) {
+		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && s.playingStream(ctx, playback.URL) {
 			slog.InfoContext(ctx, "device confirmed playback after Play timed out", "device", s.name())
 			return nil
 		}

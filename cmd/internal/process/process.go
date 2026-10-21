@@ -77,7 +77,7 @@ func run(ctx context.Context, root *cli.Command, args []string, observed func(*c
 		command.Action = func(ctx context.Context, cmd *cli.Command) error {
 			if observed == nil || observed(cmd) {
 				cfg, err := settings.Load(cmd, struct {
-					Telemetry telemetry.Config `yaml:"telemetry"`
+					Telemetry telemetry.Config `yaml:"telemetry" settings:"strict"`
 				}{})
 				if err != nil {
 					return err

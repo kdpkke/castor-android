@@ -64,3 +64,19 @@ func TestCancellingSSDPSearchInterruptsTheRead(t *testing.T) {
 		t.Fatal("cancelled SSDP search kept waiting for the device")
 	}
 }
+
+func TestSSDPSearchWithoutCallerDeadlineStillEnds(t *testing.T) {
+	peer, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close()
+	started := time.Now()
+	_, err = searchDescription(context.Background(), peer.LocalAddr().String())
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("unanswered SSDP search = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > searchTimeout+time.Second {
+		t.Fatalf("unanswered SSDP search waited %s beyond its %s budget", elapsed, searchTimeout)
+	}
+}

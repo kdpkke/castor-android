@@ -149,6 +149,7 @@ class BrowserSessionTest {
           ResolveRequest.newBuilder().addUrls(origin.url("/page").toString()).build()
         )
       }
+      assertEquals("application/x-mpegURL", response.streamsList.single().stream.contentType)
       val playlist = response.streamsList.single().stream.url
       ticket.set(2)
       val simultaneous =

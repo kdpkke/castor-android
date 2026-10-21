@@ -20,7 +20,7 @@ func TestTheCastIsReportedUnderThePartyThatFailed(t *testing.T) {
 		err, readErr error
 		want         error
 	}{
-		{"a read the delivery merely noticed is the read's own", noticed, readErr, readErr},
+		{"a reported read failure keeps its error chain", noticed, readErr, noticed},
 		{"a verdict keeps its own account", verdict, readErr, verdict},
 		{"a leg with no reader has nobody else to blame", ownFault, nil, ownFault},
 		{"a cast that ran its course reports nothing", nil, readErr, nil},
@@ -35,5 +35,14 @@ func TestTheCastIsReportedUnderThePartyThatFailed(t *testing.T) {
 	joined := attribute(ownFault, readErr)
 	if !errors.Is(joined, readErr) || !errors.Is(joined, ownFault) || !strings.HasPrefix(joined.Error(), readErr.Error()) {
 		t.Errorf("attribute = %q, want both accounts led by the read", joined)
+	}
+}
+
+func TestAttributionPreservesCleanupFailureAlongsideReadFailure(t *testing.T) {
+	readErr, cleanupErr := errors.New("read failed"), errors.New("storage close failed")
+	original := errors.Join(fmt.Errorf("encoder input: %w", readErr), cleanupErr)
+	got := attribute(original, readErr)
+	if !errors.Is(got, readErr) || !errors.Is(got, cleanupErr) || got != original {
+		t.Fatalf("attribution lost or duplicated failures: %v", got)
 	}
 }

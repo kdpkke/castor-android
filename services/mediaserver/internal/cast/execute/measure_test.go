@@ -68,8 +68,8 @@ func TestARenditionThatStartsLaterPlaysLater(t *testing.T) {
 }
 
 // declared is p as a source that stated its tracks before any probe.
-func declared(p media.Program, info media.ProbeInfo) media.Program {
-	p.SetMeasurement(info)
+func declared(p media.Program, info media.Declaration) media.Program {
+	p.SetDeclaration(info)
 	return p
 }
 
@@ -89,7 +89,7 @@ func TestOnlyAReadSureToCarrySoundIsTranscribed(t *testing.T) {
 		{"unprobed, and the program may be silent", facts{}, program(true), false},
 		{"unprobed, and the program requires sound", facts{}, program(false), true},
 		{"half a probe that heard sound", facts{probe: media.ProbeInfo{AudioCodec: media.CodecAAC}}, program(true), true},
-		{"unprobed, and the source declared sound", facts{}, declared(program(true), media.ProbeInfo{AudioCodec: media.CodecAAC}), true},
+		{"unprobed, and the source declared sound", facts{}, declared(program(true), media.Declaration{AudioCodec: media.CodecAAC}), true},
 	} {
 		if got := tt.facts.sounds(tt.program); got != tt.want {
 			t.Errorf("%s: sounds = %v, want %v", tt.name, got, tt.want)

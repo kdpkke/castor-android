@@ -11,8 +11,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
+	"github.com/stupside/castor/services/mediaserver/internal/testhttp"
 )
 
 type captionPlayback struct {
@@ -31,9 +33,9 @@ func (d *captionPlayback) AwaitEnd(ctx context.Context) error { return d.wait(ct
 func TestHandoffKeepsCaptionsAvailableUntilPlaybackEnds(t *testing.T) {
 	caps := chromecastLike(media.MP4)
 	caps.Formats[0].Captions = []media.CaptionFormat{media.CaptionVTT}
-	s := captionedPipeline(t, caps, []string{"en"})
+	s := captionedAttempt(t, caps, []string{"en"})
 	listener := &pipeListener{connections: make(chan net.Conn), done: make(chan struct{})}
-	s.cast.Listeners = listener
+	s.Publisher = listener
 	transport := &http.Transport{DialContext: listener.dial, DisableKeepAlives: true}
 	t.Cleanup(transport.CloseIdleConnections)
 	client := &http.Client{Transport: transport}
@@ -62,9 +64,9 @@ func TestHandoffKeepsCaptionsAvailableUntilPlaybackEnds(t *testing.T) {
 		}
 		return nil
 	}
-	s.cast.Device = d
 	s.attempt.Program = programFromStream(t, handoffStream())
-	result := s.cast.Run(t.Context(), s.attempt)
+	c := Cast{Machinery: s.Machinery, Device: d, Publisher: s.Publisher, Captions: s.Captions}
+	result := c.Run(t.Context(), s.attempt)
 	if result.Err != nil || !waited {
 		t.Fatalf("playback ended: %v, awaited=%v", result.Err, waited)
 	}
@@ -82,9 +84,11 @@ type pipeListener struct {
 	once        sync.Once
 }
 
-func (l *pipeListener) Listen(context.Context) (net.Listener, error) { return l, nil }
-func (l *pipeListener) Addr() net.Addr                               { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1} }
-func (l *pipeListener) Close() error                                 { l.once.Do(func() { close(l.done) }); return nil }
+func (l *pipeListener) Publish(ctx context.Context, h http.Handler) (output.Publication, error) {
+	return testhttp.Publish(ctx, l, h), nil
+}
+func (l *pipeListener) Addr() net.Addr { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1} }
+func (l *pipeListener) Close() error   { l.once.Do(func() { close(l.done) }); return nil }
 func (l *pipeListener) Accept() (net.Conn, error) {
 	select {
 	case c := <-l.connections:
@@ -114,8 +118,8 @@ func TestHandoffPropagatesPlaybackFailureAndCancellation(t *testing.T) {
 	for _, ending := range []error{failed, context.Canceled} {
 		d := &captionPlayback{caps: chromecastLike(media.MP4)}
 		d.wait = func(context.Context) error { return ending }
-		s := open(t.Context(), Cast{Device: d}, recovery.Attempt{Program: programFromStream(t, handoffStream())})
-		_, err := s.handoff()
+		s := newCoordinator(t.Context(), Cast{Device: d}, recovery.Attempt{Program: programFromStream(t, handoffStream())})
+		_, err := s.run()
 		_ = s.releases.release()
 		if !errors.Is(err, ending) {
 			t.Fatalf("got %v, want %v", err, ending)

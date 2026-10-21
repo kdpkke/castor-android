@@ -3,7 +3,6 @@ package browse
 import (
 	"context"
 	"log/slog"
-	"slices"
 	"sync"
 )
 
@@ -17,7 +16,7 @@ func held(run func() error) error {
 		h.lines.mu.Lock()
 		defer h.lines.mu.Unlock()
 		for _, k := range h.lines.kept {
-			_ = prev.Handler().Handle(context.WithoutCancel(k.ctx), k.record)
+			_ = k.handler.Handle(context.WithoutCancel(k.ctx), k.record)
 		}
 		h.lines.kept = nil
 		h.lines.released = true
@@ -28,14 +27,14 @@ func held(run func() error) error {
 // holding keeps what next would have written, in order, instead of writing it.
 type holding struct {
 	next  slog.Handler
-	attrs []slog.Attr
 	lines *lines
 }
 
 // heldLine is a record with the context it was logged under, so the cast it belongs to is not lost when it is written.
 type heldLine struct {
-	ctx    context.Context
-	record slog.Record
+	ctx     context.Context
+	record  slog.Record
+	handler slog.Handler
 }
 
 type lines struct {
@@ -50,20 +49,20 @@ func (h *holding) Enabled(ctx context.Context, level slog.Level) bool {
 
 func (h *holding) Handle(ctx context.Context, r slog.Record) error {
 	r = r.Clone()
-	r.AddAttrs(h.attrs...)
 	h.lines.mu.Lock()
 	if h.lines.released {
 		h.lines.mu.Unlock()
 		return h.next.Handle(ctx, r)
 	}
-	h.lines.kept = append(h.lines.kept, heldLine{ctx: ctx, record: r})
+	h.lines.kept = append(h.lines.kept, heldLine{ctx: ctx, record: r, handler: h.next})
 	h.lines.mu.Unlock()
 	return nil
 }
 
 func (h *holding) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &holding{next: h.next, attrs: slices.Concat(h.attrs, attrs), lines: h.lines}
+	return &holding{next: h.next.WithAttrs(attrs), lines: h.lines}
 }
 
-// WithGroup is unused by castor's screens; lines keep their keys flat.
-func (h *holding) WithGroup(string) slog.Handler { return h }
+func (h *holding) WithGroup(name string) slog.Handler {
+	return &holding{next: h.next.WithGroup(name), lines: h.lines}
+}

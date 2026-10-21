@@ -169,7 +169,19 @@ func (c *collector) add(raw string, reqID network.RequestID, contentType string)
 		}
 	}
 
-	if i := c.index(raw); i >= 0 {
+	// A console link has no request yet; attach the first matching browser
+	// request to it. Distinct requests for the same URL keep their own replay
+	// headers until deduplication can compare those headers.
+	i := -1
+	if reqID == "" {
+		i = c.index(raw)
+	} else {
+		i = slices.IndexFunc(c.captures, func(cp capture) bool { return cp.raw == raw && cp.reqID == reqID })
+		if i < 0 {
+			i = slices.IndexFunc(c.captures, func(cp capture) bool { return cp.raw == raw && cp.reqID == "" })
+		}
+	}
+	if i >= 0 {
 		if reqID != "" {
 			c.captures[i].reqID = reqID
 			c.captures[i].hop = hop
@@ -320,11 +332,18 @@ func (c *collector) claimBodyRead(reqID network.RequestID, size float64) bool {
 func (c *collector) captureFor(reqID network.RequestID) int {
 	if req := c.requests[reqID]; req != nil && req.responseURL != "" {
 		u := req.responseURL
-		if i := c.index(u); i >= 0 {
+		if i := slices.IndexFunc(c.captures, func(cp capture) bool { return cp.raw == u && cp.reqID == reqID }); i >= 0 {
 			return i
 		}
 	}
-	return slices.IndexFunc(c.captures, func(cp capture) bool { return cp.reqID == reqID })
+	// A redirect's final hop owns the response body even if the response URL
+	// event has not arrived yet.
+	for i, cp := range slices.Backward(c.captures) {
+		if cp.reqID == reqID {
+			return i
+		}
+	}
+	return -1
 }
 
 func (c *collector) noteDocument(reqID network.RequestID, body string) {

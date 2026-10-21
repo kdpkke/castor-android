@@ -8,9 +8,11 @@ import type { Mood } from "@/components/castor-logo";
 import { Tv } from "@/components/tv";
 import { DeviceType, type Device } from "@/gen/castor/v1/device_pb";
 import { RefreshDevices } from "@/features/devices/refresh-devices";
+import { PinnedTargetPicker, type PinnedTarget } from "./pinned-target-picker";
+import { PlaybackOptions } from "./playback-options";
 import { submitAction } from "./actions";
 
-const kinds = [["pages", "A video page"], ["stream", "A direct file"]] as const;
+const kinds = [["pages", "A video page"], ["stream", "A direct media URL"]] as const;
 const deviceTypes: Record<DeviceType, string> = {
   [DeviceType.UNSPECIFIED]: "Screen",
   [DeviceType.DLNA]: "DLNA",
@@ -21,24 +23,30 @@ const deviceTypes: Record<DeviceType, string> = {
 export function CastForm({ devices, devicesError, casts }: { devices: Device[]; devicesError?: string; casts: React.ReactNode }) {
   const [state, action, pending] = useActionState(submitAction, {});
   const [deviceId, setDeviceId] = useState<string | null | undefined>(devices.length === 1 ? devices[0].id : undefined);
+  const [pinned, setPinned] = useState<PinnedTarget | null>(null);
+  const [showPinned, setShowPinned] = useState(false);
   const [kind, setKind] = useState<(typeof kinds)[number][0]>("pages");
   const [draft, setDraft] = useState("");
   const [sent, setSent] = useState<string>();
   const end = useRef<HTMLDivElement>(null);
   const device = devices.find((d) => d.id === deviceId);
-  if (deviceId === undefined && devices.length === 1) setDeviceId(devices[0].id);
-  if (deviceId && !device) {
+  const deviceName = (d: Device) => devices.some((other) => other.id !== d.id && other.name === d.name && other.type === d.type)
+    ? `${d.name} (${d.address})` : d.name;
+  if (deviceId === undefined && devices.length === 1 && !pinned && !showPinned) setDeviceId(devices[0].id);
+  if (deviceId && !device && !pinned) {
     setDeviceId(null);
     setSent(undefined);
   }
+  const selectedName = pinned ? `${deviceTypes[pinned.type]} at ${pinned.address}` : device && deviceName(device);
+  const targetKey = pinned ? `pinned:${pinned.type}:${pinned.address}` : device ? `device:${device.id}` : "";
   const link = draft.trim();
   let validUrl = false;
   try {
     const url = new URL(link);
     validUrl = /^https?:\/\//i.test(link) && (url.protocol === "https:" || url.protocol === "http:") && !!url.hostname && !/\s/.test(link);
   } catch { /* Keep the editor available until the URL is complete. */ }
-  const stage = !device ? 1 : !sent ? 2 : 3;
-  const error = state.deviceId === deviceId && state.kind === kind && state.url === sent ? state.error : undefined;
+  const stage = !selectedName ? 1 : !sent ? 2 : 3;
+  const error = state.targetKey === targetKey && state.kind === kind && state.url === sent ? state.error : undefined;
 
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -54,15 +62,17 @@ export function CastForm({ devices, devicesError, casts }: { devices: Device[]; 
 
   return <Scene screen={pending ? "loading" : "idle"} title={<>Send anything.<br /><span className="text-peach">Watch anywhere.</span></>} mood={mood}>
     <div className="flex max-w-md flex-col gap-3">
-      <Bubble>{devicesError ? `I couldn’t check the screens: ${devicesError}. Try refreshing.` : !devices.length ? "I can’t see any screens. Turn a TV on, then refresh." : devices.length === 1 && device ? `Hi! I found ${device.name}. What are we watching?` : "Hi! Which screen shall we send something to?"}</Bubble>
+      <Bubble>{devicesError ? `I couldn’t check the screens: ${devicesError}. Try refreshing or enter an address.` : !devices.length ? "I can’t see any screens. Turn a TV on, refresh, or enter its address." : devices.length === 1 && device && !pinned ? `Hi! I found ${device.name}. What are we watching?` : "Hi! Which screen shall we send something to?"}</Bubble>
       <RefreshDevices disabled={pending} />
       {devices.length > 0 && stage === 1 && <div className="flex animate-rise flex-wrap justify-end gap-2">
-        {devices.map((d) => <Button variant="choice" type="button" key={d.id} onClick={() => setDeviceId(d.id)}><Tv className="size-4" />{d.name}<span className="text-[10px] uppercase opacity-70">{deviceTypes[d.type] ?? "Screen"}</span></Button>)}
+        {devices.map((d) => <Button variant="choice" type="button" key={d.id} onClick={() => { setDeviceId(d.id); setPinned(null); setShowPinned(false); }}><Tv className="size-4" />{deviceName(d)}<span className="text-[10px] uppercase opacity-70">{deviceTypes[d.type] ?? "Screen"}</span></Button>)}
       </div>}
+      {stage === 1 && showPinned && <PinnedTargetPicker onSelect={(target) => { setPinned(target); setShowPinned(false); }} onCancel={() => setShowPinned(false)} />}
+      {!showPinned && !pinned && <button type="button" disabled={pending} onClick={() => { setDeviceId(null); setPinned(null); setSent(undefined); setShowPinned(true); }} className="self-end text-xs font-bold text-peach underline disabled:opacity-40">Enter a screen address</button>}
 
-      {device && <>
-        {devices.length > 1 && <Bubble me>{device.name} <button type="button" disabled={pending} onClick={() => { setDeviceId(null); setSent(undefined); }} className="ml-2 text-xs font-bold underline opacity-80 disabled:opacity-40">change</button></Bubble>}
-        {devices.length > 1 && <Bubble>Nice choice! What are we watching?</Bubble>}
+      {selectedName && <>
+        {(devices.length > 1 || pinned) && <Bubble me>{selectedName} <button type="button" disabled={pending} onClick={() => { setDeviceId(null); setPinned(null); setSent(undefined); setShowPinned(false); }} className="ml-2 text-xs font-bold underline opacity-80 disabled:opacity-40">change</button></Bubble>}
+        {(devices.length > 1 || pinned) && <Bubble>Nice choice! What are we watching?</Bubble>}
       </>}
 
       {stage === 2 && <form onSubmit={(e) => { e.preventDefault(); send(); }} className="animate-rise space-y-3">
@@ -84,11 +94,14 @@ export function CastForm({ devices, devicesError, casts }: { devices: Device[]; 
       </>}
 
       {stage === 3 && <form action={action} className="animate-rise" aria-busy={pending}>
-        <input type="hidden" name="deviceId" value={device?.id} /><input type="hidden" name="kind" value={kind} /><input type="hidden" name="url" value={sent} />
+        <input type="hidden" name="targetKind" value={pinned ? "pinned" : "discovered"} /><input type="hidden" name="targetKey" value={targetKey} />
+        <input type="hidden" name="deviceId" value={device?.id ?? ""} /><input type="hidden" name="deviceType" value={pinned?.type ?? ""} /><input type="hidden" name="address" value={pinned?.address ?? ""} />
+        <input type="hidden" name="kind" value={kind} /><input type="hidden" name="url" value={sent} />
+        <div className="mb-3"><PlaybackOptions /></div>
         <Button variant="wide" disabled={pending}>{pending ? "Starting…" : error ? "Try again" : "Start casting"}</Button>
       </form>}
 
-      {pending && <Bubble>Gnawing a path to {device?.name}<span className="ml-1 inline-flex gap-0.5" aria-hidden>{[0, 1, 2].map((i) => <span key={i} className="animate-swim" style={{ animationDelay: `${i * 150}ms` }}>.</span>)}</span></Bubble>}
+      {pending && <Bubble>Gnawing a path to {selectedName}<span className="ml-1 inline-flex gap-0.5" aria-hidden>{[0, 1, 2].map((i) => <span key={i} className="animate-swim" style={{ animationDelay: `${i * 150}ms` }}>.</span>)}</span></Bubble>}
       {error && !pending && stage === 3 && <div role="alert"><Bubble>Oops, I dropped it: {error}</Bubble></div>}
       <div ref={end} />
     </div>

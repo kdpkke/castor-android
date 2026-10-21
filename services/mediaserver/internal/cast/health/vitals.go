@@ -3,7 +3,7 @@ package health
 import (
 	"time"
 
-	"github.com/stupside/castor/services/mediaserver/internal/cast/fetch"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/fetch"
 )
 
 // Vitals is one reading of a watched cast: its measurements and terminal states.

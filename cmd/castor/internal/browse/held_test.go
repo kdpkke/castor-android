@@ -1,12 +1,15 @@
 package browse
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stupside/castor/internal/castid"
+	"github.com/stupside/castor/internal/logging"
 )
 
 type written struct {
@@ -77,5 +80,23 @@ func TestAHeldLineIsWrittenUnderTheCastItWasLoggedFor(t *testing.T) {
 
 	if want := []string{"playing cast_id=CASTID"}; !slices.Equal(got, want) {
 		t.Errorf("wrote %v after the screen, want the line still tagged: %v", got, want)
+	}
+}
+
+func TestHeldGroupedCredentialsKeepTheirRedaction(t *testing.T) {
+	var out bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(logging.Redact(slog.NewJSONHandler(&out, nil))))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	_ = held(func() error {
+		slog.Default().WithGroup("credentials").With("account", "secret-value").Info("connecting")
+		if out.Len() != 0 {
+			t.Fatal("log reached the destination while the screen was open")
+		}
+		return nil
+	})
+	if strings.Contains(out.String(), "secret-value") || !strings.Contains(out.String(), "[redacted]") {
+		t.Fatalf("grouped credential was not redacted after the screen: %s", out.String())
 	}
 }

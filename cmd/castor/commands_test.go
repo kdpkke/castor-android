@@ -85,3 +85,47 @@ func TestMissingCastArgumentsFailBeforeStartingServers(t *testing.T) {
 		})
 	}
 }
+
+func TestCastCommandsOnlyRequireConfigurationTheyUse(t *testing.T) {
+	const sources = "sources:\n  - proxies: [https://example.com]\n    templates:\n      movie: /movie/{itemID}\n      episode: /episode/{itemID}\n"
+	for _, tc := range []struct {
+		name, document string
+		args           []string
+	}{
+		{
+			name:     "direct stream ignores unused sources and catalog",
+			document: "device:\n  name: Living Room\n  type: dlna\nsources:\n  - templates:\n      movvie: /typo\ntmdb:\n  api_kye: typo\n",
+			args:     []string{"cast", "url", "https://cdn.example/video.mp4"},
+		},
+		{
+			name: "player dry run needs no device or sources",
+			args: []string{"cast", "--dry-run", "player", "https://site.example/watch"},
+		},
+		{
+			name:     "movie dry run needs sources but no device",
+			document: sources,
+			args:     []string{"cast", "--dry-run", "movie", "123"},
+		},
+		{
+			name:     "interactive dry run needs catalog and sources but no device",
+			document: sources + "tmdb:\n  api_key: test-key\n",
+			args:     []string{"cast", "--dry-run"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tc.document), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			reachedAPI := errors.New("reached API")
+			local := Local(func(context.Context, *cli.Command) (transport.Endpoint, func(), error) {
+				return transport.Endpoint{}, nil, reachedAPI
+			})
+			root := &cli.Command{Name: "castor", Flags: process.Flags, Commands: Commands(local)}
+			args := append([]string{"castor", "--config", path}, tc.args...)
+			if err := root.Run(t.Context(), args); !errors.Is(err, reachedAPI) {
+				t.Fatalf("command returned %v before contacting the API", err)
+			}
+		})
+	}
+}

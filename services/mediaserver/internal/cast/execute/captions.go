@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/stupside/castor/services/mediaserver/internal/captions"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/deliver"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"github.com/stupside/castor/services/mediaserver/internal/source"
@@ -20,13 +19,13 @@ type Captions struct {
 
 // shownCaptions fetches the caption the cast wants from what the source published and serves it for the device.
 // A caption is a courtesy: whatever stops it is logged and the cast plays without.
-func (s *pipeline) shownCaptions() []media.Caption {
-	want := s.cast.Captions
+func (s *preparation) shownCaptions() []media.Caption {
+	want := s.Captions
 	published := s.attempt.Rendition.Captions
 	if want == nil || len(published) == 0 {
 		return nil
 	}
-	format, ok := captionFormat(s.cast.Device.Capabilities())
+	format, ok := captionFormat(s.capabilities)
 	if !ok {
 		slog.InfoContext(s.ctx, "the source publishes captions, but the device shows none")
 		return nil
@@ -51,12 +50,12 @@ func (s *pipeline) shownCaptions() []media.Caption {
 		if format == media.CaptionSRT {
 			name, contentType, body = "captions.srt", "text/srt", captions.SRT(vtt)
 		}
-		u, closeStatic, err := deliver.Static(s.ctx, s.cast.Listeners, name, contentType, body)
+		u, closeStatic, err := output.Static(s.ctx, s.Publisher, name, contentType, body)
 		if err != nil {
 			slog.WarnContext(s.ctx, "casting without the source's captions", "error", err)
 			return nil
 		}
-		s.releases.push(closeStatic)
+		s.releases.publication(closeStatic)
 		slog.InfoContext(s.ctx, "showing the source's captions", "language", pick.Language, "format", string(format))
 		return []media.Caption{{URL: u, Format: format, Language: pick.Language, Name: pick.Name, Default: true}}
 	}
@@ -75,8 +74,8 @@ func captionFormat(c media.Capabilities) (media.CaptionFormat, bool) {
 
 // playbackCapabilities keeps sidecar support attached to the codec/transport
 // envelope that advertised it. Both handoff and encoding consume this selection.
-func (s *pipeline) playbackCapabilities() media.Capabilities {
-	caps := s.cast.Device.Capabilities()
+func (s *preparation) playbackCapabilities() media.Capabilities {
+	caps := s.capabilities
 	if len(s.shown) == 0 {
 		return caps
 	}
@@ -88,11 +87,11 @@ func (s *pipeline) playbackCapabilities() media.Capabilities {
 
 // nativeOutput asks the installed delivery adapters to carry generated cues.
 // Source clock availability is a media fact; protocol eligibility belongs to adapters.
-func (s *pipeline) nativeOutput(f feed) (output.Selection, bool) {
+func (s *preparation) nativeOutput(f feed) (output.Selection, bool) {
 	if f.buffered == nil || f.buffered.transcript == nil || f.buffered.captionVideoOffset == nil {
 		return output.Selection{}, false
 	}
-	selected, err := s.cast.Outputs.Select(s.playbackCapabilities(), &output.Captions{
+	selected, err := s.Outputs.Select(s.playbackCapabilities(), &output.Captions{
 		Cues: f.buffered.transcript.Cues(), VideoOffset: *f.buffered.captionVideoOffset,
 	})
 	return selected, err == nil

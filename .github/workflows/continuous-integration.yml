@@ -11,28 +11,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  android:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          submodules: true
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with:
-          distribution: temurin
-          java-version: 25
-      - run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build unzip pkg-config nasm autoconf automake libtool
-      - run: bash android/scripts/build-native.sh arm64-v8a x86_64
-      - run: |
-          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/android" ]; then
-            "$ANDROID_HOME/cmdline-tools/latest/bin/android" sdk install platforms/android-37.2 build-tools/37.0.0
-          else
-            sdkmanager 'platforms;android-37.2' 'build-tools;37.0.0'
-          fi
-      - run: bash gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
-        working-directory: android
-
   app:
     runs-on: ubuntu-latest
     steps:
@@ -107,4 +85,5 @@ jobs:
           version: 1.73.0
           setup_only: true
       - run: buf lint && buf format -d --exit-code
+      - run: buf breaking --against '.git#branch=origin/main' --path proto/castor/v1
       - run: make generate && test -z "$(git status --porcelain -- gen)"

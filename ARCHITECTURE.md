@@ -1,96 +1,89 @@
 # Architecture
 
-Castor ships three independent services in one binary. Clients speak the public API; API calls scraping and media over separate Connect/protobuf contracts.
+Castor ships three independent services in one binary. They can run embedded or remotely through the same Connect/protobuf contracts.
 
-## Clients and three services
+## Services and ownership
 
 ```mermaid
 flowchart LR
-    ui[TUI and other clients] -- castor.v1 --> api[API server]
-    api -- "Page URLs (castor.scraping.v1)" --> scraping[Scraping server]
-    scraping -- "Loads webpage and iframes" --> site["Source webpage / player<br/>watch.example"]
-    scraping -- "Captures the player's stream requests" --> cdn["Media origin / CDN<br/>video-cdn.example"]
-    scraping -- "Stream URLs + replay headers" --> api
-    api -- "Stream URLs + preferences (castor.media.v1)" --> media[Media server]
-    api -- connects, drives --> device[Device]
-    media -- "Fetches manifests + media bytes" --> cdn
-    device -- fetches /media --> media
-    device -. "Direct playback when handed off" .-> cdn
+    client[CLI / other clients] --> api[API]
+    api -- page URLs --> scraping[Scraping]
+    scraping -- stream candidates --> api
+    scraping -- browser requests --> web[Webpage / player]
+    api -- streams + preferences --> media[Media]
+    api -- device commands --> device[Device]
+    media -- manifests + bytes --> origin[Media origin / CDN]
+    device -- fetch served media --> media
+    device -. direct handoff .-> origin
 ```
 
-The webpage and media origin are distinct: `watch.example` may load video from `video-cdn.example` (illustrative domains). Scraping discovers stream URLs; media fetches manifests and bytes from those URLs, never the original webpage. Direct playback lets the device fetch the CDN itself.
-
-| Component | Owns | Does not do |
+| Owner | Responsibility | Contract |
 | --- | --- | --- |
-| Clients | Catalog, sources, UI; public API calls | Service internals |
-| API | Device discovery/control, cast defaults, orchestration, status, cancellation | Browser extraction or media ranking |
-| Scraping | Chrome, frames, capture-document parsing; `browser`, `capture` | Devices, probing, ranking, playback |
-| Media | Probing, ranking, recovery, ffmpeg, subtitles, `/media`; `resolver`, `whisper` | Webpages or device control |
+| Clients | Catalog, source selection, UI | `castor.v1` |
+| API | Device discovery/control, preferences, orchestration, public status | `castor.v1` |
+| Scraping | Chrome, frames, stream discovery and replay headers | `castor.scraping.v1` |
+| Media | Source selection, probing, ranking, encoding, subtitles, delivery and recovery | `castor.media.v1` |
 
-Scraping emits generated `StreamCandidate` contracts directly, with URLs, replay headers, MIME types, source pages, and manifest evidence. Its private HLS/DASH document inspection identifies referenced resources and pre-rolls from responses Chrome already fetched. API translates public sources into media's page-free `Source`. A direct stream is explicitly chosen and only measured; a candidate list is ranked, with alternatives retained for recovery. Candidates are alternative URLs, not video chunks; one HLS/DASH URL can contain quality variants.
+Scraping discovers stream URLs from webpages. Media receives those URLs and fetches their manifests and bytes. Direct streams bypass scraping; candidate lists are ranked and retained for recovery. One candidate can contain multiple HLS/DASH renditions.
 
-## Topologies
+Services share generated contracts from [`proto/`](proto/), validated at RPC boundaries. Consumers define narrow ports; service entry points wire adapters, and binary main composes services. Domain implementations stay within each service's `internal` packages. Shared plumbing owns configuration, authentication and telemetry. Only media requires cgo for Whisper.
 
-Android composes API and media inside an app-owned native process. An authenticated loopback adapter supplies WebView extraction and Android device discovery using the existing public contracts. API still owns device identities/control; media still owns ranking, delivery, transcoding, and subtitles. See [Android](android/README.md).
 
-| Setup | What runs where |
-| --- | --- |
-| Local CLI | Missing services run embedded, with loopback RPC endpoints. |
-| Shared media | Run `media-server`; clients set `servers.media.url` and `servers.media.token`. |
-| Shared API | Run `api-server` on the devices' network, pointing at media and scraping; clients set `servers.api.url` and `servers.api.token`. |
-| Shared scraping | Run `scraping-server` with Chrome; API sets `servers.scraping.url` and `servers.scraping.token`. |
+Android composes API and media inside an app-owned native process. An authenticated loopback adapter supplies WebView extraction and Android device discovery using the public contracts. API owns device control; media owns ranking, delivery, transcoding and subtitles. See [Android](android/README.md).
 
-Each standalone command starts only its own service. Standalone API defaults scraping to `http://localhost:8412`. Binary main composes embedded services through callbacks; embedded and remote services use the same HTTP contracts.
+## Cooperating state machines
 
-## Boundaries
-
-- Services share generated contracts, not implementations; tests fake peers at their contracts.
-- Service internals use Go's `internal` directories; only binary main imports service entry points. The TUI stays inside the CLI.
-- Consumers declare narrow ports; entry points wire adapters. Decisions use capabilities, not device-family or site branches.
-- Shared plumbing handles configuration, HTTP, authentication, watch state, and logging without domain logic.
-- Only media needs cgo (Whisper); API and scraping build without it.
-
-## The contracts
-
-Buf generates Go and TypeScript Connect clients from `proto/`. RPC edges validate requests and peer responses with protovalidate; contracts are not stable yet. API resolves optional preferences against its validated `cast` defaults into media's complete `PlaybackSettings`.
-
-- Device types, audio/video codecs, failure codes, and recovery actions are enums.
-- Subtitles select disabled, automatic detection, or a language; an absent API selection inherits defaults.
-- Status selects connecting, extracting, measuring, or casting with state-specific data. Terminal results select completed, stopped, or a typed failure.
-- `Stream` holds playback data; `StreamCandidate` adds discovery evidence. Unknown ranked bitrate is absent, not zero. Media ignores unknown capability enum values rather than assuming support.
-
-| Contract | RPCs |
-| --- | --- |
-| `castor.v1` (clients → API) | `ListDevices`; `Cast`, `Stop`, `ListCasts`; `Watch` (status, final `Ended`); `Resolve` (preview, best first). |
-| `castor.scraping.v1` (API → scraping) | `ScrapingService.Resolve`: HTTP(S) pages → unranked candidates. Never calls media. |
-| `castor.media.v1` (API → media) | `CastService.Start`, `Stop`, `Watch`; `StreamService.Rank`; `DeviceService.Drive` (capabilities and command stream), `Answer` (command results). |
-
-## A cast, start to end
-
-1. API mints the cast ID and returns it, connects the device (`CONNECTING`), then resolves pages through scraping (`EXTRACTING`). Direct streams bypass scraping.
-2. API starts media under that same ID with streams and complete preferences (media refuses an ID already in use), opens `Watch` and `Drive`, and lends the device's capabilities. Media measures/ranks (`MEASURING`), chooses delivery, then plays (`CASTING`). A cast without a lent device is abandoned after a minute.
-3. Media sends device commands down `Drive`; API executes them and returns `Answer`. Media decides playback and recovery without needing access to the device's network.
-4. API forwards status to watchers, ending with `Ended`. The cast belongs to API, not the UI; the CLI chooses to stop it on Ctrl+C. Media can continue after its lender leaves until it needs device control again.
-
-Every call a cast makes carries its ID in the `Castor-Cast-Id` header, and every log line logged under a cast gets `cast_id`, in all three services and in the CLI, so one ID follows a cast through the logs.
-
-Stopping during extraction cancels scraping and releases the device without creating a media cast. Once media starts, API retries stop until accepted. Shutdown drains each service's own work.
-
-## Inside the media engine
+API creates a cast ID, connects the device, resolves pages and starts media. It opens `Watch` for status and `Drive` for device commands; command results return through `Answer`. Media makes playback decisions while API executes device operations on the device's network. The same cast ID follows RPCs and logs.
 
 ```mermaid
 flowchart LR
-    candidates[Resolved candidates] --> rank[Measure and rank] --> compose{Compose}
-    compose -- hand off --> fetch[Device fetches the media origin / CDN]
-    compose -- serve --> plan[Plan] --> deliver[Deliver] --> health{Health}
-    health -- fault --> compose
+    session["API session<br/>Remote lifecycle + device ownership"]
+    cast["Media cast<br/>Measure, rank, recover, end"]
+    attempt["Attempt<br/>Prepare, play, stop, clean up"]
+    health["Playback health<br/>Observe progress + control state"]
+    session -- start / stop --> cast
+    cast -- selected source + recovery policy --> attempt
+    attempt -- monitor --> health
+    health -- pause / resume / completion / fault --> attempt
+    attempt -- command through Drive --> session
+    session -- result through Answer --> attempt
+    attempt -- outcome after cleanup --> cast
+    cast -- status / terminal result --> session
 ```
 
-- **Rank:** prefer the tallest stream within `cast.max_height`; unmeasured candidates are last resorts. Media's HLS/DASH readers handle playback, not capture-document parsing.
-- **Compose:** hand off compatible streams to self-fetching devices unless `delivery: serve`; otherwise remux or use a read-once encoding pipeline (e.g. DLNA). `--debug` explains the choice.
-- **Plan/deliver:** copy or encode each track, scale to the ceiling, and show the source's own captions as a native track when it publishes the language asked, else burn Whisper subtitles into read-once casts. Use a working GPU encoder, falling back to software. Internal delivery listens on loopback behind `/media`.
-- **Recover:** detect stalls, slow reads, or stopped fetching; revise the attempt, cheapest first, or try the next candidate.
+Each machine owns its transitions and accepts typed events. The cast runs attempts sequentially: recovery can revise delivery or choose another candidate only after the previous attempt has finished cleanup. Health observes and proposes actions; the attempt applies them and reports command outcomes.
 
-## Trust boundary
+Within an attempt, operations return typed inputs for the next stage:
 
-Services use independent bearer tokens; health checks and device-facing `/media` are open. Invalid downstream credentials are API misconfiguration, not caller authentication failures. Replay headers reach media but are stripped from public listings. See [SECURITY.md](SECURITY.md).
+```mermaid
+flowchart LR
+    inspect[Inspect] --> plan[Plan]
+    plan -- served output --> produce[Produce + validate]
+    plan -- eligible source handoff --> ready[Ready]
+    produce --> ready
+    ready --> play[Request Play] --> playing[Playing] --> cleanup[Stop + join + release]
+```
+
+Only a certified ready presentation can request Play. Cancellation or failure from any active stage enters cleanup. The attempt joins preparation, producers and active delivery requests before releasing storage. API joins its Watch and Drive workers before releasing the device. A cast belongs to API independently of UI connections; each service drains its own work on shutdown.
+
+## Media contracts
+
+The engine separates what a source declares, what was observed, and what output must preserve:
+
+| Evidence | Meaning |
+| --- | --- |
+| `Declaration` | A manifest's codec and rendition envelope; cannot establish successful probing or track absence. |
+| `Observation` | Probe facts bound to the inspected URLs, formats, headers, representations, selected tracks and clock. Changed bindings invalidate reuse. |
+| `TrackRequirements` | Tracks the output must retain, derived from mandatory selections and positive source evidence. |
+
+- **Source adapters own format details.** HLS/DASH adapters resolve manifests, select resources and decode their envelopes. A shared relay handles bounded reads, caching and timeline publication. Core orchestration works with normalized programs and capabilities.
+- **Planning uses measured media.** Ranking summaries remain separate from bound observations. Republishing under a local URL requires inspecting that reading; output validation retains the original program's track requirements.
+- **Track choices are explicit.** Every track is copied, encoded or omitted. An unfinished plan cannot build an FFmpeg command. Stream presence is separate from codec parameters: an unidentified stream is present and cannot silently disappear.
+- **Readiness follows the delivery path.** Direct handoff requires source/receiver eligibility. Served output requires an available, validated artifact. Output adapters own packaging and publication; capability checks govern compatibility. Live-source evidence describes observed media and cannot guarantee future segments.
+- **Failures remain observable.** Readiness does not end monitoring: reader, producer and playback failures feed the attempt outcome and cast recovery.
+
+## Deployment and trust
+
+API runs where it can reach devices; scraping runs with Chrome; media runs where devices can fetch its published URLs. Standalone commands start only their own service. See [README.md](README.md) for configuration.
+
+Services use independent bearer tokens. Health checks and device-facing `/media` routes are open; publications use random paths and closing them joins active requests. Replay headers reach media but are stripped from public listings. See [SECURITY.md](SECURITY.md).

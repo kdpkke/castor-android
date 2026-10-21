@@ -24,14 +24,14 @@ func TestIdentifyKeepsNamedFormatsAndSniffsIncompleteManifests(t *testing.T) {
 		{"https://cdn.example/index", "<html>not found</html>", ""},
 	} {
 		client := &sourcetest.Documents{ByPath: map[string]string{"/index": tc.body}}
-		if got := formats.Identify(t.Context(), client, sourcetest.URL(t, tc.raw)); got != tc.want {
+		if got := formats.Identify(t.Context(), client, sourcetest.URL(t, tc.raw), nil); got != tc.want {
 			t.Errorf("Identify(%s) = %q, want %q", tc.raw, got, tc.want)
 		}
 		if asked := client.Asked(); tc.body == "" && len(asked) != 0 {
 			t.Errorf("a named format fetched %v, want no request", asked)
 		}
 	}
-	if got := formats.Identify(t.Context(), &sourcetest.Document{Status: 403}, sourcetest.URL(t, "https://cdn.example/index")); got != "" {
+	if got := formats.Identify(t.Context(), &sourcetest.Document{Status: 403}, sourcetest.URL(t, "https://cdn.example/index"), nil); got != "" {
 		t.Errorf("a refused sniff identified %q, want unknown", got)
 	}
 }
@@ -57,7 +57,7 @@ func TestOnlyTheHeadOfABodyIsSniffed(t *testing.T) {
 	formats := source.Formats{hls.Format{}, dash.Format{}}
 	body := strings.Repeat("\x00", 64<<10) + "#EXTM3U"
 	client := &sourcetest.Documents{ByPath: map[string]string{"/index": body}}
-	if got := formats.Identify(t.Context(), client, sourcetest.URL(t, "https://cdn.example/index")); got != "" {
+	if got := formats.Identify(t.Context(), client, sourcetest.URL(t, "https://cdn.example/index"), nil); got != "" {
 		t.Errorf("a signature past the first 64 KiB identified %q, want unknown", got)
 	}
 }

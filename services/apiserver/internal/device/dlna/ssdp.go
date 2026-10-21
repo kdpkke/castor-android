@@ -5,17 +5,21 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/stupside/castor/services/apiserver/internal/device"
 )
 
 const (
-	searchTarget = "urn:schemas-upnp-org:device:MediaRenderer:1"
-	ssdpPort     = "1900"
+	searchTarget  = "urn:schemas-upnp-org:device:MediaRenderer:1"
+	ssdpPort      = "1900"
+	searchTimeout = 3 * time.Second
 )
 
 // searchDescription: unicast M-SEARCH for description (no interface enumeration).
 func searchDescription(ctx context.Context, host string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
+	defer cancel()
 	target := device.WithPort(host, ssdpPort)
 
 	var dialer net.Dialer

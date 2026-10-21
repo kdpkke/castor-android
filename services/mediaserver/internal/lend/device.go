@@ -15,22 +15,20 @@ import (
 type Device struct {
 	line *Line
 	caps media.Capabilities
-	// reach is where the device fetches a URL the engine serves on loopback.
-	reach func(*url.URL) *url.URL
 	// left ends the cast once its lender has gone.
 	left func()
 }
 
 var _ execute.Device = Device{}
 
-func NewDevice(line *Line, caps media.Capabilities, reach func(*url.URL) *url.URL, left func()) Device {
-	return Device{line: line, caps: caps, reach: reach, left: left}
+func NewDevice(line *Line, caps media.Capabilities, left func()) Device {
+	return Device{line: line, caps: caps, left: left}
 }
 
 func (d Device) Play(ctx context.Context, streamURL *url.URL, contentType string, captions []media.Caption) error {
-	play := &mediav1.DeviceCommand_Play{Url: d.reach(streamURL).String(), Container: wire.Container(contentType)}
+	play := &mediav1.DeviceCommand_Play{Url: streamURL.String(), Container: wire.Container(contentType)}
 	for _, c := range captions {
-		play.Captions = append(play.Captions, wire.Caption(c, d.reach(c.URL)))
+		play.Captions = append(play.Captions, wire.Caption(c, c.URL))
 	}
 	err := d.done(ctx, &mediav1.DeviceCommand_Call{Operation: &mediav1.DeviceCommand_Call_Play{Play: play}})
 	if errors.Is(err, ErrLenderLeft) {

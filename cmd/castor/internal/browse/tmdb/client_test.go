@@ -144,7 +144,7 @@ func TestTMDBPayloadsDecodeAsTMDBSendsThem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(season.Episodes) != 1 || season.Episodes[0] != (Episode{EpisodeNumber: 1, Name: "Pilot", Overview: "The premiere.", AirDate: "2005-03-24"}) {
+	if len(season.Episodes) != 1 || season.Episodes[0] != (Episode{EpisodeNumber: 1, Name: "Pilot", Overview: "The premiere.", AirDate: "2005-03-24", StillPath: "/x.jpg"}) {
 		t.Errorf("season = %+v", season)
 	}
 	page, err := c.Discover(t.Context(), DiscoverParams{MediaType: MediaMovie})

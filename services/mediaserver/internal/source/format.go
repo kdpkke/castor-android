@@ -13,8 +13,8 @@ import (
 type Reader interface {
 	Resolve(ctx context.Context, env Env, s Subject) (Resolution, error)
 
-	// Timeline follows an input whose timeline castor keeps, read for the kind of track given; nil for one ffmpeg reads directly.
-	Timeline(c Client, in media.Input, reads media.TrackKind) timeline.Source
+	// Timeline describes an input castor follows; a zero Reading goes directly to ffmpeg.
+	Timeline(c Client, in media.Input, reads media.TrackKind) timeline.Reading
 
 	// InputArgs is how ffmpeg and ffprobe open an input of this shape; nil when they need no telling.
 	InputArgs(segmentRetries int) []string

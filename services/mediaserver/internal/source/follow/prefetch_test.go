@@ -88,7 +88,7 @@ func played(t *testing.T, f *feed, segments int) time.Duration {
 func TestSegmentsAreReadAheadSeveralAtOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := origin(12, 2*time.Second)
-		f := newFeed(t.Context(), "primary", o, nil)
+		f := testFeed(t.Context(), "primary", o, nil)
 		if err := f.start(); err != nil {
 			t.Fatal(err)
 		}
@@ -105,7 +105,7 @@ func TestSegmentsAreReadAheadSeveralAtOnce(t *testing.T) {
 func TestASegmentReadThatHangsIsAskedForAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := origin(3, time.Second, "https://origin.example/1.ts")
-		f := newFeed(t.Context(), "primary", o, nil)
+		f := testFeed(t.Context(), "primary", o, nil)
 		if err := f.start(); err != nil {
 			t.Fatal(err)
 		}
@@ -121,7 +121,7 @@ func TestASegmentReadThatHangsIsAskedForAgain(t *testing.T) {
 func TestReadingAheadStopsAtTheWindow(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := origin(40, 100*time.Millisecond)
-		f := newFeed(t.Context(), "primary", o, nil)
+		f := testFeed(t.Context(), "primary", o, nil)
 		if err := f.start(); err != nil {
 			t.Fatal(err)
 		}
@@ -156,7 +156,7 @@ func (o *flaky) Read(ctx context.Context, uri string, r timeline.Range) (io.Read
 func TestASegmentThatFailedAheadOfTheReaderIsReadAgainWhenAskedFor(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		uri := "https://origin.example/1.ts"
-		f := newFeed(t.Context(), "primary", origin(3, time.Second), nil)
+		f := testFeed(t.Context(), "primary", origin(3, time.Second), nil)
 		if err := f.start(); err != nil {
 			t.Fatal(err)
 		}
@@ -176,7 +176,7 @@ func TestAFailedReadIsAskedAgainAfterAPause(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		uri := "https://origin.example/0.ts"
 		o := &flaky{throttled: origin(1, 0), failing: map[string]bool{uri: true}}
-		f := newFeed(t.Context(), "primary", o, nil)
+		f := testFeed(t.Context(), "primary", o, nil)
 		if err := f.start(); err != nil {
 			t.Fatal(err)
 		}
@@ -192,7 +192,7 @@ func TestAnOriginThatGoesQuietMidReadIsGivenUpOn(t *testing.T) {
 		pr, pw := io.Pipe()
 		defer pw.Close()
 		go func() { _, _ = pw.Write([]byte("start")) }()
-		f := newFeed(t.Context(), "primary", readerSource{pr}, nil)
+		f := testFeed(t.Context(), "primary", readerSource{pr}, nil)
 		_, err := f.pull(t.Context(), "https://origin.example/0.ts", timeline.Range{}, segmentLimit)
 		if !errors.Is(err, errIdle) {
 			t.Errorf("pull = %v, want the quiet origin given up on", err)
@@ -202,11 +202,11 @@ func TestAnOriginThatGoesQuietMidReadIsGivenUpOn(t *testing.T) {
 
 func TestAResourceLargerThanItsLimitIsRefused(t *testing.T) {
 	body := strings.Repeat("x", 100)
-	f := newFeed(t.Context(), "primary", readerSource{strings.NewReader(body)}, nil)
+	f := testFeed(t.Context(), "primary", readerSource{strings.NewReader(body)}, nil)
 	if _, err := f.pull(t.Context(), "https://origin.example/0.ts", timeline.Range{}, 99); err == nil {
 		t.Error("read 100 bytes against a limit of 99")
 	}
-	f = newFeed(t.Context(), "primary", readerSource{strings.NewReader(body)}, nil)
+	f = testFeed(t.Context(), "primary", readerSource{strings.NewReader(body)}, nil)
 	if b, err := f.pull(t.Context(), "https://origin.example/0.ts", timeline.Range{}, 100); err != nil || len(b) != 100 {
 		t.Errorf("pull at the limit = %d bytes, %v; want them all", len(b), err)
 	}
@@ -227,7 +227,7 @@ func (s readerSource) Read(ctx context.Context, _ string, _ timeline.Range) (io.
 func TestWinningHedgeJoinsTheCancelledOriginRead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		o := origin(1, time.Second, "https://origin.example/0.ts")
-		f := newFeed(t.Context(), "primary", o, nil)
+		f := testFeed(t.Context(), "primary", o, nil)
 		if _, err := f.hedged(t.Context(), o.window.Segments[0]); err != nil {
 			t.Fatal(err)
 		}

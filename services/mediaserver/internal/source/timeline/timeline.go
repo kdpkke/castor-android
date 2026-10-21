@@ -69,6 +69,39 @@ type Source interface {
 	Read(ctx context.Context, uri string, r Range) (io.ReadCloser, error)
 }
 
+// KeyReader retrieves a key through the same bounded, cached origin session as media.
+type KeyReader func(context.Context, string) ([]byte, error)
+
+// Decoder handles the origin format's resource encoding. Implementations must be safe
+// for concurrent segment reads. The bool reports a source envelope removed from a segment.
+type Decoder interface {
+	Segment(context.Context, Segment, []byte, KeyReader) ([]byte, bool, error)
+	Map(context.Context, Map, []byte, KeyReader) ([]byte, error)
+	ConsumesKey(Key) bool
+}
+
+// Reading is a format's contract with the shared timeline relay. A followed
+// source needs a decoder. DirectFallback explicitly permits FFmpeg to read the
+// origin URL if Castor cannot open the first window.
+type Reading struct {
+	Source         Source
+	Decoder        Decoder
+	DirectFallback bool
+}
+
+// IdentityDecoder passes resources through when a format has no resource envelope.
+type IdentityDecoder struct{}
+
+func (IdentityDecoder) Segment(_ context.Context, _ Segment, body []byte, _ KeyReader) ([]byte, bool, error) {
+	return body, false, nil
+}
+
+func (IdentityDecoder) Map(_ context.Context, _ Map, body []byte, _ KeyReader) ([]byte, error) {
+	return body, nil
+}
+
+func (IdentityDecoder) ConsumesKey(Key) bool { return false }
+
 // Failure is an origin that answered a window request with a status.
 type Failure struct {
 	Status int

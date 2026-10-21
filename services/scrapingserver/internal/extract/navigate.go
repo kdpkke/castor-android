@@ -7,43 +7,86 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 )
 
-// iframeSrcJS finds largest displayed iframe, including offscreen lazy players (100x100+) and returns src.
+// iframeSrcJS ranks displayed iframes, including offscreen lazy players (100x100+).
 //
 //go:embed js/iframe_src.js
 var iframeSrcJS string
 
-// navigateIframe polls for largest iframe and navigates; repeat until leaf.
-func navigateIframe(ctx context.Context) error {
+type frameCandidate struct {
+	Src  string  `json:"src"`
+	Area float64 `json:"area"`
+}
+
+type frameVisit struct {
+	src, parent string
+	depth       int
+}
+
+// navigateIframe explores a bounded set of player frames, largest first.
+func navigateIframe(ctx context.Context, stop func() bool) error {
 	iframeCtx, cancel := context.WithTimeout(ctx, navigateIframeTimeout)
 	defer cancel()
-
-	for depth := range navigateIframeMaxDepth {
-		var iframeSrc, parent string
-
-		err := chromedp.Run(iframeCtx,
-			chromedp.Poll(iframeSrcJS, &iframeSrc, chromedp.WithPollingTimeout(0)),
-			chromedp.Location(&parent),
-		)
-
-		if err != nil {
-			// No frame at all is a failure; none past the first is the leaf.
-			if depth == 0 || ctx.Err() != nil || iframeCtx.Err() == nil {
-				return err
-			}
-			return nil
-		}
-		slog.DebugContext(ctx, "navigating to iframe", "src", iframeSrc, "depth", depth+1)
-		if err := openFrame(iframeCtx, iframeSrc, parent); err != nil {
-			return err
-		}
+	var parent string
+	if err := chromedp.Run(iframeCtx, chromedp.Location(&parent)); err != nil {
+		return err
 	}
-
+	frames, err := findFrames(iframeCtx)
+	if err != nil {
+		return err
+	}
+	queue := make([]frameVisit, 0, len(frames))
+	for _, f := range frames {
+		queue = append(queue, frameVisit{src: f.Src, parent: parent, depth: 1})
+	}
+	visited := map[string]bool{parent: true}
+	for len(queue) > 0 && len(visited) <= 8 && iframeCtx.Err() == nil && !stop() {
+		v := queue[0]
+		queue = queue[1:]
+		if visited[v.src] || v.depth > navigateIframeMaxDepth {
+			continue
+		}
+		visited[v.src] = true
+		slog.DebugContext(ctx, "navigating to iframe", "src", v.src, "depth", v.depth)
+		if err := openFrame(iframeCtx, v.src, v.parent); err != nil {
+			slog.DebugContext(ctx, "iframe navigation failed", "src", v.src, "error", err)
+			continue
+		}
+		if err := clickPlayer(iframeCtx); err != nil {
+			slog.DebugContext(ctx, "iframe player click failed", "src", v.src, "error", err)
+		}
+		if v.depth == navigateIframeMaxDepth || stop() {
+			continue
+		}
+		children, err := findFrames(iframeCtx)
+		if err != nil {
+			continue
+		}
+		branch := make([]frameVisit, 0, len(children))
+		for _, child := range children {
+			branch = append(branch, frameVisit{src: child.Src, parent: v.src, depth: v.depth + 1})
+		}
+		queue = append(branch, queue...)
+	}
 	return nil
+}
+
+func findFrames(ctx context.Context) ([]frameCandidate, error) {
+	var frames []frameCandidate
+	// Let dynamically inserted and lazy frames appear without spending the whole
+	// traversal budget on a page that has no children.
+	waitCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	err := chromedp.Run(waitCtx, chromedp.Poll(iframeSrcJS, &frames, chromedp.WithPollingTimeout(0)))
+	if waitCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+		return nil, nil
+	}
+	return frames, err
 }
 
 // openFrame loads a frame's document as its parent would, since embed hosts refuse a request no site framed; only a web page is opened.

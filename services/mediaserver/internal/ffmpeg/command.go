@@ -15,7 +15,7 @@ const (
 // pipeURL spells an fd the way ffmpeg's pipe protocol takes it.
 func pipeURL(fd int) string { return "pipe:" + strconv.Itoa(fd) }
 
-// The pipes a command reads its input from and routes its outputs to; Start carries the -progress feed and the PCM tee over loopback.
+// The pipes a command reads its input from and routes its outputs to; Start connects the progress feed and PCM tee using the platform transport.
 var (
 	StdinPipe    = pipeURL(0)
 	StdoutPipe   = pipeURL(1)

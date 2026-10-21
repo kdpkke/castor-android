@@ -4,53 +4,136 @@ package health
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/looplab/fsm"
+	"github.com/stupside/castor/internal/telemetry"
+
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
 
-// Watch polls one subject until a rule ends the wait: nil to proceed, a *Fault to end.
-func Watch(ctx context.Context, m Monitor) error {
-	now := time.Now()
-	t := &tracker{m: m, start: now, grew: now, kept: now}
-	tick := time.NewTicker(pollInterval)
-	defer tick.Stop()
+// Decision asks the attempt to control playback, or says observation completed.
+type Decision uint8
 
+const (
+	Complete Decision = iota
+	Pause
+	Resume
+)
+
+// controlEvent keeps this machine's events distinct at Go call sites.
+type controlEvent uint8
+
+const (
+	pauseAccepted controlEvent = iota
+	pauseRejected
+	resumeAccepted
+	resumeRejected
+)
+
+func (e controlEvent) String() string {
+	return [...]string{
+		pauseAccepted:  "pause-accepted",
+		pauseRejected:  "pause-rejected",
+		resumeAccepted: "resume-accepted",
+		resumeRejected: "resume-rejected",
+	}[e]
+}
+
+// Observer retains health measurements and policy state. It never controls a device.
+// One attempt calls Next, applies its decision, and reports the result with Applied.
+type Observer struct {
+	tracker
+	polled bool
+	rule   rule
+}
+
+func Observe(m Monitor) *Observer {
+	now := time.Now()
+	o := &Observer{m: m, start: now, grew: now, kept: now}
+	o.playback = o.playbackMachine()
+	return o
+}
+
+func (o *Observer) Next(ctx context.Context) (Decision, error) {
+	t := &o.tracker
 	for {
 		if err := context.Cause(ctx); err != nil {
-			return err
+			return Complete, err
 		}
-		h := t.read()
-		r, act, err := judge(m.Phase, h)
+		if o.polled {
+			select {
+			case <-ctx.Done():
+				return Complete, context.Cause(ctx)
+			case <-time.After(pollInterval):
+			}
+		}
+		o.polled = true
+		h, err := t.read()
 		if err != nil {
-			return err
+			return Complete, err
 		}
+		r, act, err := judge(t.m.Phase, h)
+		if err != nil {
+			return Complete, err
+		}
+		o.rule = r
 		switch act {
 		case open:
-			slog.InfoContext(ctx, "watch cleared",
-				"gate", m.Subject,
-				"rule", r.name,
-				"waited", time.Since(t.start).Round(time.Millisecond),
-			)
-			return nil
+			slog.InfoContext(ctx, "watch cleared", "gate", t.m.Subject, "rule", r.name, "waited", time.Since(t.start).Round(time.Millisecond))
+			return Complete, nil
 		case revise, abandon:
-			return t.fault(ctx, r, act, h)
+			return Complete, t.fault(ctx, r, act, h)
 		case hold:
-			t.hold(ctx, r)
+			return Pause, nil
 		case release:
-			t.release(ctx, r, h)
+			return Resume, nil
 		default:
 			t.report(ctx, r, h)
 		}
+	}
+}
 
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		case <-tick.C:
+// Applied records what actually happened, so a refused pause never counts as held.
+func (o *Observer) Applied(ctx context.Context, decision Decision, commandErr error) error {
+	var event controlEvent
+	switch decision {
+	case Pause:
+		event = pauseAccepted
+		if commandErr != nil {
+			event = pauseRejected
+		}
+	case Resume:
+		event = resumeAccepted
+		if commandErr != nil {
+			event = resumeRejected
+		}
+	default:
+		return fmt.Errorf("health: unexpected control result %d", decision)
+	}
+	// Command cancellation must not erase the outcome of a command already sent.
+	previous := o.playback.Current()
+	err := o.playback.Event(context.WithoutCancel(ctx), event.String())
+	if stayed, ok := errors.AsType[fsm.NoTransitionError](err); ok {
+		err = stayed.Err
+	}
+	if err != nil {
+		return err
+	}
+	if commandErr != nil {
+		switch decision {
+		case Pause:
+			slog.WarnContext(ctx, "the device would not pause, so it is left to play out what it has", "gate", o.m.Subject, "rule", o.rule.name, "error", commandErr)
+		case Resume:
+			if previous != resumeRefused {
+				slog.WarnContext(ctx, "the device would not resume", "gate", o.m.Subject, "rule", o.rule.name, "error", commandErr)
+			}
 		}
 	}
+	return nil
 }
 
 // Fault is a verdict that ended a watch; recovery keys on its Kind.
@@ -90,6 +173,36 @@ func (f *Fault) Error() string {
 
 func (f *Fault) Unwrap() error { return f.Err }
 
+// Playback control has its own state machine. It records command outcomes only;
+// it owns no goroutines, device connection, cancellation or resource cleanup.
+const (
+	playbackRunning  = "playing"
+	playbackPaused   = "paused"
+	resumeRefused    = "resume-refused"
+	pauseUnavailable = "pause-unavailable"
+)
+
+func (o *Observer) playbackMachine() *fsm.FSM {
+	return fsm.NewFSM(playbackRunning, fsm.Events{
+		{Name: pauseAccepted.String(), Src: []string{playbackRunning}, Dst: playbackPaused},
+		{Name: pauseRejected.String(), Src: []string{playbackRunning}, Dst: pauseUnavailable},
+		{Name: resumeAccepted.String(), Src: []string{playbackPaused, resumeRefused}, Dst: playbackRunning},
+		{Name: resumeRejected.String(), Src: []string{playbackPaused, resumeRefused}, Dst: resumeRefused},
+	}, fsm.Callbacks{
+		"after_" + pauseAccepted.String(): func(ctx context.Context, _ *fsm.Event) {
+			o.pausedAt = time.Now()
+			slog.InfoContext(ctx, "device held", "gate", o.m.Subject, "rule", o.rule.name)
+		},
+		"after_" + resumeAccepted.String(): func(ctx context.Context, _ *fsm.Event) {
+			held := time.Since(o.pausedAt)
+			o.held += held
+			o.pausedAt = time.Time{}
+			slog.InfoContext(ctx, "device released", "gate", o.m.Subject, "rule", o.rule.name, "held", held.Round(time.Millisecond))
+		},
+		"after_event": func(ctx context.Context, e *fsm.Event) { telemetry.Transition(ctx, "health", e.Event, e.Src, e.Dst) },
+	})
+}
+
 // tracker is one Watch's derived state: how long each thing has been true.
 type tracker struct {
 	m     Monitor
@@ -112,21 +225,22 @@ type tracker struct {
 	// pausedAt is when the device was last held, zero while it plays; held is every hold before it.
 	pausedAt time.Time
 	held     time.Duration
-	// unholdable is a device that refused to pause, judged from then on as one that cannot be held.
-	unholdable bool
-	// refusedResume is a resume the device refused, which is warned of once however often it is retried.
-	refusedResume bool
+	playback *fsm.FSM
 
 	reported time.Time
 }
 
 // read takes one reading of every port.
-func (t *tracker) read() Vitals {
+func (t *tracker) read() (Vitals, error) {
 	now := time.Now()
-	h := Vitals{subtitles: t.m.Lead != nil, holdable: t.m.Transport != nil && !t.unholdable}
+	h := Vitals{subtitles: t.m.Lead != nil, holdable: t.m.Holdable && !t.playback.Is(pauseUnavailable)}
 
 	if t.m.Landed != nil {
-		h.Landed = t.m.Landed()
+		var err error
+		h.Landed, err = t.m.Landed()
+		if err != nil {
+			return h, err
+		}
 	}
 
 	if l := t.m.Lead; l != nil {
@@ -180,7 +294,7 @@ func (t *tracker) read() Vitals {
 	}
 	// Only a device plays; the watch starts as Play returns, which understates the media on hand.
 	if t.m.Phase == Playing {
-		h.paused = !t.pausedAt.IsZero()
+		h.paused = t.playback.Is(playbackPaused) || t.playback.Is(resumeRefused)
 		held := t.held
 		if h.paused {
 			h.sincePause = now.Sub(t.pausedAt)
@@ -193,7 +307,7 @@ func (t *tracker) read() Vitals {
 		h.overdue = now.Sub(t.start) > t.m.Grace
 	}
 
-	return h
+	return h, nil
 }
 
 // mark is the media position read at one instant.
@@ -213,32 +327,6 @@ func (t *tracker) pace(now time.Time, position time.Duration) float64 {
 		return float64(position-oldest.position) / float64(span)
 	}
 	return 0
-}
-
-// hold pauses the device; one that will not be held is judged from then on as one that cannot be.
-func (t *tracker) hold(ctx context.Context, r rule) {
-	if err := t.m.Transport.Pause(ctx); err != nil {
-		t.unholdable = true
-		slog.WarnContext(ctx, "the device would not pause, so it is left to play out what it has", "gate", t.m.Subject, "rule", r.name, "error", err)
-		return
-	}
-	t.pausedAt = time.Now()
-	slog.InfoContext(ctx, "device held", "gate", t.m.Subject, "rule", r.name)
-}
-
-// release resumes a held device; a refusal is retried on the next tick, since the rule still holds.
-func (t *tracker) release(ctx context.Context, r rule, h Vitals) {
-	if err := t.m.Transport.Resume(ctx); err != nil {
-		if !t.refusedResume {
-			slog.WarnContext(ctx, "the device would not resume", "gate", t.m.Subject, "rule", r.name, "error", err)
-		}
-		t.refusedResume = true
-		return
-	}
-	t.refusedResume = false
-	t.held += time.Since(t.pausedAt)
-	t.pausedAt = time.Time{}
-	slog.InfoContext(ctx, "device released", "gate", t.m.Subject, "rule", r.name, "held", h.sincePause.Round(time.Millisecond))
 }
 
 // fault ends the watch with the producer's own error and evidence; only an abandon is logged, a revise is the recovery's to say.

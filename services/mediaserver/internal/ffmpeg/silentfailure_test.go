@@ -33,3 +33,14 @@ func TestSilentFailuresAreCaughtOnAnyLine(t *testing.T) {
 		}
 	})
 }
+
+func TestDemuxIOErrorMarksReadIncomplete(t *testing.T) {
+	line := "[in#0/hls @ 0x710c28140] [error] Error during demuxing: Input/output error"
+	_, markers := drainLines(t, line)
+	if markers.failure() == nil {
+		t.Fatal("the HLS demux error was treated as a clean read")
+	}
+	if !markers.lostMedia() {
+		t.Error("the HLS demux error did not mark the read incomplete")
+	}
+}

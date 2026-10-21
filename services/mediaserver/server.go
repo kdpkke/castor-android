@@ -22,7 +22,8 @@ type Server struct {
 
 // New serves the media contract, binding each cast to what it asked with caster, telling devices to reach its media route at reach.
 func New(caster func(asked *mediav1.PlaybackSettings) cast.Caster, reach *url.URL) *Server {
-	casts := cast.New(caster, reach)
+	publications := mediaroute.NewPublisher(reach)
+	casts := cast.New(caster, publications)
 
 	valid := transport.Options()
 	api := http.NewServeMux()
@@ -30,9 +31,7 @@ func New(caster func(asked *mediav1.PlaybackSettings) cast.Caster, reach *url.UR
 	api.Handle(mediav1connect.NewDeviceServiceHandler(casts, valid))
 	api.Handle(mediav1connect.NewStreamServiceHandler(casts, valid))
 	transport.Introspect(api, mediav1connect.CastServiceName, mediav1connect.DeviceServiceName, mediav1connect.StreamServiceName)
-	media := http.NewServeMux()
-	media.Handle(mediaroute.Pattern, mediaroute.Handler(casts.Serves))
-	return &Server{API: api, Media: media, casts: casts}
+	return &Server{API: api, Media: publications, casts: casts}
 }
 
 // Shutdown takes no new cast, ends those running, failed as the server shuts down, and waits until they let go of what they hold, or ctx ends.

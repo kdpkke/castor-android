@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
+
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
@@ -27,14 +29,13 @@ import (
 	"github.com/stupside/castor/internal/castid"
 	"github.com/stupside/castor/services/mediaserver"
 	"github.com/stupside/castor/services/mediaserver/internal/cast"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/deliver"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/execute"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"github.com/stupside/castor/services/mediaserver/internal/source"
 )
 
-type play func(ctx context.Context, device execute.Device, listeners deliver.Listeners, streams []*source.Stream, turns recovery.Turns) error
+type play func(ctx context.Context, device execute.Device, listeners output.Publisher, streams []*source.Stream, turns recovery.Turns) error
 
 // engine is the server's machinery: it ranks by reversing, so the order cast in proves ranking ran.
 type engine struct {
@@ -72,7 +73,7 @@ func (e *engine) Measure(_ context.Context, stream *source.Stream) (*source.Stre
 	return stream, nil
 }
 
-func (e *engine) Play(ctx context.Context, device execute.Device, l deliver.Listeners, streams []*source.Stream, turns recovery.Turns) error {
+func (e *engine) Play(ctx context.Context, device execute.Device, l output.Publisher, streams []*source.Stream, turns recovery.Turns) error {
 	// This fake skips probing: its playable fixtures are MPEG-TS, as the lent device advertises.
 	for _, stream := range streams {
 		stream.ContentType = media.MPEGTS
@@ -92,7 +93,7 @@ type lentDevice struct {
 
 func newLentDevice() *lentDevice {
 	return &lentDevice{
-		caps:   &mediav1.Capabilities{SelfFetch: true, ServedHeaders: map[string]string{"transferMode.dlna.org": "Streaming"}, Formats: []*mediav1.FormatSupport{{Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: mediav1.ProgressiveSupport_CONTAINER_MPEGTS}}, Tracks: &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: &mediav1.VideoSupport{Codec: mediav1.VideoCodec_VIDEO_CODEC_H264, MaxLevel: 42}, Audio: &mediav1.AudioSupport{Codec: mediav1.AudioCodec_AUDIO_CODEC_AAC, MaxChannels: 2}}}}}},
+		caps:   &mediav1.Capabilities{SelfFetch: true, ServedHeaders: map[string]string{"transferMode.dlna.org": "Streaming"}, Formats: []*mediav1.FormatSupport{{Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: mediav1.ProgressiveSupport_CONTAINER_MPEGTS}}, Tracks: &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: &mediav1.VideoSupport{Codec: &mediav1.VideoSupport_H264{H264: &mediav1.H264Support{MaxLevel: 42}}}, Audio: &mediav1.AudioSupport{Codec: mediav1.AudioCodec_AUDIO_CODEC_AAC, MaxChannels: 2}}}}}},
 		handed: make(chan *url.URL, 4),
 		as:     make(chan mediav1.Container, 4),
 		played: make(chan []byte, 4),
@@ -307,7 +308,7 @@ func castOn(t *testing.T, c server, source *mediav1.Source, device *lentDevice) 
 }
 
 // handoff is a cast the device fetches the head stream of for itself.
-func handoff(ctx context.Context, device execute.Device, _ deliver.Listeners, streams []*source.Stream, turns recovery.Turns) error {
+func handoff(ctx context.Context, device execute.Device, _ output.Publisher, streams []*source.Stream, turns recovery.Turns) error {
 	turns.Attempting(1)
 	return device.Play(ctx, streams[0].URL, streams[0].ContentType, nil)
 }
@@ -315,7 +316,7 @@ func handoff(ctx context.Context, device execute.Device, _ deliver.Listeners, st
 func TestPagesStreamsAreRankedThenHandedToTheLentDeviceAsTheyAre(t *testing.T) {
 	device := newLentDevice()
 	var caps media.Capabilities
-	c := serve(t, machinery(func(ctx context.Context, lent execute.Device, l deliver.Listeners, streams []*source.Stream, turns recovery.Turns) error {
+	c := serve(t, machinery(func(ctx context.Context, lent execute.Device, l output.Publisher, streams []*source.Stream, turns recovery.Turns) error {
 		caps = lent.Capabilities()
 		return handoff(ctx, lent, l, streams, turns)
 	}).backend())
@@ -337,9 +338,9 @@ func TestPagesStreamsAreRankedThenHandedToTheLentDeviceAsTheyAre(t *testing.T) {
 
 func TestALentDevicesCapabilitiesReachTheEngine(t *testing.T) {
 	device := newLentDevice()
-	device.caps = &mediav1.Capabilities{Deinterlaces: true, Formats: []*mediav1.FormatSupport{{Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: mediav1.ProgressiveSupport_CONTAINER_MP4}}, Tracks: &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: &mediav1.VideoSupport{Codec: mediav1.VideoCodec_VIDEO_CODEC_H264, Profiles: []mediav1.Profile{mediav1.Profile_PROFILE_HIGH}, MaxLevel: 42}, Audio: &mediav1.AudioSupport{Codec: mediav1.AudioCodec_AUDIO_CODEC_AAC, MaxChannels: 2}}}}, {Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: mediav1.ProgressiveSupport_CONTAINER_MP4}}, Tracks: &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: &mediav1.VideoSupport{Codec: mediav1.VideoCodec_VIDEO_CODEC_HEVC, Profiles: []mediav1.Profile{mediav1.Profile_PROFILE_MAIN_10}, BitDepths: []uint32{10}}, Audio: &mediav1.AudioSupport{Codec: mediav1.AudioCodec_AUDIO_CODEC_AAC, MaxChannels: 2}}}}, {Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: mediav1.ProgressiveSupport_CONTAINER_MPEGTS}}, Tracks: &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: &mediav1.VideoSupport{Codec: mediav1.VideoCodec_VIDEO_CODEC_H264, Profiles: []mediav1.Profile{mediav1.Profile_PROFILE_HIGH}, MaxLevel: 42}, Audio: &mediav1.AudioSupport{Codec: mediav1.AudioCodec_AUDIO_CODEC_AAC, MaxChannels: 2}}}}, {Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: mediav1.ProgressiveSupport_CONTAINER_MPEGTS}}, Tracks: &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: &mediav1.VideoSupport{Codec: mediav1.VideoCodec_VIDEO_CODEC_HEVC, Profiles: []mediav1.Profile{mediav1.Profile_PROFILE_MAIN_10}, BitDepths: []uint32{10}}, Audio: &mediav1.AudioSupport{Codec: mediav1.AudioCodec_AUDIO_CODEC_AAC, MaxChannels: 2}}}}}}
+	device.caps = &mediav1.Capabilities{Deinterlaces: true, Formats: []*mediav1.FormatSupport{{Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: mediav1.ProgressiveSupport_CONTAINER_MP4}}, Tracks: &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: &mediav1.VideoSupport{Codec: &mediav1.VideoSupport_H264{H264: &mediav1.H264Support{Profiles: []mediav1.H264Support_Profile{mediav1.H264Support_PROFILE_HIGH}, MaxLevel: 42}}}, Audio: &mediav1.AudioSupport{Codec: mediav1.AudioCodec_AUDIO_CODEC_AAC, MaxChannels: 2}}}}, {Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: mediav1.ProgressiveSupport_CONTAINER_MP4}}, Tracks: &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: &mediav1.VideoSupport{Codec: &mediav1.VideoSupport_Hevc{Hevc: &mediav1.HEVCSupport{Profiles: []mediav1.HEVCSupport_Profile{mediav1.HEVCSupport_PROFILE_MAIN_10}, BitDepths: []uint32{10}}}}, Audio: &mediav1.AudioSupport{Codec: mediav1.AudioCodec_AUDIO_CODEC_AAC, MaxChannels: 2}}}}, {Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: mediav1.ProgressiveSupport_CONTAINER_MPEGTS}}, Tracks: &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: &mediav1.VideoSupport{Codec: &mediav1.VideoSupport_H264{H264: &mediav1.H264Support{Profiles: []mediav1.H264Support_Profile{mediav1.H264Support_PROFILE_HIGH}, MaxLevel: 42}}}, Audio: &mediav1.AudioSupport{Codec: mediav1.AudioCodec_AUDIO_CODEC_AAC, MaxChannels: 2}}}}, {Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: mediav1.ProgressiveSupport_CONTAINER_MPEGTS}}, Tracks: &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: &mediav1.VideoSupport{Codec: &mediav1.VideoSupport_Hevc{Hevc: &mediav1.HEVCSupport{Profiles: []mediav1.HEVCSupport_Profile{mediav1.HEVCSupport_PROFILE_MAIN_10}, BitDepths: []uint32{10}}}}, Audio: &mediav1.AudioSupport{Codec: mediav1.AudioCodec_AUDIO_CODEC_AAC, MaxChannels: 2}}}}}}
 	seen := make(chan media.Capabilities, 1)
-	c := serve(t, machinery(func(ctx context.Context, lent execute.Device, l deliver.Listeners, streams []*source.Stream, turns recovery.Turns) error {
+	c := serve(t, machinery(func(ctx context.Context, lent execute.Device, l output.Publisher, streams []*source.Stream, turns recovery.Turns) error {
 		seen <- lent.Capabilities()
 		return handoff(ctx, lent, l, streams, turns)
 	}).backend())
@@ -434,7 +435,7 @@ func TestResolvedCandidatesWaitForTheirDeviceAlreadyMeasuring(t *testing.T) {
 }
 
 func TestAStreamCastNeverShowsExtractingAndItsStateNeverGoesBack(t *testing.T) {
-	c := serve(t, machinery(func(ctx context.Context, device execute.Device, _ deliver.Listeners, streams []*source.Stream, turns recovery.Turns) error {
+	c := serve(t, machinery(func(ctx context.Context, device execute.Device, _ output.Publisher, streams []*source.Stream, turns recovery.Turns) error {
 		turns.Attempting(1)
 		turns.Revising(recovery.ServeInstead, "refused")
 		turns.Attempting(2)
@@ -477,32 +478,30 @@ func stateOrder(t *testing.T, status *castorv1.CastStatus) int {
 
 func TestWhatTheServerServesTheDeviceFetchesFromTheServerItself(t *testing.T) {
 	device := newLentDevice()
-	delivered, delivery := make(chan string, 1), make(chan string, 1)
-	c := serve(t, machinery(func(ctx context.Context, lent execute.Device, listeners deliver.Listeners, _ []*source.Stream, _ recovery.Turns) error {
-		// The delivery the engine opens, through the listeners the server binds it to.
-		l, err := listeners.Listen(ctx)
+	delivered := make(chan string, 1)
+	c := serve(t, machinery(func(ctx context.Context, lent execute.Device, publisher output.Publisher, _ []*source.Stream, _ recovery.Turns) error {
+		pub, err := publisher.Publish(ctx, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			delivered <- r.URL.RequestURI()
+			_, _ = io.WriteString(w, "media bytes")
+		}))
 		if err != nil {
 			return err
 		}
-		delivery <- l.Addr().String()
-		srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			delivered <- r.URL.RequestURI()
-			_, _ = io.WriteString(w, "media bytes")
-		})}
-		go func() { _ = srv.Serve(l) }()
-		defer srv.Close()
+		defer pub.Close()
 		if h := lent.Capabilities().ServedHeaders; h["transferMode.dlna.org"] != "Streaming" {
 			return errors.New("the device's served headers did not reach the media server")
 		}
-		return lent.Play(ctx, &url.URL{Scheme: "http", Host: l.Addr().String(), Path: "/stream.ts", RawQuery: "n=1"}, media.MPEGTS, nil)
+		stream := pub.URL("stream.ts")
+		stream.RawQuery = "n=1"
+		return lent.Play(ctx, stream, media.MPEGTS, nil)
 	}).backend())
 
 	if err := castOn(t, c, streamOf("https://cdn.example/direct"), device).outcome(); err != nil {
 		t.Fatal(err)
 	}
-	handed, served := <-device.handed, <-delivery
+	handed := <-device.handed
 	if "http://"+handed.Host != c.media || !strings.HasPrefix(handed.Path, "/media/") {
-		t.Errorf("the device was handed %s, want the server's media route at %s rather than its delivery at %s", handed, c.media, served)
+		t.Errorf("the device was handed %s, want the server's media route at %s", handed, c.media)
 	}
 	if as := <-device.as; as != mediav1.Container_CONTAINER_MPEGTS {
 		t.Errorf("the device was handed the stream as %v, want MPEG-TS as the engine served it", as)
@@ -512,6 +511,14 @@ func TestWhatTheServerServesTheDeviceFetchesFromTheServerItself(t *testing.T) {
 	}
 	if got := <-delivered; got != "/stream.ts?n=1" {
 		t.Errorf("the delivery was asked for %q, want the path and query the engine served", got)
+	}
+	closed, err := http.Get(c.media + handed.RequestURI())
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed.Body.Close()
+	if closed.StatusCode != http.StatusNotFound {
+		t.Errorf("finished delivery answered %d, want 404", closed.StatusCode)
 	}
 }
 
@@ -527,9 +534,9 @@ func TestASourceOnLoopbackIsHandedToTheDeviceAsItIs(t *testing.T) {
 	}
 }
 
-func TestDevicesReachOnlyThePortsACastServesNeverTheAPI(t *testing.T) {
+func TestDevicesReachOnlyPublishedDeliveriesNeverTheAPI(t *testing.T) {
 	released := make(chan struct{})
-	c := serve(t, machinery(func(context.Context, execute.Device, deliver.Listeners, []*source.Stream, recovery.Turns) error {
+	c := serve(t, machinery(func(context.Context, execute.Device, output.Publisher, []*source.Stream, recovery.Turns) error {
 		<-released
 		return nil
 	}).backend())
@@ -538,8 +545,8 @@ func TestDevicesReachOnlyThePortsACastServesNeverTheAPI(t *testing.T) {
 	w := watching(t, c, id)
 	go func() { _ = lend(t.Context(), c, id, newLentDevice()) }()
 	for what, path := range map[string]string{
-		"a port the cast never served": "/media/" + id + "/22/etc/passwd",
-		"the API":                      "/" + mediav1connect.CastServiceName + "/Stop",
+		"an unpublished delivery": "/media/unknown/etc/passwd",
+		"the API":                 "/" + mediav1connect.CastServiceName + "/Stop",
 	} {
 		resp, err := http.Post(c.media+path, "application/json", strings.NewReader(`{"castId":"`+id+`"}`))
 		if err != nil {
@@ -560,7 +567,7 @@ func TestADeviceGoneOnItsNetworkIsGoneToTheCastsRecovery(t *testing.T) {
 	device := newLentDevice()
 	device.end = &mediav1.DeviceError{Error: &mediav1.DeviceError_Gone_{Gone: &mediav1.DeviceError_Gone{Device: "Bedroom", Observed: "stopped answering", Cause: "connection refused"}}}
 	seen := make(chan error, 1)
-	c := serve(t, machinery(func(ctx context.Context, lent execute.Device, _ deliver.Listeners, _ []*source.Stream, _ recovery.Turns) error {
+	c := serve(t, machinery(func(ctx context.Context, lent execute.Device, _ output.Publisher, _ []*source.Stream, _ recovery.Turns) error {
 		err := lent.AwaitEnd(ctx)
 		seen <- err
 		return err
@@ -578,7 +585,7 @@ func TestADeviceGoneOnItsNetworkIsGoneToTheCastsRecovery(t *testing.T) {
 
 func TestACastHasOneDeviceAndPlaysOnWhenItsLenderLeaves(t *testing.T) {
 	playing, ended := make(chan struct{}), make(chan struct{})
-	c := serve(t, machinery(func(ctx context.Context, device execute.Device, _ deliver.Listeners, streams []*source.Stream, _ recovery.Turns) error {
+	c := serve(t, machinery(func(ctx context.Context, device execute.Device, _ output.Publisher, streams []*source.Stream, _ recovery.Turns) error {
 		if err := device.Play(ctx, streams[0].URL, streams[0].ContentType, nil); err != nil {
 			return err
 		}
@@ -613,7 +620,7 @@ func TestACastHasOneDeviceAndPlaysOnWhenItsLenderLeaves(t *testing.T) {
 
 func TestACastThatNeedsItsDeviceAgainOnceItsLenderLeftEndsThere(t *testing.T) {
 	lent, again := make(chan struct{}), make(chan struct{})
-	c := serve(t, machinery(func(ctx context.Context, device execute.Device, _ deliver.Listeners, streams []*source.Stream, _ recovery.Turns) error {
+	c := serve(t, machinery(func(ctx context.Context, device execute.Device, _ output.Publisher, streams []*source.Stream, _ recovery.Turns) error {
 		close(lent)
 		<-again
 		// Recovery revising the attempt, each revision playing again, until the cast is ended.
@@ -705,7 +712,7 @@ func TestMalformedSourcesAreRejectedBeforeRankingOrPlayback(t *testing.T) {
 func TestAServerShuttingDownFailsItsCastsSayingSoAndTakesNoMore(t *testing.T) {
 	playing := make(chan struct{})
 	var tornDown atomic.Bool
-	c := serve(t, machinery(func(ctx context.Context, _ execute.Device, _ deliver.Listeners, _ []*source.Stream, _ recovery.Turns) error {
+	c := serve(t, machinery(func(ctx context.Context, _ execute.Device, _ output.Publisher, _ []*source.Stream, _ recovery.Turns) error {
 		close(playing)
 		<-ctx.Done()
 		// Teardown that takes a while, which shutting down waits for.

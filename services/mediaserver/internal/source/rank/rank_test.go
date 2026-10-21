@@ -24,22 +24,16 @@ type scripted struct {
 	asked []string
 }
 
-func (s *scripted) Probe(c *source.Stream) media.Prober {
-	return proberFunc(func(context.Context) (media.ProbeInfo, media.Reach, error) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.asked = append(s.asked, c.URL.String())
-		info, ok := s.answers[c.URL.String()]
-		if !ok {
-			return media.ProbeInfo{}, media.ReachUnproven, fmt.Errorf("no scripted measurement for %s", c.URL)
-		}
-		return *info, media.ReachOpened, nil
-	})
+func (s *scripted) Probe(_ context.Context, c *source.Stream) (source.Inspection, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.asked = append(s.asked, c.URL.String())
+	info, ok := s.answers[c.URL.String()]
+	if !ok {
+		return source.Inspection{}, fmt.Errorf("no scripted measurement for %s", c.URL)
+	}
+	return source.Inspection{Info: *info, Reach: media.ReachOpened}, nil
 }
-
-type proberFunc func(context.Context) (media.ProbeInfo, media.Reach, error)
-
-func (f proberFunc) Probe(ctx context.Context) (media.ProbeInfo, media.Reach, error) { return f(ctx) }
 
 // playable is a measurement of a real title: both tracks, a feature runtime.
 func playable(bitRate int64, height int, runtime time.Duration) *media.ProbeInfo {
@@ -87,10 +81,8 @@ func TestRankMeasuresTheLadderBeforeTheCapDropsIt(t *testing.T) {
 func TestCancellationDoesNotAdmitAProbeFailureAsAFallback(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	r := New(testConfig, 1080, func(*source.Stream) media.Prober {
-		return proberFunc(func(ctx context.Context) (media.ProbeInfo, media.Reach, error) {
-			return media.ProbeInfo{}, media.ReachUnproven, ctx.Err()
-		})
+	r := New(testConfig, 1080, func(ctx context.Context, _ *source.Stream) (source.Inspection, error) {
+		return source.Inspection{}, ctx.Err()
 	})
 	s := candidateAt(t, media.HLS, "https://origin.example/movie.m3u8")
 	if _, err := r.Rank(ctx, []*source.Stream{s}); !errors.Is(err, context.Canceled) {
@@ -98,5 +90,52 @@ func TestCancellationDoesNotAdmitAProbeFailureAsAFallback(t *testing.T) {
 	}
 	if _, err := r.Measure(ctx, s); !errors.Is(err, context.Canceled) {
 		t.Errorf("Measure = %v, want cancellation", err)
+	}
+}
+
+func TestWebMNameDisambiguatesMatroskaProbe(t *testing.T) {
+	const webm = "https://origin.example/movie.webm"
+	const mkv = "https://origin.example/movie.mkv"
+	measurer := &scripted{answers: map[string]*media.ProbeInfo{
+		webm: {ContentType: media.MKV, VideoCodec: media.CodecVP8, AudioCodec: media.CodecVorbis},
+		mkv:  {ContentType: media.MKV, VideoCodec: media.CodecVP8, AudioCodec: media.CodecVorbis},
+	}}
+	r := New(testConfig, 1080, measurer.Probe)
+	for _, tc := range []struct{ url, want string }{{webm, media.WebM}, {mkv, media.MKV}} {
+		got, err := r.Measure(t.Context(), candidateAt(t, "", tc.url))
+		if err != nil || got.ContentType != tc.want {
+			t.Errorf("Measure(%s) = %q, %v; want %q", tc.url, got.ContentType, err, tc.want)
+		}
+	}
+}
+
+func TestRankingCarriesSuccessfulBindingsAndClearsFailedInspection(t *testing.T) {
+	s := candidateAt(t, media.HLS, "https://origin.example/master.m3u8")
+	program, err := source.ProgramFor(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	program.Inputs[0].URL.Path = "/selected.m3u8"
+	info := *playable(1_000_000, 720, time.Hour)
+	observed := media.Observe(program, info)
+	var fail bool
+	r := New(testConfig, 1080, func(context.Context, *source.Stream) (source.Inspection, error) {
+		inspection := source.Inspection{Info: info, Reach: media.ReachOpened, Observation: &observed}
+		if fail {
+			return inspection, errors.New("inspection failed after partial output")
+		}
+		return inspection, nil
+	})
+	measured, err := r.Measure(t.Context(), s)
+	if err != nil || measured.Observation == nil {
+		t.Fatalf("ranked candidate lost bindings: %+v, %v", measured, err)
+	}
+	if got, ok := measured.Observation.For(program); !ok || got.VideoHeight != 720 {
+		t.Fatalf("ranked observation = %+v, bound=%t", got, ok)
+	}
+	fail = true
+	failed, err := r.Measure(t.Context(), measured)
+	if err != nil || failed.Observation != nil || failed.Probe != nil {
+		t.Fatalf("failed reinspection retained evidence: %+v, %v", failed, err)
 	}
 }

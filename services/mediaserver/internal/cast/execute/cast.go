@@ -5,11 +5,10 @@ import (
 	"io"
 	"net/url"
 
-	"github.com/stupside/castor/services/mediaserver/internal/cast/codec"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/deliver"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/codec"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/transcode"
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"github.com/stupside/castor/services/mediaserver/internal/probe"
@@ -31,11 +30,8 @@ type Machinery struct {
 	// Probes measures what an attempt reads: its source program, or its local buffer.
 	Probes probe.FFprobe
 
-	// Timelines serves the inputs whose timelines castor keeps.
-	Timelines Timelines
-
 	// InputArgs is how ffmpeg opens an input, as its source format says.
-	InputArgs transcode.InputArgs
+	InputArgs encoding.InputArgs
 }
 
 // Cast is what one cast's attempts run with, on the machinery every cast shares.
@@ -44,13 +40,17 @@ type Cast struct {
 
 	Device Device
 
-	Listeners deliver.Listeners
+	Publisher output.Publisher
 
 	// Captions is nil for a cast that wants none of the source's own.
 	Captions *Captions
 
-	// Subtitles is nil when generated subtitles are disabled.
-	Subtitles Subtitles
+	// Timelines uses this cast's source session across its recovery attempts.
+	Timelines Timelines
+
+	// Transcription selects an attempt's lazy recognizer after audio resolution.
+	// Nil disables generated subtitles.
+	Transcription func(ctx context.Context, audioLanguage string) Subtitles
 
 	// MaxHeight is the tallest picture the cast may show.
 	MaxHeight media.HeightCap
@@ -64,7 +64,8 @@ type Device interface {
 	AwaitEnd(ctx context.Context) error
 
 	// Pause holds the device on its picture until Resume, while the read behind it gets ahead again.
-	health.Transport
+	Pause(context.Context) error
+	Resume(context.Context) error
 
 	Capabilities() media.Capabilities
 }
@@ -87,7 +88,8 @@ type burnRenderer interface {
 	Writer(ctx context.Context) func(media.Progress)
 }
 
-// Timelines republishes a program's followed inputs for one read; the func stops serving them.
+// Timelines republishes a program's followed inputs for one read. The returned
+// function joins serving and reports its final outcome, even if the reader succeeded.
 type Timelines interface {
 	Republish(ctx context.Context, program media.Program) (media.Program, func() error, error)
 }

@@ -1,7 +1,6 @@
 package health
 
 import (
-	"context"
 	"time"
 
 	"github.com/stupside/castor/services/mediaserver/internal/media"
@@ -24,14 +23,14 @@ type Monitor struct {
 	// Audience is the device side (nil until device holds URL).
 	Audience Audience
 
-	// Transport holds and releases the device; nil where it cannot be held, or its read never gets ahead.
-	Transport Transport
+	// Holdable says whether the attempt can pause this playback.
+	Holdable bool
 
 	// Lead is the transcription frontier (nil if no burn-in).
 	Lead Lead
 
 	// Landed is the artifact's own size, so the gate opens on the artifact rather than the producer.
-	Landed func() int64
+	Landed func() (int64, error)
 
 	// Grace is how long the artifact may take; zero waits on it alone.
 	Grace time.Duration
@@ -59,10 +58,4 @@ type Lead interface {
 type Audience interface {
 	// Handed is the bytes taken and when the last one moved.
 	Handed() (bytes int64, last time.Time)
-}
-
-// Transport is the device's playback control.
-type Transport interface {
-	Pause(ctx context.Context) error
-	Resume(ctx context.Context) error
 }

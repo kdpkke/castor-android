@@ -9,8 +9,15 @@ import (
 
 type ProbeInfo struct {
 	ContentType string
-	BitRate     int64         // the container's own top-level rate, 0 where ffprobe reports none
-	Duration    time.Duration // the declared runtime, 0 for a live edge and where none is reported
+	// SourceUnwrapped reports that probing had to decode a nonstandard HLS segment envelope.
+	SourceUnwrapped bool
+	BitRate         int64         // the container's own top-level rate, 0 where ffprobe reports none
+	Duration        time.Duration // the declared runtime, 0 for a live edge and where none is reported
+
+	// Presence records selected stream descriptors even when their codec or
+	// dimensions are unknown. Missing parameters do not establish absence.
+	VideoPresent bool
+	AudioPresent bool
 
 	VideoCodec    Codec // e.g. CodecH264, CodecHEVC
 	VideoProfile  Profile
@@ -55,6 +62,7 @@ type AudioTrack struct {
 
 // TakeVideo is p with every picture fact taken from m; a new video field is carried here or nowhere.
 func (p ProbeInfo) TakeVideo(m ProbeInfo) ProbeInfo {
+	p.VideoPresent = m.VideoPresent
 	p.VideoCodec, p.VideoProfile, p.VideoHeight, p.VideoBitDepth = m.VideoCodec, m.VideoProfile, m.VideoHeight, m.VideoBitDepth
 	p.VideoHDR, p.VideoLevel = m.VideoHDR, m.VideoLevel
 	p.VideoStartOffset = m.VideoStartOffset
@@ -65,12 +73,23 @@ func (p ProbeInfo) TakeVideo(m ProbeInfo) ProbeInfo {
 
 // TakeAudio is p with every sound fact taken from m; a new audio field is carried here or nowhere.
 func (p ProbeInfo) TakeAudio(m ProbeInfo) ProbeInfo {
+	p.AudioPresent = m.AudioPresent
 	p.AudioCodec, p.AudioChannels, p.AudioSampleRate = m.AudioCodec, m.AudioChannels, m.AudioSampleRate
 	p.AudioTracks = slices.Clone(m.AudioTracks)
 	return p
 }
 
+// HasVideo reports whether video is present. A known codec also establishes
+// presence for facts assembled from selected track metadata rather than
+// directly from a probe's stream descriptors.
+func (p ProbeInfo) HasVideo() bool { return p.VideoPresent || p.VideoCodec != "" }
+func (p ProbeInfo) HasAudio() bool { return p.AudioPresent || p.AudioCodec != "" }
+
 func (p ProbeInfo) Clone() ProbeInfo {
+	if p.VideoStartOffset != nil {
+		offset := *p.VideoStartOffset
+		p.VideoStartOffset = &offset
+	}
 	p.VideoHeights = slices.Clone(p.VideoHeights)
 	p.AudioTracks = slices.Clone(p.AudioTracks)
 	p.ProgramHeights = maps.Clone(p.ProgramHeights)

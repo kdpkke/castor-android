@@ -10,11 +10,11 @@ func TestCanceledWatchDoesNotReadResources(t *testing.T) {
 	cause := errors.New("cast owner stopped")
 	ctx, cancel := context.WithCancelCause(t.Context())
 	cancel(cause)
-	err := Watch(ctx, Monitor{
+	err := watchFixture(ctx, Monitor{
 		Phase: Opening,
-		Landed: func() int64 {
+		Landed: func() (int64, error) {
 			t.Fatal("read a resource after cancellation")
-			return 0
+			return 0, nil
 		},
 	})
 	if !errors.Is(err, cause) {

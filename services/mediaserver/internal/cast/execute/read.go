@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stupside/castor/services/mediaserver/internal/cast/codec"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/transcode"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/codec"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
 
@@ -17,6 +17,7 @@ import (
 type buffered struct {
 	reader     *pull
 	transcript Transcript
+	expected   media.TrackRequirements
 	// captionVideoOffset locates the first video sample on the PCM timeline.
 	// An unknown clock cannot safely carry separately timed generated captions.
 	captionVideoOffset *time.Duration
@@ -25,28 +26,28 @@ type buffered struct {
 }
 
 // read buffers program under its own context, so releasing it stops the read and its transcription before the work dir goes.
-func (s *pipeline) read(work string, program media.Program) (*buffered, error) {
+func (s *preparation) read(work string, program media.Program) (*buffered, error) {
 	ctx, stop := context.WithCancel(s.ctx)
-	source, err := transcode.NewProgramSource(program, s.attempt.Fetch, s.cast.Binary, s.cast.InputArgs)
+	source, err := encoding.NewProgramSource(program, s.attempt.Fetch, s.Binary, s.InputArgs)
 	if err != nil {
 		stop()
 		return nil, err
 	}
-	facts := measure(ctx, "the source this cast buffers", s.cast.Probes.Source(program, source.ProbeInputs()))
+	facts := measure(ctx, "the source this cast buffers", s.Probes.Source(program, source.ProbeInputs()))
 	program = aligned(program, facts.probe.InputStarts)
-	if source, err = transcode.NewProgramSource(program, s.attempt.Fetch, s.cast.Binary, s.cast.InputArgs); err != nil {
+	if source, err = encoding.NewProgramSource(program, s.attempt.Fetch, s.Binary, s.InputArgs); err != nil {
 		stop()
 		return nil, err
 	}
 
-	transcript := s.transcription(ctx, facts, program)
 	floor, err := codec.Floor(ctx, codec.Inputs{
 		Probe:     facts.probe,
-		Into:      transcode.SpoolFormat,
+		Measured:  facts.measured,
+		Into:      encoding.SpoolFormat,
 		Decode:    s.attempt.Decode,
-		MaxHeight: s.cast.MaxHeight,
+		MaxHeight: s.MaxHeight,
 		Spliced:   program.Seamed(),
-		Encoders:  s.cast.Encoders,
+		Encoders:  s.Encoders,
 	})
 	if err != nil {
 		stop()
@@ -54,6 +55,7 @@ func (s *pipeline) read(work string, program media.Program) (*buffered, error) {
 	}
 	logRefusals(ctx, floor)
 
+	transcript := s.transcription(ctx, facts, s.attempt.Program)
 	var pcmRate int
 	if transcript != nil {
 		pcmRate = transcript.SampleRate()
@@ -61,10 +63,10 @@ func (s *pipeline) read(work string, program media.Program) (*buffered, error) {
 	live := slices.ContainsFunc(program.Inputs, func(in media.Input) bool { return in.Fetching().Live })
 	reader, err := startPull(ctx, pullSpec{
 		live:       live,
-		ffmpegPath: s.cast.FFmpegPath,
+		ffmpegPath: s.FFmpegPath,
 		source:     source,
 		probe:      facts.probe,
-		spoolPath:  filepath.Join(work, "spool"+transcode.SpoolFormat.Extension),
+		spoolPath:  filepath.Join(work, "spool"+encoding.SpoolFormat.Extension),
 		floor:      floor,
 		pcmRate:    pcmRate,
 	})
@@ -77,23 +79,24 @@ func (s *pipeline) read(work string, program media.Program) (*buffered, error) {
 	if transcript != nil {
 		transcribing.Go(func() { transcript.Run(ctx, reader.pcm) })
 	}
-	s.releases.push(func() error {
-		stop()
+	s.releases.push(reader.spool.Close)
+	s.releases.worker(stop, func() error {
 		<-reader.Done()
 		transcribing.Wait()
-		return reader.spool.Close()
+		return unlessTeardown(reader.Err())
 	})
 	var videoOffset *time.Duration
 	if track, ok := program.Track(media.TrackVideo); ok && facts.probe.VideoStartOffset != nil {
 		offset := *facts.probe.VideoStartOffset + program.Offsets[track.Input]
 		videoOffset = &offset
 	}
-	return &buffered{reader: reader, transcript: transcript, captionVideoOffset: videoOffset, live: live}, nil
+	expected := facts.probe.RequiredTracks().Or(s.attempt.Program.RequiredTracks())
+	return &buffered{reader: reader, transcript: transcript, expected: expected, captionVideoOffset: videoOffset, live: live}, nil
 }
 
 // transcription reads sound once; native subtitles and burn-in consume the same cues.
-func (s *pipeline) transcription(ctx context.Context, facts facts, program media.Program) Transcript {
-	if s.cast.Subtitles == nil {
+func (s *preparation) transcription(ctx context.Context, facts facts, program media.Program) Transcript {
+	if s.subtitles == nil {
 		return nil
 	}
 	if len(s.shown) > 0 {
@@ -104,5 +107,5 @@ func (s *pipeline) transcription(ctx context.Context, facts facts, program media
 		slog.InfoContext(ctx, "no subtitles for this cast: nothing shows the source carries sound")
 		return nil
 	}
-	return s.cast.Subtitles(ctx)
+	return s.subtitles(ctx)
 }

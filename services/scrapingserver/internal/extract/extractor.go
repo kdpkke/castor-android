@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/stupside/castor/internal/telemetry"
 	"log/slog"
+	"maps"
 	"slices"
 	"sync"
 
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
+	"github.com/stupside/castor/internal/telemetry"
+	"google.golang.org/protobuf/proto"
 )
 
 // Extractor opens pages in a browser and captures the streams they fetch.
@@ -101,13 +103,34 @@ func (e *Extractor) Resolve(ctx context.Context, urls []string) (streams []*cast
 }
 
 func deduplicate(streams []*castorv1.StreamCandidate) []*castorv1.StreamCandidate {
-	seen := make(map[string]struct{}, len(streams))
-	return slices.DeleteFunc(slices.Clone(streams), func(s *castorv1.StreamCandidate) bool {
-		key := s.GetStream().GetUrl()
-		if _, ok := seen[key]; ok {
-			return true
+	// A URL is not sufficient to replay a browser request: two pages can
+	// fetch the same resource with different cookies or authorization. Keep
+	// each access path so media can try another one if the first fails.
+	byURL := make(map[string][]*castorv1.StreamCandidate, len(streams))
+	out := make([]*castorv1.StreamCandidate, 0, len(streams))
+	for _, candidate := range streams {
+		stream := candidate.GetStream()
+		var duplicate *castorv1.StreamCandidate
+		for _, prior := range byURL[stream.GetUrl()] {
+			if maps.Equal(prior.GetStream().GetHeaders(), stream.GetHeaders()) {
+				duplicate = prior
+				break
+			}
 		}
-		seen[key] = struct{}{}
-		return false
-	})
+		if duplicate != nil {
+			// The same request may have been observed before its document was
+			// inspected. Retain the strongest evidence available for ranking.
+			if duplicate.Ladder == castorv1.Ladder_LADDER_UNSPECIFIED || candidate.GetLadder() == castorv1.Ladder_LADDER_MULTIVARIANT {
+				duplicate.Ladder = candidate.GetLadder()
+			}
+			if duplicate.GetStream().ContentType == "" {
+				duplicate.Stream.ContentType = stream.GetContentType()
+			}
+			continue
+		}
+		stored := proto.CloneOf(candidate)
+		byURL[stream.GetUrl()] = append(byURL[stream.GetUrl()], stored)
+		out = append(out, stored)
+	}
+	return out
 }

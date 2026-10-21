@@ -132,58 +132,6 @@ func (Container) EnumDescriptor() ([]byte, []int) {
 	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{1}
 }
 
-type VideoCodec int32
-
-const (
-	VideoCodec_VIDEO_CODEC_UNSPECIFIED VideoCodec = 0
-	VideoCodec_VIDEO_CODEC_H264        VideoCodec = 1
-	VideoCodec_VIDEO_CODEC_HEVC        VideoCodec = 2
-	VideoCodec_VIDEO_CODEC_VP8         VideoCodec = 3
-)
-
-// Enum value maps for VideoCodec.
-var (
-	VideoCodec_name = map[int32]string{
-		0: "VIDEO_CODEC_UNSPECIFIED",
-		1: "VIDEO_CODEC_H264",
-		2: "VIDEO_CODEC_HEVC",
-		3: "VIDEO_CODEC_VP8",
-	}
-	VideoCodec_value = map[string]int32{
-		"VIDEO_CODEC_UNSPECIFIED": 0,
-		"VIDEO_CODEC_H264":        1,
-		"VIDEO_CODEC_HEVC":        2,
-		"VIDEO_CODEC_VP8":         3,
-	}
-)
-
-func (x VideoCodec) Enum() *VideoCodec {
-	p := new(VideoCodec)
-	*p = x
-	return p
-}
-
-func (x VideoCodec) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (VideoCodec) Descriptor() protoreflect.EnumDescriptor {
-	return file_castor_media_v1_device_proto_enumTypes[2].Descriptor()
-}
-
-func (VideoCodec) Type() protoreflect.EnumType {
-	return &file_castor_media_v1_device_proto_enumTypes[2]
-}
-
-func (x VideoCodec) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use VideoCodec.Descriptor instead.
-func (VideoCodec) EnumDescriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{2}
-}
-
 type AudioCodec int32
 
 const (
@@ -226,11 +174,11 @@ func (x AudioCodec) String() string {
 }
 
 func (AudioCodec) Descriptor() protoreflect.EnumDescriptor {
-	return file_castor_media_v1_device_proto_enumTypes[3].Descriptor()
+	return file_castor_media_v1_device_proto_enumTypes[2].Descriptor()
 }
 
 func (AudioCodec) Type() protoreflect.EnumType {
-	return &file_castor_media_v1_device_proto_enumTypes[3]
+	return &file_castor_media_v1_device_proto_enumTypes[2]
 }
 
 func (x AudioCodec) Number() protoreflect.EnumNumber {
@@ -239,66 +187,7 @@ func (x AudioCodec) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AudioCodec.Descriptor instead.
 func (AudioCodec) EnumDescriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{3}
-}
-
-// Profile is a video codec profile a device decodes.
-type Profile int32
-
-const (
-	Profile_PROFILE_UNSPECIFIED          Profile = 0
-	Profile_PROFILE_BASELINE             Profile = 1
-	Profile_PROFILE_CONSTRAINED_BASELINE Profile = 2
-	Profile_PROFILE_MAIN                 Profile = 3
-	Profile_PROFILE_MAIN_10              Profile = 4
-	Profile_PROFILE_HIGH                 Profile = 5
-)
-
-// Enum value maps for Profile.
-var (
-	Profile_name = map[int32]string{
-		0: "PROFILE_UNSPECIFIED",
-		1: "PROFILE_BASELINE",
-		2: "PROFILE_CONSTRAINED_BASELINE",
-		3: "PROFILE_MAIN",
-		4: "PROFILE_MAIN_10",
-		5: "PROFILE_HIGH",
-	}
-	Profile_value = map[string]int32{
-		"PROFILE_UNSPECIFIED":          0,
-		"PROFILE_BASELINE":             1,
-		"PROFILE_CONSTRAINED_BASELINE": 2,
-		"PROFILE_MAIN":                 3,
-		"PROFILE_MAIN_10":              4,
-		"PROFILE_HIGH":                 5,
-	}
-)
-
-func (x Profile) Enum() *Profile {
-	p := new(Profile)
-	*p = x
-	return p
-}
-
-func (x Profile) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (Profile) Descriptor() protoreflect.EnumDescriptor {
-	return file_castor_media_v1_device_proto_enumTypes[4].Descriptor()
-}
-
-func (Profile) Type() protoreflect.EnumType {
-	return &file_castor_media_v1_device_proto_enumTypes[4]
-}
-
-func (x Profile) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use Profile.Descriptor instead.
-func (Profile) EnumDescriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{4}
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{2}
 }
 
 type ProgressiveSupport_Container int32
@@ -340,11 +229,11 @@ func (x ProgressiveSupport_Container) String() string {
 }
 
 func (ProgressiveSupport_Container) Descriptor() protoreflect.EnumDescriptor {
-	return file_castor_media_v1_device_proto_enumTypes[5].Descriptor()
+	return file_castor_media_v1_device_proto_enumTypes[3].Descriptor()
 }
 
 func (ProgressiveSupport_Container) Type() protoreflect.EnumType {
-	return &file_castor_media_v1_device_proto_enumTypes[5]
+	return &file_castor_media_v1_device_proto_enumTypes[3]
 }
 
 func (x ProgressiveSupport_Container) Number() protoreflect.EnumNumber {
@@ -386,11 +275,11 @@ func (x HLSSupport_Subtitles) String() string {
 }
 
 func (HLSSupport_Subtitles) Descriptor() protoreflect.EnumDescriptor {
-	return file_castor_media_v1_device_proto_enumTypes[6].Descriptor()
+	return file_castor_media_v1_device_proto_enumTypes[4].Descriptor()
 }
 
 func (HLSSupport_Subtitles) Type() protoreflect.EnumType {
-	return &file_castor_media_v1_device_proto_enumTypes[6]
+	return &file_castor_media_v1_device_proto_enumTypes[4]
 }
 
 func (x HLSSupport_Subtitles) Number() protoreflect.EnumNumber {
@@ -400,6 +289,156 @@ func (x HLSSupport_Subtitles) Number() protoreflect.EnumNumber {
 // Deprecated: Use HLSSupport_Subtitles.Descriptor instead.
 func (HLSSupport_Subtitles) EnumDescriptor() ([]byte, []int) {
 	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{8, 0}
+}
+
+type HLSSupport_ExtraSegmentFormat int32
+
+const (
+	HLSSupport_EXTRA_SEGMENT_FORMAT_UNSPECIFIED HLSSupport_ExtraSegmentFormat = 0
+	HLSSupport_EXTRA_SEGMENT_FORMAT_TIKTIKPX    HLSSupport_ExtraSegmentFormat = 1 // PNG/gzip/MPEG-TS envelope
+)
+
+// Enum value maps for HLSSupport_ExtraSegmentFormat.
+var (
+	HLSSupport_ExtraSegmentFormat_name = map[int32]string{
+		0: "EXTRA_SEGMENT_FORMAT_UNSPECIFIED",
+		1: "EXTRA_SEGMENT_FORMAT_TIKTIKPX",
+	}
+	HLSSupport_ExtraSegmentFormat_value = map[string]int32{
+		"EXTRA_SEGMENT_FORMAT_UNSPECIFIED": 0,
+		"EXTRA_SEGMENT_FORMAT_TIKTIKPX":    1,
+	}
+)
+
+func (x HLSSupport_ExtraSegmentFormat) Enum() *HLSSupport_ExtraSegmentFormat {
+	p := new(HLSSupport_ExtraSegmentFormat)
+	*p = x
+	return p
+}
+
+func (x HLSSupport_ExtraSegmentFormat) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (HLSSupport_ExtraSegmentFormat) Descriptor() protoreflect.EnumDescriptor {
+	return file_castor_media_v1_device_proto_enumTypes[5].Descriptor()
+}
+
+func (HLSSupport_ExtraSegmentFormat) Type() protoreflect.EnumType {
+	return &file_castor_media_v1_device_proto_enumTypes[5]
+}
+
+func (x HLSSupport_ExtraSegmentFormat) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use HLSSupport_ExtraSegmentFormat.Descriptor instead.
+func (HLSSupport_ExtraSegmentFormat) EnumDescriptor() ([]byte, []int) {
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{8, 1}
+}
+
+type H264Support_Profile int32
+
+const (
+	H264Support_PROFILE_UNSPECIFIED          H264Support_Profile = 0
+	H264Support_PROFILE_CONSTRAINED_BASELINE H264Support_Profile = 1
+	H264Support_PROFILE_BASELINE             H264Support_Profile = 2
+	H264Support_PROFILE_MAIN                 H264Support_Profile = 3
+	H264Support_PROFILE_HIGH                 H264Support_Profile = 4
+)
+
+// Enum value maps for H264Support_Profile.
+var (
+	H264Support_Profile_name = map[int32]string{
+		0: "PROFILE_UNSPECIFIED",
+		1: "PROFILE_CONSTRAINED_BASELINE",
+		2: "PROFILE_BASELINE",
+		3: "PROFILE_MAIN",
+		4: "PROFILE_HIGH",
+	}
+	H264Support_Profile_value = map[string]int32{
+		"PROFILE_UNSPECIFIED":          0,
+		"PROFILE_CONSTRAINED_BASELINE": 1,
+		"PROFILE_BASELINE":             2,
+		"PROFILE_MAIN":                 3,
+		"PROFILE_HIGH":                 4,
+	}
+)
+
+func (x H264Support_Profile) Enum() *H264Support_Profile {
+	p := new(H264Support_Profile)
+	*p = x
+	return p
+}
+
+func (x H264Support_Profile) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (H264Support_Profile) Descriptor() protoreflect.EnumDescriptor {
+	return file_castor_media_v1_device_proto_enumTypes[6].Descriptor()
+}
+
+func (H264Support_Profile) Type() protoreflect.EnumType {
+	return &file_castor_media_v1_device_proto_enumTypes[6]
+}
+
+func (x H264Support_Profile) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use H264Support_Profile.Descriptor instead.
+func (H264Support_Profile) EnumDescriptor() ([]byte, []int) {
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{10, 0}
+}
+
+type HEVCSupport_Profile int32
+
+const (
+	HEVCSupport_PROFILE_UNSPECIFIED HEVCSupport_Profile = 0
+	HEVCSupport_PROFILE_MAIN        HEVCSupport_Profile = 1
+	HEVCSupport_PROFILE_MAIN_10     HEVCSupport_Profile = 2
+)
+
+// Enum value maps for HEVCSupport_Profile.
+var (
+	HEVCSupport_Profile_name = map[int32]string{
+		0: "PROFILE_UNSPECIFIED",
+		1: "PROFILE_MAIN",
+		2: "PROFILE_MAIN_10",
+	}
+	HEVCSupport_Profile_value = map[string]int32{
+		"PROFILE_UNSPECIFIED": 0,
+		"PROFILE_MAIN":        1,
+		"PROFILE_MAIN_10":     2,
+	}
+)
+
+func (x HEVCSupport_Profile) Enum() *HEVCSupport_Profile {
+	p := new(HEVCSupport_Profile)
+	*p = x
+	return p
+}
+
+func (x HEVCSupport_Profile) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (HEVCSupport_Profile) Descriptor() protoreflect.EnumDescriptor {
+	return file_castor_media_v1_device_proto_enumTypes[7].Descriptor()
+}
+
+func (HEVCSupport_Profile) Type() protoreflect.EnumType {
+	return &file_castor_media_v1_device_proto_enumTypes[7]
+}
+
+func (x HEVCSupport_Profile) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use HEVCSupport_Profile.Descriptor instead.
+func (HEVCSupport_Profile) EnumDescriptor() ([]byte, []int) {
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{11, 0}
 }
 
 type DriveRequest struct {
@@ -965,9 +1004,11 @@ func (x *ProgressiveSupport) GetContainer() ProgressiveSupport_Container {
 type HLSSupport struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Subtitle rendition playlists refreshed alongside the media playlist.
-	Subtitles     HLSSupport_Subtitles `protobuf:"varint,1,opt,name=subtitles,proto3,enum=castor.media.v1.HLSSupport_Subtitles" json:"subtitles,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Subtitles HLSSupport_Subtitles `protobuf:"varint,1,opt,name=subtitles,proto3,enum=castor.media.v1.HLSSupport_Subtitles" json:"subtitles,omitempty"`
+	// Nonstandard segment formats accepted in addition to ordinary HLS segments.
+	ExtraSegmentFormats []HLSSupport_ExtraSegmentFormat `protobuf:"varint,2,rep,packed,name=extra_segment_formats,json=extraSegmentFormats,proto3,enum=castor.media.v1.HLSSupport_ExtraSegmentFormat" json:"extra_segment_formats,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *HLSSupport) Reset() {
@@ -1007,13 +1048,21 @@ func (x *HLSSupport) GetSubtitles() HLSSupport_Subtitles {
 	return HLSSupport_SUBTITLES_UNSPECIFIED
 }
 
+func (x *HLSSupport) GetExtraSegmentFormats() []HLSSupport_ExtraSegmentFormat {
+	if x != nil {
+		return x.ExtraSegmentFormats
+	}
+	return nil
+}
+
 type VideoSupport struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Codec VideoCodec             `protobuf:"varint,1,opt,name=codec,proto3,enum=castor.media.v1.VideoCodec" json:"codec,omitempty"`
-	// profiles are those decoded; none is any.
-	Profiles      []Profile `protobuf:"varint,2,rep,packed,name=profiles,proto3,enum=castor.media.v1.Profile" json:"profiles,omitempty"`
-	BitDepths     []uint32  `protobuf:"varint,3,rep,packed,name=bit_depths,json=bitDepths,proto3" json:"bit_depths,omitempty"`
-	MaxLevel      uint32    `protobuf:"varint,4,opt,name=max_level,json=maxLevel,proto3" json:"max_level,omitempty"`
+	// Types that are valid to be assigned to Codec:
+	//
+	//	*VideoSupport_H264
+	//	*VideoSupport_Hevc
+	//	*VideoSupport_Vp8
+	Codec         isVideoSupport_Codec `protobuf_oneof:"codec"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1048,32 +1097,211 @@ func (*VideoSupport) Descriptor() ([]byte, []int) {
 	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *VideoSupport) GetCodec() VideoCodec {
+func (x *VideoSupport) GetCodec() isVideoSupport_Codec {
 	if x != nil {
 		return x.Codec
 	}
-	return VideoCodec_VIDEO_CODEC_UNSPECIFIED
+	return nil
 }
 
-func (x *VideoSupport) GetProfiles() []Profile {
+func (x *VideoSupport) GetH264() *H264Support {
+	if x != nil {
+		if x, ok := x.Codec.(*VideoSupport_H264); ok {
+			return x.H264
+		}
+	}
+	return nil
+}
+
+func (x *VideoSupport) GetHevc() *HEVCSupport {
+	if x != nil {
+		if x, ok := x.Codec.(*VideoSupport_Hevc); ok {
+			return x.Hevc
+		}
+	}
+	return nil
+}
+
+func (x *VideoSupport) GetVp8() *VP8Support {
+	if x != nil {
+		if x, ok := x.Codec.(*VideoSupport_Vp8); ok {
+			return x.Vp8
+		}
+	}
+	return nil
+}
+
+type isVideoSupport_Codec interface {
+	isVideoSupport_Codec()
+}
+
+type VideoSupport_H264 struct {
+	H264 *H264Support `protobuf:"bytes,1,opt,name=h264,proto3,oneof"`
+}
+
+type VideoSupport_Hevc struct {
+	Hevc *HEVCSupport `protobuf:"bytes,2,opt,name=hevc,proto3,oneof"`
+}
+
+type VideoSupport_Vp8 struct {
+	Vp8 *VP8Support `protobuf:"bytes,3,opt,name=vp8,proto3,oneof"`
+}
+
+func (*VideoSupport_H264) isVideoSupport_Codec() {}
+
+func (*VideoSupport_Hevc) isVideoSupport_Codec() {}
+
+func (*VideoSupport_Vp8) isVideoSupport_Codec() {}
+
+type H264Support struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Empty means any H.264 profile within the advertised level.
+	Profiles      []H264Support_Profile `protobuf:"varint,1,rep,packed,name=profiles,proto3,enum=castor.media.v1.H264Support_Profile" json:"profiles,omitempty"`
+	MaxLevel      uint32                `protobuf:"varint,2,opt,name=max_level,json=maxLevel,proto3" json:"max_level,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *H264Support) Reset() {
+	*x = H264Support{}
+	mi := &file_castor_media_v1_device_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *H264Support) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*H264Support) ProtoMessage() {}
+
+func (x *H264Support) ProtoReflect() protoreflect.Message {
+	mi := &file_castor_media_v1_device_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use H264Support.ProtoReflect.Descriptor instead.
+func (*H264Support) Descriptor() ([]byte, []int) {
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *H264Support) GetProfiles() []H264Support_Profile {
 	if x != nil {
 		return x.Profiles
 	}
 	return nil
 }
 
-func (x *VideoSupport) GetBitDepths() []uint32 {
+func (x *H264Support) GetMaxLevel() uint32 {
+	if x != nil {
+		return x.MaxLevel
+	}
+	return 0
+}
+
+type HEVCSupport struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Empty means any HEVC profile at the advertised bit depths.
+	Profiles []HEVCSupport_Profile `protobuf:"varint,1,rep,packed,name=profiles,proto3,enum=castor.media.v1.HEVCSupport_Profile" json:"profiles,omitempty"`
+	// Empty means 8-bit only.
+	BitDepths     []uint32 `protobuf:"varint,2,rep,packed,name=bit_depths,json=bitDepths,proto3" json:"bit_depths,omitempty"`
+	MaxLevel      uint32   `protobuf:"varint,3,opt,name=max_level,json=maxLevel,proto3" json:"max_level,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HEVCSupport) Reset() {
+	*x = HEVCSupport{}
+	mi := &file_castor_media_v1_device_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HEVCSupport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HEVCSupport) ProtoMessage() {}
+
+func (x *HEVCSupport) ProtoReflect() protoreflect.Message {
+	mi := &file_castor_media_v1_device_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HEVCSupport.ProtoReflect.Descriptor instead.
+func (*HEVCSupport) Descriptor() ([]byte, []int) {
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *HEVCSupport) GetProfiles() []HEVCSupport_Profile {
+	if x != nil {
+		return x.Profiles
+	}
+	return nil
+}
+
+func (x *HEVCSupport) GetBitDepths() []uint32 {
 	if x != nil {
 		return x.BitDepths
 	}
 	return nil
 }
 
-func (x *VideoSupport) GetMaxLevel() uint32 {
+func (x *HEVCSupport) GetMaxLevel() uint32 {
 	if x != nil {
 		return x.MaxLevel
 	}
 	return 0
+}
+
+type VP8Support struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VP8Support) Reset() {
+	*x = VP8Support{}
+	mi := &file_castor_media_v1_device_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VP8Support) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VP8Support) ProtoMessage() {}
+
+func (x *VP8Support) ProtoReflect() protoreflect.Message {
+	mi := &file_castor_media_v1_device_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VP8Support.ProtoReflect.Descriptor instead.
+func (*VP8Support) Descriptor() ([]byte, []int) {
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{12}
 }
 
 type AudioSupport struct {
@@ -1086,7 +1314,7 @@ type AudioSupport struct {
 
 func (x *AudioSupport) Reset() {
 	*x = AudioSupport{}
-	mi := &file_castor_media_v1_device_proto_msgTypes[10]
+	mi := &file_castor_media_v1_device_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1098,7 +1326,7 @@ func (x *AudioSupport) String() string {
 func (*AudioSupport) ProtoMessage() {}
 
 func (x *AudioSupport) ProtoReflect() protoreflect.Message {
-	mi := &file_castor_media_v1_device_proto_msgTypes[10]
+	mi := &file_castor_media_v1_device_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1111,7 +1339,7 @@ func (x *AudioSupport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AudioSupport.ProtoReflect.Descriptor instead.
 func (*AudioSupport) Descriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{10}
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *AudioSupport) GetCodec() AudioCodec {
@@ -1142,7 +1370,7 @@ type DeviceCommand struct {
 
 func (x *DeviceCommand) Reset() {
 	*x = DeviceCommand{}
-	mi := &file_castor_media_v1_device_proto_msgTypes[11]
+	mi := &file_castor_media_v1_device_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1154,7 +1382,7 @@ func (x *DeviceCommand) String() string {
 func (*DeviceCommand) ProtoMessage() {}
 
 func (x *DeviceCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_castor_media_v1_device_proto_msgTypes[11]
+	mi := &file_castor_media_v1_device_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1167,7 +1395,7 @@ func (x *DeviceCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceCommand.ProtoReflect.Descriptor instead.
 func (*DeviceCommand) Descriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{11}
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DeviceCommand) GetCommand() isDeviceCommand_Command {
@@ -1226,7 +1454,7 @@ type DeviceError struct {
 
 func (x *DeviceError) Reset() {
 	*x = DeviceError{}
-	mi := &file_castor_media_v1_device_proto_msgTypes[12]
+	mi := &file_castor_media_v1_device_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1238,7 +1466,7 @@ func (x *DeviceError) String() string {
 func (*DeviceError) ProtoMessage() {}
 
 func (x *DeviceError) ProtoReflect() protoreflect.Message {
-	mi := &file_castor_media_v1_device_proto_msgTypes[12]
+	mi := &file_castor_media_v1_device_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1251,7 +1479,7 @@ func (x *DeviceError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceError.ProtoReflect.Descriptor instead.
 func (*DeviceError) Descriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{12}
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *DeviceError) GetError() isDeviceError_Error {
@@ -1303,7 +1531,7 @@ type AnswerRequest_Done struct {
 
 func (x *AnswerRequest_Done) Reset() {
 	*x = AnswerRequest_Done{}
-	mi := &file_castor_media_v1_device_proto_msgTypes[13]
+	mi := &file_castor_media_v1_device_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1315,7 +1543,7 @@ func (x *AnswerRequest_Done) String() string {
 func (*AnswerRequest_Done) ProtoMessage() {}
 
 func (x *AnswerRequest_Done) ProtoReflect() protoreflect.Message {
-	mi := &file_castor_media_v1_device_proto_msgTypes[13]
+	mi := &file_castor_media_v1_device_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1347,7 +1575,7 @@ type DeviceCommand_Call struct {
 
 func (x *DeviceCommand_Call) Reset() {
 	*x = DeviceCommand_Call{}
-	mi := &file_castor_media_v1_device_proto_msgTypes[15]
+	mi := &file_castor_media_v1_device_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1359,7 +1587,7 @@ func (x *DeviceCommand_Call) String() string {
 func (*DeviceCommand_Call) ProtoMessage() {}
 
 func (x *DeviceCommand_Call) ProtoReflect() protoreflect.Message {
-	mi := &file_castor_media_v1_device_proto_msgTypes[15]
+	mi := &file_castor_media_v1_device_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1372,7 +1600,7 @@ func (x *DeviceCommand_Call) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceCommand_Call.ProtoReflect.Descriptor instead.
 func (*DeviceCommand_Call) Descriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{11, 0}
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{14, 0}
 }
 
 func (x *DeviceCommand_Call) GetId() string {
@@ -1465,7 +1693,7 @@ type DeviceCommand_Play struct {
 
 func (x *DeviceCommand_Play) Reset() {
 	*x = DeviceCommand_Play{}
-	mi := &file_castor_media_v1_device_proto_msgTypes[16]
+	mi := &file_castor_media_v1_device_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1477,7 +1705,7 @@ func (x *DeviceCommand_Play) String() string {
 func (*DeviceCommand_Play) ProtoMessage() {}
 
 func (x *DeviceCommand_Play) ProtoReflect() protoreflect.Message {
-	mi := &file_castor_media_v1_device_proto_msgTypes[16]
+	mi := &file_castor_media_v1_device_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1490,7 +1718,7 @@ func (x *DeviceCommand_Play) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceCommand_Play.ProtoReflect.Descriptor instead.
 func (*DeviceCommand_Play) Descriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{11, 1}
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{14, 1}
 }
 
 func (x *DeviceCommand_Play) GetUrl() string {
@@ -1530,7 +1758,7 @@ type DeviceCommand_Caption struct {
 
 func (x *DeviceCommand_Caption) Reset() {
 	*x = DeviceCommand_Caption{}
-	mi := &file_castor_media_v1_device_proto_msgTypes[17]
+	mi := &file_castor_media_v1_device_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1542,7 +1770,7 @@ func (x *DeviceCommand_Caption) String() string {
 func (*DeviceCommand_Caption) ProtoMessage() {}
 
 func (x *DeviceCommand_Caption) ProtoReflect() protoreflect.Message {
-	mi := &file_castor_media_v1_device_proto_msgTypes[17]
+	mi := &file_castor_media_v1_device_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1555,7 +1783,7 @@ func (x *DeviceCommand_Caption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceCommand_Caption.ProtoReflect.Descriptor instead.
 func (*DeviceCommand_Caption) Descriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{11, 2}
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{14, 2}
 }
 
 func (x *DeviceCommand_Caption) GetUrl() string {
@@ -1601,7 +1829,7 @@ type DeviceCommand_AwaitEnd struct {
 
 func (x *DeviceCommand_AwaitEnd) Reset() {
 	*x = DeviceCommand_AwaitEnd{}
-	mi := &file_castor_media_v1_device_proto_msgTypes[18]
+	mi := &file_castor_media_v1_device_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1613,7 +1841,7 @@ func (x *DeviceCommand_AwaitEnd) String() string {
 func (*DeviceCommand_AwaitEnd) ProtoMessage() {}
 
 func (x *DeviceCommand_AwaitEnd) ProtoReflect() protoreflect.Message {
-	mi := &file_castor_media_v1_device_proto_msgTypes[18]
+	mi := &file_castor_media_v1_device_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1626,7 +1854,7 @@ func (x *DeviceCommand_AwaitEnd) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceCommand_AwaitEnd.ProtoReflect.Descriptor instead.
 func (*DeviceCommand_AwaitEnd) Descriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{11, 3}
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{14, 3}
 }
 
 type DeviceCommand_Pause struct {
@@ -1637,7 +1865,7 @@ type DeviceCommand_Pause struct {
 
 func (x *DeviceCommand_Pause) Reset() {
 	*x = DeviceCommand_Pause{}
-	mi := &file_castor_media_v1_device_proto_msgTypes[19]
+	mi := &file_castor_media_v1_device_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1649,7 +1877,7 @@ func (x *DeviceCommand_Pause) String() string {
 func (*DeviceCommand_Pause) ProtoMessage() {}
 
 func (x *DeviceCommand_Pause) ProtoReflect() protoreflect.Message {
-	mi := &file_castor_media_v1_device_proto_msgTypes[19]
+	mi := &file_castor_media_v1_device_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1662,7 +1890,7 @@ func (x *DeviceCommand_Pause) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceCommand_Pause.ProtoReflect.Descriptor instead.
 func (*DeviceCommand_Pause) Descriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{11, 4}
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{14, 4}
 }
 
 type DeviceCommand_Resume struct {
@@ -1673,7 +1901,7 @@ type DeviceCommand_Resume struct {
 
 func (x *DeviceCommand_Resume) Reset() {
 	*x = DeviceCommand_Resume{}
-	mi := &file_castor_media_v1_device_proto_msgTypes[20]
+	mi := &file_castor_media_v1_device_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1685,7 +1913,7 @@ func (x *DeviceCommand_Resume) String() string {
 func (*DeviceCommand_Resume) ProtoMessage() {}
 
 func (x *DeviceCommand_Resume) ProtoReflect() protoreflect.Message {
-	mi := &file_castor_media_v1_device_proto_msgTypes[20]
+	mi := &file_castor_media_v1_device_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1698,7 +1926,7 @@ func (x *DeviceCommand_Resume) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceCommand_Resume.ProtoReflect.Descriptor instead.
 func (*DeviceCommand_Resume) Descriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{11, 5}
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{14, 5}
 }
 
 type DeviceCommand_Cancel struct {
@@ -1710,7 +1938,7 @@ type DeviceCommand_Cancel struct {
 
 func (x *DeviceCommand_Cancel) Reset() {
 	*x = DeviceCommand_Cancel{}
-	mi := &file_castor_media_v1_device_proto_msgTypes[21]
+	mi := &file_castor_media_v1_device_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1722,7 +1950,7 @@ func (x *DeviceCommand_Cancel) String() string {
 func (*DeviceCommand_Cancel) ProtoMessage() {}
 
 func (x *DeviceCommand_Cancel) ProtoReflect() protoreflect.Message {
-	mi := &file_castor_media_v1_device_proto_msgTypes[21]
+	mi := &file_castor_media_v1_device_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1735,7 +1963,7 @@ func (x *DeviceCommand_Cancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceCommand_Cancel.ProtoReflect.Descriptor instead.
 func (*DeviceCommand_Cancel) Descriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{11, 6}
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{14, 6}
 }
 
 func (x *DeviceCommand_Cancel) GetCommandId() string {
@@ -1758,7 +1986,7 @@ type DeviceError_Gone struct {
 
 func (x *DeviceError_Gone) Reset() {
 	*x = DeviceError_Gone{}
-	mi := &file_castor_media_v1_device_proto_msgTypes[22]
+	mi := &file_castor_media_v1_device_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1770,7 +1998,7 @@ func (x *DeviceError_Gone) String() string {
 func (*DeviceError_Gone) ProtoMessage() {}
 
 func (x *DeviceError_Gone) ProtoReflect() protoreflect.Message {
-	mi := &file_castor_media_v1_device_proto_msgTypes[22]
+	mi := &file_castor_media_v1_device_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1783,7 +2011,7 @@ func (x *DeviceError_Gone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceError_Gone.ProtoReflect.Descriptor instead.
 func (*DeviceError_Gone) Descriptor() ([]byte, []int) {
-	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{12, 0}
+	return file_castor_media_v1_device_proto_rawDescGZIP(), []int{15, 0}
 }
 
 func (x *DeviceError_Gone) GetDevice() string {
@@ -1877,21 +2105,43 @@ const file_castor_media_v1_device_proto_rawDesc = "" +
 	"\rCONTAINER_MP4\x10\x01\x12\x14\n" +
 	"\x10CONTAINER_MPEGTS\x10\x02\x12\x11\n" +
 	"\rCONTAINER_MKV\x10\x03\x12\x12\n" +
-	"\x0eCONTAINER_WEBM\x10\x04\"\x99\x01\n" +
+	"\x0eCONTAINER_WEBM\x10\x04\"\xef\x02\n" +
 	"\n" +
 	"HLSSupport\x12M\n" +
-	"\tsubtitles\x18\x01 \x01(\x0e2%.castor.media.v1.HLSSupport.SubtitlesB\b\xbaH\x05\x82\x01\x02\x10\x01R\tsubtitles\"<\n" +
+	"\tsubtitles\x18\x01 \x01(\x0e2%.castor.media.v1.HLSSupport.SubtitlesB\b\xbaH\x05\x82\x01\x02\x10\x01R\tsubtitles\x12u\n" +
+	"\x15extra_segment_formats\x18\x02 \x03(\x0e2..castor.media.v1.HLSSupport.ExtraSegmentFormatB\x11\xbaH\x0e\x92\x01\v\x10\x10\x18\x01\"\x05\x82\x01\x02 \x00R\x13extraSegmentFormats\"<\n" +
 	"\tSubtitles\x12\x19\n" +
 	"\x15SUBTITLES_UNSPECIFIED\x10\x00\x12\x14\n" +
-	"\x10SUBTITLES_WEBVTT\x10\x01\"\xe6\x01\n" +
-	"\fVideoSupport\x12=\n" +
-	"\x05codec\x18\x01 \x01(\x0e2\x1b.castor.media.v1.VideoCodecB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05codec\x12G\n" +
-	"\bprofiles\x18\x02 \x03(\x0e2\x18.castor.media.v1.ProfileB\x11\xbaH\x0e\x92\x01\v\x10\x10\"\a\x82\x01\x04\x10\x01 \x00R\bprofiles\x121\n" +
+	"\x10SUBTITLES_WEBVTT\x10\x01\"]\n" +
+	"\x12ExtraSegmentFormat\x12$\n" +
+	" EXTRA_SEGMENT_FORMAT_UNSPECIFIED\x10\x00\x12!\n" +
+	"\x1dEXTRA_SEGMENT_FORMAT_TIKTIKPX\x10\x01\"\xb7\x01\n" +
+	"\fVideoSupport\x122\n" +
+	"\x04h264\x18\x01 \x01(\v2\x1c.castor.media.v1.H264SupportH\x00R\x04h264\x122\n" +
+	"\x04hevc\x18\x02 \x01(\v2\x1c.castor.media.v1.HEVCSupportH\x00R\x04hevc\x12/\n" +
+	"\x03vp8\x18\x03 \x01(\v2\x1b.castor.media.v1.VP8SupportH\x00R\x03vp8B\x0e\n" +
+	"\x05codec\x12\x05\xbaH\x02\b\x01\"\x81\x02\n" +
+	"\vH264Support\x12U\n" +
+	"\bprofiles\x18\x01 \x03(\x0e2$.castor.media.v1.H264Support.ProfileB\x13\xbaH\x10\x92\x01\r\x10\x04\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\bprofiles\x12\x1b\n" +
+	"\tmax_level\x18\x02 \x01(\rR\bmaxLevel\"~\n" +
+	"\aProfile\x12\x17\n" +
+	"\x13PROFILE_UNSPECIFIED\x10\x00\x12 \n" +
+	"\x1cPROFILE_CONSTRAINED_BASELINE\x10\x01\x12\x14\n" +
+	"\x10PROFILE_BASELINE\x10\x02\x12\x10\n" +
+	"\fPROFILE_MAIN\x10\x03\x12\x10\n" +
+	"\fPROFILE_HIGH\x10\x04\"\x81\x02\n" +
+	"\vHEVCSupport\x12U\n" +
+	"\bprofiles\x18\x01 \x03(\x0e2$.castor.media.v1.HEVCSupport.ProfileB\x13\xbaH\x10\x92\x01\r\x10\x02\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\bprofiles\x123\n" +
 	"\n" +
-	"bit_depths\x18\x03 \x03(\rB\x12\xbaH\x0f\x92\x01\f\x10\b\"\b*\x060\b0\n" +
+	"bit_depths\x18\x02 \x03(\rB\x14\xbaH\x11\x92\x01\x0e\x10\x03\x18\x01\"\b*\x060\b0\n" +
 	"0\fR\tbitDepths\x12\x1b\n" +
-	"\tmax_level\x18\x04 \x01(\rR\bmaxLevel\"p\n" +
+	"\tmax_level\x18\x03 \x01(\rR\bmaxLevel\"I\n" +
+	"\aProfile\x12\x17\n" +
+	"\x13PROFILE_UNSPECIFIED\x10\x00\x12\x10\n" +
+	"\fPROFILE_MAIN\x10\x01\x12\x13\n" +
+	"\x0fPROFILE_MAIN_10\x10\x02\"\f\n" +
+	"\n" +
+	"VP8Support\"p\n" +
 	"\fAudioSupport\x12=\n" +
 	"\x05codec\x18\x01 \x01(\x0e2\x1b.castor.media.v1.AudioCodecB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05codec\x12!\n" +
@@ -1948,13 +2198,7 @@ const file_castor_media_v1_device_proto_rawDesc = "" +
 	"\rCONTAINER_HLS\x10\x03\x1a\x19\xc2\xf3\x18\x15application/x-mpegURL\x12'\n" +
 	"\rCONTAINER_MKV\x10\x04\x1a\x14\xc2\xf3\x18\x10video/x-matroska\x12\"\n" +
 	"\x0eCONTAINER_WEBM\x10\x05\x1a\x0e\xc2\xf3\x18\n" +
-	"video/webm*j\n" +
-	"\n" +
-	"VideoCodec\x12\x1b\n" +
-	"\x17VIDEO_CODEC_UNSPECIFIED\x10\x00\x12\x14\n" +
-	"\x10VIDEO_CODEC_H264\x10\x01\x12\x14\n" +
-	"\x10VIDEO_CODEC_HEVC\x10\x02\x12\x13\n" +
-	"\x0fVIDEO_CODEC_VP8\x10\x03*\x96\x01\n" +
+	"video/webm*\x96\x01\n" +
 	"\n" +
 	"AudioCodec\x12\x1b\n" +
 	"\x17AUDIO_CODEC_UNSPECIFIED\x10\x00\x12\x13\n" +
@@ -1962,14 +2206,7 @@ const file_castor_media_v1_device_proto_rawDesc = "" +
 	"\x0fAUDIO_CODEC_AC3\x10\x02\x12\x14\n" +
 	"\x10AUDIO_CODEC_EAC3\x10\x03\x12\x13\n" +
 	"\x0fAUDIO_CODEC_MP3\x10\x04\x12\x16\n" +
-	"\x12AUDIO_CODEC_VORBIS\x10\x05*\x93\x01\n" +
-	"\aProfile\x12\x17\n" +
-	"\x13PROFILE_UNSPECIFIED\x10\x00\x12\x14\n" +
-	"\x10PROFILE_BASELINE\x10\x01\x12 \n" +
-	"\x1cPROFILE_CONSTRAINED_BASELINE\x10\x02\x12\x10\n" +
-	"\fPROFILE_MAIN\x10\x03\x12\x13\n" +
-	"\x0fPROFILE_MAIN_10\x10\x04\x12\x10\n" +
-	"\fPROFILE_HIGH\x10\x052\xa4\x01\n" +
+	"\x12AUDIO_CODEC_VORBIS\x10\x052\xa4\x01\n" +
 	"\rDeviceService\x12H\n" +
 	"\x05Drive\x12\x1d.castor.media.v1.DriveRequest\x1a\x1e.castor.media.v1.DriveResponse0\x01\x12I\n" +
 	"\x06Answer\x12\x1e.castor.media.v1.AnswerRequest\x1a\x1f.castor.media.v1.AnswerResponse:7\n" +
@@ -1988,81 +2225,89 @@ func file_castor_media_v1_device_proto_rawDescGZIP() []byte {
 	return file_castor_media_v1_device_proto_rawDescData
 }
 
-var file_castor_media_v1_device_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_castor_media_v1_device_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_castor_media_v1_device_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
+var file_castor_media_v1_device_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_castor_media_v1_device_proto_goTypes = []any{
 	(CaptionFormat)(0),                    // 0: castor.media.v1.CaptionFormat
 	(Container)(0),                        // 1: castor.media.v1.Container
-	(VideoCodec)(0),                       // 2: castor.media.v1.VideoCodec
-	(AudioCodec)(0),                       // 3: castor.media.v1.AudioCodec
-	(Profile)(0),                          // 4: castor.media.v1.Profile
-	(ProgressiveSupport_Container)(0),     // 5: castor.media.v1.ProgressiveSupport.Container
-	(HLSSupport_Subtitles)(0),             // 6: castor.media.v1.HLSSupport.Subtitles
-	(*DriveRequest)(nil),                  // 7: castor.media.v1.DriveRequest
-	(*DriveResponse)(nil),                 // 8: castor.media.v1.DriveResponse
-	(*AnswerRequest)(nil),                 // 9: castor.media.v1.AnswerRequest
-	(*AnswerResponse)(nil),                // 10: castor.media.v1.AnswerResponse
-	(*Capabilities)(nil),                  // 11: castor.media.v1.Capabilities
-	(*FormatSupport)(nil),                 // 12: castor.media.v1.FormatSupport
-	(*AVSupport)(nil),                     // 13: castor.media.v1.AVSupport
-	(*ProgressiveSupport)(nil),            // 14: castor.media.v1.ProgressiveSupport
-	(*HLSSupport)(nil),                    // 15: castor.media.v1.HLSSupport
-	(*VideoSupport)(nil),                  // 16: castor.media.v1.VideoSupport
-	(*AudioSupport)(nil),                  // 17: castor.media.v1.AudioSupport
-	(*DeviceCommand)(nil),                 // 18: castor.media.v1.DeviceCommand
-	(*DeviceError)(nil),                   // 19: castor.media.v1.DeviceError
-	(*AnswerRequest_Done)(nil),            // 20: castor.media.v1.AnswerRequest.Done
-	nil,                                   // 21: castor.media.v1.Capabilities.ServedHeadersEntry
-	(*DeviceCommand_Call)(nil),            // 22: castor.media.v1.DeviceCommand.Call
-	(*DeviceCommand_Play)(nil),            // 23: castor.media.v1.DeviceCommand.Play
-	(*DeviceCommand_Caption)(nil),         // 24: castor.media.v1.DeviceCommand.Caption
-	(*DeviceCommand_AwaitEnd)(nil),        // 25: castor.media.v1.DeviceCommand.AwaitEnd
-	(*DeviceCommand_Pause)(nil),           // 26: castor.media.v1.DeviceCommand.Pause
-	(*DeviceCommand_Resume)(nil),          // 27: castor.media.v1.DeviceCommand.Resume
-	(*DeviceCommand_Cancel)(nil),          // 28: castor.media.v1.DeviceCommand.Cancel
-	(*DeviceError_Gone)(nil),              // 29: castor.media.v1.DeviceError.Gone
-	(*descriptorpb.EnumValueOptions)(nil), // 30: google.protobuf.EnumValueOptions
+	(AudioCodec)(0),                       // 2: castor.media.v1.AudioCodec
+	(ProgressiveSupport_Container)(0),     // 3: castor.media.v1.ProgressiveSupport.Container
+	(HLSSupport_Subtitles)(0),             // 4: castor.media.v1.HLSSupport.Subtitles
+	(HLSSupport_ExtraSegmentFormat)(0),    // 5: castor.media.v1.HLSSupport.ExtraSegmentFormat
+	(H264Support_Profile)(0),              // 6: castor.media.v1.H264Support.Profile
+	(HEVCSupport_Profile)(0),              // 7: castor.media.v1.HEVCSupport.Profile
+	(*DriveRequest)(nil),                  // 8: castor.media.v1.DriveRequest
+	(*DriveResponse)(nil),                 // 9: castor.media.v1.DriveResponse
+	(*AnswerRequest)(nil),                 // 10: castor.media.v1.AnswerRequest
+	(*AnswerResponse)(nil),                // 11: castor.media.v1.AnswerResponse
+	(*Capabilities)(nil),                  // 12: castor.media.v1.Capabilities
+	(*FormatSupport)(nil),                 // 13: castor.media.v1.FormatSupport
+	(*AVSupport)(nil),                     // 14: castor.media.v1.AVSupport
+	(*ProgressiveSupport)(nil),            // 15: castor.media.v1.ProgressiveSupport
+	(*HLSSupport)(nil),                    // 16: castor.media.v1.HLSSupport
+	(*VideoSupport)(nil),                  // 17: castor.media.v1.VideoSupport
+	(*H264Support)(nil),                   // 18: castor.media.v1.H264Support
+	(*HEVCSupport)(nil),                   // 19: castor.media.v1.HEVCSupport
+	(*VP8Support)(nil),                    // 20: castor.media.v1.VP8Support
+	(*AudioSupport)(nil),                  // 21: castor.media.v1.AudioSupport
+	(*DeviceCommand)(nil),                 // 22: castor.media.v1.DeviceCommand
+	(*DeviceError)(nil),                   // 23: castor.media.v1.DeviceError
+	(*AnswerRequest_Done)(nil),            // 24: castor.media.v1.AnswerRequest.Done
+	nil,                                   // 25: castor.media.v1.Capabilities.ServedHeadersEntry
+	(*DeviceCommand_Call)(nil),            // 26: castor.media.v1.DeviceCommand.Call
+	(*DeviceCommand_Play)(nil),            // 27: castor.media.v1.DeviceCommand.Play
+	(*DeviceCommand_Caption)(nil),         // 28: castor.media.v1.DeviceCommand.Caption
+	(*DeviceCommand_AwaitEnd)(nil),        // 29: castor.media.v1.DeviceCommand.AwaitEnd
+	(*DeviceCommand_Pause)(nil),           // 30: castor.media.v1.DeviceCommand.Pause
+	(*DeviceCommand_Resume)(nil),          // 31: castor.media.v1.DeviceCommand.Resume
+	(*DeviceCommand_Cancel)(nil),          // 32: castor.media.v1.DeviceCommand.Cancel
+	(*DeviceError_Gone)(nil),              // 33: castor.media.v1.DeviceError.Gone
+	(*descriptorpb.EnumValueOptions)(nil), // 34: google.protobuf.EnumValueOptions
 }
 var file_castor_media_v1_device_proto_depIdxs = []int32{
-	11, // 0: castor.media.v1.DriveRequest.capabilities:type_name -> castor.media.v1.Capabilities
-	18, // 1: castor.media.v1.DriveResponse.command:type_name -> castor.media.v1.DeviceCommand
-	20, // 2: castor.media.v1.AnswerRequest.done:type_name -> castor.media.v1.AnswerRequest.Done
-	19, // 3: castor.media.v1.AnswerRequest.error:type_name -> castor.media.v1.DeviceError
-	12, // 4: castor.media.v1.Capabilities.formats:type_name -> castor.media.v1.FormatSupport
-	21, // 5: castor.media.v1.Capabilities.served_headers:type_name -> castor.media.v1.Capabilities.ServedHeadersEntry
-	14, // 6: castor.media.v1.FormatSupport.progressive:type_name -> castor.media.v1.ProgressiveSupport
-	15, // 7: castor.media.v1.FormatSupport.hls:type_name -> castor.media.v1.HLSSupport
-	16, // 8: castor.media.v1.FormatSupport.video:type_name -> castor.media.v1.VideoSupport
-	17, // 9: castor.media.v1.FormatSupport.audio:type_name -> castor.media.v1.AudioSupport
-	13, // 10: castor.media.v1.FormatSupport.av:type_name -> castor.media.v1.AVSupport
+	12, // 0: castor.media.v1.DriveRequest.capabilities:type_name -> castor.media.v1.Capabilities
+	22, // 1: castor.media.v1.DriveResponse.command:type_name -> castor.media.v1.DeviceCommand
+	24, // 2: castor.media.v1.AnswerRequest.done:type_name -> castor.media.v1.AnswerRequest.Done
+	23, // 3: castor.media.v1.AnswerRequest.error:type_name -> castor.media.v1.DeviceError
+	13, // 4: castor.media.v1.Capabilities.formats:type_name -> castor.media.v1.FormatSupport
+	25, // 5: castor.media.v1.Capabilities.served_headers:type_name -> castor.media.v1.Capabilities.ServedHeadersEntry
+	15, // 6: castor.media.v1.FormatSupport.progressive:type_name -> castor.media.v1.ProgressiveSupport
+	16, // 7: castor.media.v1.FormatSupport.hls:type_name -> castor.media.v1.HLSSupport
+	17, // 8: castor.media.v1.FormatSupport.video:type_name -> castor.media.v1.VideoSupport
+	21, // 9: castor.media.v1.FormatSupport.audio:type_name -> castor.media.v1.AudioSupport
+	14, // 10: castor.media.v1.FormatSupport.av:type_name -> castor.media.v1.AVSupport
 	0,  // 11: castor.media.v1.FormatSupport.captions:type_name -> castor.media.v1.CaptionFormat
-	16, // 12: castor.media.v1.AVSupport.video:type_name -> castor.media.v1.VideoSupport
-	17, // 13: castor.media.v1.AVSupport.audio:type_name -> castor.media.v1.AudioSupport
-	5,  // 14: castor.media.v1.ProgressiveSupport.container:type_name -> castor.media.v1.ProgressiveSupport.Container
-	6,  // 15: castor.media.v1.HLSSupport.subtitles:type_name -> castor.media.v1.HLSSupport.Subtitles
-	2,  // 16: castor.media.v1.VideoSupport.codec:type_name -> castor.media.v1.VideoCodec
-	4,  // 17: castor.media.v1.VideoSupport.profiles:type_name -> castor.media.v1.Profile
-	3,  // 18: castor.media.v1.AudioSupport.codec:type_name -> castor.media.v1.AudioCodec
-	22, // 19: castor.media.v1.DeviceCommand.call:type_name -> castor.media.v1.DeviceCommand.Call
-	28, // 20: castor.media.v1.DeviceCommand.cancel:type_name -> castor.media.v1.DeviceCommand.Cancel
-	29, // 21: castor.media.v1.DeviceError.gone:type_name -> castor.media.v1.DeviceError.Gone
-	23, // 22: castor.media.v1.DeviceCommand.Call.play:type_name -> castor.media.v1.DeviceCommand.Play
-	25, // 23: castor.media.v1.DeviceCommand.Call.await_end:type_name -> castor.media.v1.DeviceCommand.AwaitEnd
-	26, // 24: castor.media.v1.DeviceCommand.Call.pause:type_name -> castor.media.v1.DeviceCommand.Pause
-	27, // 25: castor.media.v1.DeviceCommand.Call.resume:type_name -> castor.media.v1.DeviceCommand.Resume
-	1,  // 26: castor.media.v1.DeviceCommand.Play.container:type_name -> castor.media.v1.Container
-	24, // 27: castor.media.v1.DeviceCommand.Play.captions:type_name -> castor.media.v1.DeviceCommand.Caption
-	0,  // 28: castor.media.v1.DeviceCommand.Caption.format:type_name -> castor.media.v1.CaptionFormat
-	30, // 29: castor.media.v1.mime:extendee -> google.protobuf.EnumValueOptions
-	7,  // 30: castor.media.v1.DeviceService.Drive:input_type -> castor.media.v1.DriveRequest
-	9,  // 31: castor.media.v1.DeviceService.Answer:input_type -> castor.media.v1.AnswerRequest
-	8,  // 32: castor.media.v1.DeviceService.Drive:output_type -> castor.media.v1.DriveResponse
-	10, // 33: castor.media.v1.DeviceService.Answer:output_type -> castor.media.v1.AnswerResponse
-	32, // [32:34] is the sub-list for method output_type
-	30, // [30:32] is the sub-list for method input_type
-	30, // [30:30] is the sub-list for extension type_name
-	29, // [29:30] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	17, // 12: castor.media.v1.AVSupport.video:type_name -> castor.media.v1.VideoSupport
+	21, // 13: castor.media.v1.AVSupport.audio:type_name -> castor.media.v1.AudioSupport
+	3,  // 14: castor.media.v1.ProgressiveSupport.container:type_name -> castor.media.v1.ProgressiveSupport.Container
+	4,  // 15: castor.media.v1.HLSSupport.subtitles:type_name -> castor.media.v1.HLSSupport.Subtitles
+	5,  // 16: castor.media.v1.HLSSupport.extra_segment_formats:type_name -> castor.media.v1.HLSSupport.ExtraSegmentFormat
+	18, // 17: castor.media.v1.VideoSupport.h264:type_name -> castor.media.v1.H264Support
+	19, // 18: castor.media.v1.VideoSupport.hevc:type_name -> castor.media.v1.HEVCSupport
+	20, // 19: castor.media.v1.VideoSupport.vp8:type_name -> castor.media.v1.VP8Support
+	6,  // 20: castor.media.v1.H264Support.profiles:type_name -> castor.media.v1.H264Support.Profile
+	7,  // 21: castor.media.v1.HEVCSupport.profiles:type_name -> castor.media.v1.HEVCSupport.Profile
+	2,  // 22: castor.media.v1.AudioSupport.codec:type_name -> castor.media.v1.AudioCodec
+	26, // 23: castor.media.v1.DeviceCommand.call:type_name -> castor.media.v1.DeviceCommand.Call
+	32, // 24: castor.media.v1.DeviceCommand.cancel:type_name -> castor.media.v1.DeviceCommand.Cancel
+	33, // 25: castor.media.v1.DeviceError.gone:type_name -> castor.media.v1.DeviceError.Gone
+	27, // 26: castor.media.v1.DeviceCommand.Call.play:type_name -> castor.media.v1.DeviceCommand.Play
+	29, // 27: castor.media.v1.DeviceCommand.Call.await_end:type_name -> castor.media.v1.DeviceCommand.AwaitEnd
+	30, // 28: castor.media.v1.DeviceCommand.Call.pause:type_name -> castor.media.v1.DeviceCommand.Pause
+	31, // 29: castor.media.v1.DeviceCommand.Call.resume:type_name -> castor.media.v1.DeviceCommand.Resume
+	1,  // 30: castor.media.v1.DeviceCommand.Play.container:type_name -> castor.media.v1.Container
+	28, // 31: castor.media.v1.DeviceCommand.Play.captions:type_name -> castor.media.v1.DeviceCommand.Caption
+	0,  // 32: castor.media.v1.DeviceCommand.Caption.format:type_name -> castor.media.v1.CaptionFormat
+	34, // 33: castor.media.v1.mime:extendee -> google.protobuf.EnumValueOptions
+	8,  // 34: castor.media.v1.DeviceService.Drive:input_type -> castor.media.v1.DriveRequest
+	10, // 35: castor.media.v1.DeviceService.Answer:input_type -> castor.media.v1.AnswerRequest
+	9,  // 36: castor.media.v1.DeviceService.Drive:output_type -> castor.media.v1.DriveResponse
+	11, // 37: castor.media.v1.DeviceService.Answer:output_type -> castor.media.v1.AnswerResponse
+	36, // [36:38] is the sub-list for method output_type
+	34, // [34:36] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	33, // [33:34] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_castor_media_v1_device_proto_init() }
@@ -2081,15 +2326,20 @@ func file_castor_media_v1_device_proto_init() {
 		(*FormatSupport_Audio)(nil),
 		(*FormatSupport_Av)(nil),
 	}
-	file_castor_media_v1_device_proto_msgTypes[11].OneofWrappers = []any{
+	file_castor_media_v1_device_proto_msgTypes[9].OneofWrappers = []any{
+		(*VideoSupport_H264)(nil),
+		(*VideoSupport_Hevc)(nil),
+		(*VideoSupport_Vp8)(nil),
+	}
+	file_castor_media_v1_device_proto_msgTypes[14].OneofWrappers = []any{
 		(*DeviceCommand_Call_)(nil),
 		(*DeviceCommand_Cancel_)(nil),
 	}
-	file_castor_media_v1_device_proto_msgTypes[12].OneofWrappers = []any{
+	file_castor_media_v1_device_proto_msgTypes[15].OneofWrappers = []any{
 		(*DeviceError_Message)(nil),
 		(*DeviceError_Gone_)(nil),
 	}
-	file_castor_media_v1_device_proto_msgTypes[15].OneofWrappers = []any{
+	file_castor_media_v1_device_proto_msgTypes[18].OneofWrappers = []any{
 		(*DeviceCommand_Call_Play)(nil),
 		(*DeviceCommand_Call_AwaitEnd)(nil),
 		(*DeviceCommand_Call_Pause)(nil),
@@ -2100,8 +2350,8 @@ func file_castor_media_v1_device_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_castor_media_v1_device_proto_rawDesc), len(file_castor_media_v1_device_proto_rawDesc)),
-			NumEnums:      7,
-			NumMessages:   23,
+			NumEnums:      8,
+			NumMessages:   26,
 			NumExtensions: 1,
 			NumServices:   1,
 		},

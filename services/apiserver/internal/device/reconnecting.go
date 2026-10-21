@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"sync/atomic"
 	"time"
 
@@ -33,9 +32,9 @@ func (r *reconnecting) current() (Device, Info) {
 	return l.device, l.target
 }
 
-func (r *reconnecting) Play(ctx context.Context, streamURL *url.URL, container mediav1.Container, captions []*mediav1.DeviceCommand_Caption) error {
+func (r *reconnecting) Play(ctx context.Context, playback Playback) error {
 	dev, target := r.current()
-	err := dev.Play(ctx, streamURL, container, captions)
+	err := dev.Play(ctx, playback)
 	if _, gone := errors.AsType[*Gone](err); !gone {
 		return err
 	}
@@ -51,7 +50,7 @@ func (r *reconnecting) Play(ctx context.Context, streamURL *url.URL, container m
 	}
 	stale := r.cur.Swap(&link{device: fresh, target: at})
 	_ = stale.device.Close()
-	return fresh.Play(ctx, streamURL, container, captions)
+	return fresh.Play(ctx, playback)
 }
 
 func (r *reconnecting) AwaitEnd(ctx context.Context) error {

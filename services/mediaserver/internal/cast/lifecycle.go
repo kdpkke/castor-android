@@ -3,73 +3,100 @@ package cast
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"connectrpc.com/connect"
 	"github.com/looplab/fsm"
+	"github.com/stupside/castor/internal/telemetry"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
 	"github.com/stupside/castor/services/mediaserver/internal/lend"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
 
-// A cast waits for its device, measures its streams, plays them, and ends once.
+// castEvent keeps this machine's events distinct at Go call sites.
+type castEvent uint8
+
+const (
+	eventLendStream castEvent = iota
+	eventMeasure
+	eventRank
+	eventAttempt
+	eventRevise
+	eventEnd
+	eventAbandon
+)
+
+func (e castEvent) String() string {
+	return [...]string{
+		eventLendStream: "lend-stream",
+		eventMeasure:    "measure",
+		eventRank:       "rank",
+		eventAttempt:    "attempt",
+		eventRevise:     "revise",
+		eventEnd:        "end",
+		eventAbandon:    "abandon",
+	}[e]
+}
+
 const (
 	stateAwaiting  = "awaiting"
 	stateMeasuring = "measuring"
 	stateCasting   = "casting"
 	stateEnded     = "ended"
-
-	// Lending a device starts measuring, for both a direct stream and candidates.
-	eventLendStream = "lend-stream"
-	eventMeasure    = "measure"
-	eventRank       = "rank"
-	eventAttempt    = "attempt"
-	eventRevise     = "revise"
-	eventEnd        = "end"
-	eventAbandon    = "abandon"
 )
 
-// lifecycle is the moves a cast may make; reaching its end releases the device and everything the cast holds.
+// lifecycle validates cast progress. The owner publishes the terminal snapshot
+// after attempt cleanup, then signals completion to the device lender.
 func (c *cast) lifecycle() *fsm.FSM {
 	return fsm.NewFSM(stateAwaiting, fsm.Events{
-		{Name: eventLendStream, Src: []string{stateAwaiting}, Dst: stateMeasuring},
-		{Name: eventMeasure, Src: []string{stateMeasuring}, Dst: stateMeasuring},
-		{Name: eventRank, Src: []string{stateMeasuring}, Dst: stateMeasuring},
-		{Name: eventAttempt, Src: []string{stateMeasuring, stateCasting}, Dst: stateCasting},
-		{Name: eventRevise, Src: []string{stateCasting}, Dst: stateCasting},
-		{Name: eventEnd, Src: []string{stateMeasuring, stateCasting}, Dst: stateEnded},
+		{Name: eventLendStream.String(), Src: []string{stateAwaiting}, Dst: stateMeasuring},
+		{Name: eventMeasure.String(), Src: []string{stateMeasuring}, Dst: stateMeasuring},
+		{Name: eventRank.String(), Src: []string{stateMeasuring}, Dst: stateMeasuring},
+		{Name: eventAttempt.String(), Src: []string{stateMeasuring, stateCasting}, Dst: stateCasting},
+		{Name: eventRevise.String(), Src: []string{stateCasting}, Dst: stateCasting},
+		{Name: eventEnd.String(), Src: []string{stateMeasuring, stateCasting}, Dst: stateEnded},
 		// Only a cast still awaiting is abandoned, so a grace that runs out as a device is lent changes nothing.
-		{Name: eventAbandon, Src: []string{stateAwaiting}, Dst: stateEnded},
+		{Name: eventAbandon.String(), Src: []string{stateAwaiting}, Dst: stateEnded},
 	}, fsm.Callbacks{
-		"enter_" + stateEnded: func(context.Context, *fsm.Event) {
-			close(c.done)
-			c.cancel(nil)
-		},
+		"after_event": func(ctx context.Context, e *fsm.Event) { telemetry.Transition(ctx, "cast", e.Event, e.Src, e.Dst) },
 	})
 }
 
 // fire takes event if the cast's state allows it, then publishes what change makes of its snapshot; it reports whether it took it.
-func (c *cast) fire(event string, change func(*view)) bool {
+func (c *cast) fire(event castEvent, change func(*view)) bool {
 	taken := false
+	ended := false
 	c.now.Update(func(now view) (view, bool) {
 		// Never the cast's cancellation: a cancelled context would abort the transition that ends it.
-		err := c.machine.Event(context.WithoutCancel(c.ctx), event)
-		if _, stayed := errors.AsType[fsm.NoTransitionError](err); err != nil && !stayed {
-			return now, false
-		}
 		next := view{status: proto.CloneOf(now.status), ended: now.ended}
-		if c.machine.Is(stateCasting) && next.status.GetCasting() == nil {
-			measured := next.status.GetMeasuring()
-			next.status.State = &castorv1.CastStatus_Casting{Casting: &castorv1.CastingStatus{
-				Streams: measured.GetStreams(), Castable: measured.GetCastable(),
-			}}
+		err := c.machine.Event(context.WithoutCancel(c.ctx), event.String())
+		if stayed, ok := errors.AsType[fsm.NoTransitionError](err); ok {
+			err = stayed.Err
+		}
+		if err != nil {
+			// Duplicate lending, expired admission timers and updates after
+			// completion are expected races. Other rejections are owner bugs.
+			_, invalid := errors.AsType[fsm.InvalidEventError](err)
+			if !invalid || !(c.machine.Is(stateEnded) || event == eventLendStream || event == eventAbandon) {
+				slog.ErrorContext(c.ctx, "cast transition failed", "state", c.machine.Current(), "event", event, "error", err)
+			}
+			return now, false
 		}
 		change(&next)
 		taken = true
+		ended = c.machine.Is(stateEnded)
 		return next, true
 	})
+	// Publish the terminal snapshot before waking registry and device owners.
+	// Only the caller that took the terminal transition signals completion.
+	if ended {
+		close(c.done)
+		c.cancel(nil)
+	}
 	return taken
 }
 
@@ -86,10 +113,11 @@ func (c *cast) lend(caps media.Capabilities) error {
 }
 
 // end ends the cast by event with outcome: nil ended, errStopped stopped, else why it failed.
-func (c *cast) end(event string, outcome error) {
+func (c *cast) end(event castEvent, outcome error) {
 	ended := &castorv1.Ended{Result: &castorv1.Ended_Completed{Completed: &emptypb.Empty{}}}
+	interrupted, _ := errors.AsType[*recovery.Interrupted](outcome)
 	switch {
-	case errors.Is(outcome, errStopped):
+	case errors.Is(outcome, errStopped) && (interrupted == nil || interrupted.Failure == nil):
 		ended.Result = &castorv1.Ended_Stopped{Stopped: &emptypb.Empty{}}
 	case outcome != nil:
 		ended.Result = &castorv1.Ended_Failed{Failed: &castorv1.Failure{Code: failureCode(outcome), Message: outcome.Error()}}

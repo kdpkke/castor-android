@@ -1,19 +1,19 @@
 // Package output defines the delivery port consumed by playback orchestration.
-// Protocol adapters own publication, muxer configuration and pacing.
+// Protocol adapters prepare artifacts, muxer configuration and pacing.
 package output
 
 import (
 	"context"
 	"fmt"
 	"io"
-	"net/url"
+	"net/http"
 	"slices"
 	"time"
 
-	"github.com/stupside/castor/services/mediaserver/internal/cast/container"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/deliver"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/fetch"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/container"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/fetch"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output/storage"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"github.com/stupside/castor/services/mediaserver/internal/subtitle"
 )
@@ -24,31 +24,41 @@ type Captions struct {
 	VideoOffset time.Duration
 }
 
-// Output owns publication until Close; its producer remains owned by the caller.
+// Output is a serving view of artifacts. Close releases owned storage; the
+// caller must first join production and close its HTTP publication.
 type Output interface {
-	URL() *url.URL
-	Wait(context.Context) error
-	Artifact() deliver.Artifact
-	Drained() <-chan struct{}
+	Path() string
+	Handler() http.Handler
+	Wait(context.Context, <-chan struct{}) error
+	Artifact() Artifact
 	Audience() health.Audience
-	Settled() error
+	Settled(media.Progress) error
 	Close() error
 }
 
-// Plan binds a supported presentation to the producer format and its publisher.
+// Prepared separates the artifact view from the work required to build it.
+// Write borrows its reader and returns when packaging is complete. WatchStorage,
+// when present, reports a storage failure; the attempt owns both operations.
+type Prepared struct {
+	Output       Output
+	Write        func(context.Context, io.Reader) error
+	WatchStorage func(context.Context) error
+}
+
+// Plan binds a supported presentation to the producer format and artifact preparation.
 // EncoderFormat can differ from Format when an adapter packages producer bytes.
 type Plan interface {
 	Format() container.Format
 	EncoderFormat() container.Format
 	Pace(burning bool) fetch.Pace
 	Reserve(dir string) (func() error, error)
-	Open(context.Context, deliver.Opening, string, io.ReadCloser, func() media.Progress) (Output, error)
+	Prepare(Opening, string) (Prepared, error)
 }
 
 // Relayer is implemented by outputs that can serve an existing buffer without
 // starting another encoder. Other protocols need only implement Plan.
 type Relayer interface {
-	OpenSpool(context.Context, deliver.Opening, *deliver.Spool, <-chan struct{}, func() media.Progress) (Output, error)
+	ServeSpool(Opening, *storage.Spool) Output
 }
 
 // Adapter accepts complete transport envelopes. An unsupported caption request
@@ -66,15 +76,80 @@ type Selection struct {
 }
 
 func (f Factory) Select(caps media.Capabilities, captions *Captions) (Selection, error) {
+	selections := f.Selections(caps, captions)
+	if len(selections) > 0 {
+		return selections[0], nil
+	}
+	return Selection{}, fmt.Errorf("no delivery adapter accepts the requested playback envelopes")
+}
+
+// Selections returns adapter-supported envelopes in receiver preference order.
+// The codec planner can then try the next delivery when the host cannot encode
+// for the first one. Each selection retains only tuples for its transport.
+func (f Factory) Selections(caps media.Capabilities, captions *Captions) []Selection {
+	var selections []Selection
+	seen := make(map[media.Transport]bool)
 	for _, envelope := range caps.Formats {
+		if seen[envelope.Transport] {
+			continue
+		}
 		for _, adapter := range f {
 			plan, ok := adapter.Select(envelope, captions)
 			if !ok {
 				continue
 			}
-			caps.Formats = slices.DeleteFunc(slices.Clone(caps.Formats), func(other media.FormatSupport) bool { return other.Transport != envelope.Transport })
-			return Selection{Plan: plan, Capabilities: caps}, nil
+			selected := caps
+			selected.Formats = slices.DeleteFunc(slices.Clone(caps.Formats), func(other media.FormatSupport) bool { return other.Transport != envelope.Transport })
+			selections = append(selections, Selection{Plan: plan, Capabilities: selected})
+			seen[envelope.Transport] = true
+			break
 		}
 	}
-	return Selection{}, fmt.Errorf("no delivery adapter accepts the requested playback envelopes")
+	return selections
+}
+
+// Artifact is what a delivery hands the device, which the watch that opens it waits on.
+type Artifact struct {
+	// Path names the local artifact for probing without issuing receiver requests.
+	Path string
+	// Subject names it in a log line and in a fault ("the stream output", "the HLS playlist").
+	Subject string
+
+	Landed func() (int64, error)
+
+	Grace time.Duration
+}
+
+// Opening is everything a delivery mechanism is opened with.
+type Opening struct {
+	Live    bool
+	Format  container.Format
+	Headers map[string]string
+
+	// IdleGrace is how long an idle device is waited for before the delivery counts as done.
+	IdleGrace time.Duration
+
+	// WriteDeadline bounds one socket write, so a hung client cannot hold its goroutine.
+	WriteDeadline time.Duration
+}
+
+const settleInterval = 500 * time.Millisecond
+
+// Settle waits for production to drain and the receiver to finish consuming it.
+func Settle(ctx context.Context, drained <-chan struct{}, finished func() bool) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-drained:
+	}
+	tick := time.NewTicker(settleInterval)
+	defer tick.Stop()
+	for !finished() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick.C:
+		}
+	}
+	return nil
 }

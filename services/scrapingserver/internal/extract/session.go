@@ -2,6 +2,7 @@ package extract
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -100,6 +101,20 @@ func click(ctx context.Context, x, y float64) error {
 	return chromedp.Run(ctx, chromedp.MouseClickXY(x, y, chromedp.ButtonLeft))
 }
 
+//go:embed js/player_pos.js
+var playerPosJS string
+
+func clickPlayer(ctx context.Context) error {
+	var pos *struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(playerPosJS, &pos)); err != nil || pos == nil {
+		return err
+	}
+	return click(ctx, pos.X, pos.Y)
+}
+
 // action is one best-effort nudge at the page: a name for the log and the work.
 type action struct {
 	name string
@@ -109,14 +124,16 @@ type action struct {
 // runActions drives the page until it has been driven as far as it can usefully be driven.
 func (s *session) runActions() {
 	actions := []action{
+		{"click player", func() error { return clickPlayer(s.ctx) }},
 		{"click", func() error { return click(s.ctx, s.centerX, s.centerY) }},
 		{"navigate iframe", func() error {
-			return navigateIframe(s.ctx)
+			return navigateIframe(s.ctx, s.collector.hasMaster)
 		}},
 		{"bypass turnstile", func() error {
 			return bypassTurnstile(s.ctx)
 		}},
 		{"click", func() error { return click(s.ctx, s.centerX, s.centerY) }},
+		{"click player", func() error { return clickPlayer(s.ctx) }},
 	}
 
 	for _, a := range actions {

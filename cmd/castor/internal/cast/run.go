@@ -18,8 +18,8 @@ const stopGrace = 10 * time.Second
 var errStopped = errors.New("cast stopped")
 
 // Run casts source to to and follows the cast to its end, cancelling ctx stops it.
-func Run(ctx context.Context, casts castorv1connect.CastServiceClient, to *castorv1.Target, source *castorv1.Source) error {
-	started, err := casts.Cast(ctx, &castorv1.CastRequest{Target: to, Source: source})
+func Run(ctx context.Context, casts castorv1connect.CastServiceClient, to *castorv1.Target, source *castorv1.Source, info *castorv1.MediaInfo) error {
+	started, err := casts.Cast(ctx, &castorv1.CastRequest{Target: to, Source: source, MediaInfo: info})
 	if err != nil {
 		return err
 	}

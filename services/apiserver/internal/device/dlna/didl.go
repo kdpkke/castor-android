@@ -1,11 +1,13 @@
 package dlna
 
 import (
+	"cmp"
 	"encoding/xml"
 	"fmt"
 	"net/url"
 
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
+	castorv1 "github.com/stupside/castor/gen/castor/v1"
 )
 
 // captionKinds names a caption format the way DLNA renderers do, in a protocolInfo's text/ type and sec:type.
@@ -37,12 +39,15 @@ type didlLite struct {
 }
 
 type didlItem struct {
-	ID         string    `xml:"id,attr"`
-	ParentID   string    `xml:"parentID,attr"`
-	Restricted string    `xml:"restricted,attr"`
-	Title      string    `xml:"dc:title"`
-	Class      string    `xml:"upnp:class"`
-	Res        []didlRes `xml:"res"`
+	ID          string    `xml:"id,attr"`
+	ParentID    string    `xml:"parentID,attr"`
+	Restricted  string    `xml:"restricted,attr"`
+	Title       string    `xml:"dc:title"`
+	Description string    `xml:"dc:description,omitempty"`
+	Date        string    `xml:"dc:date,omitempty"`
+	AlbumArtURI string    `xml:"upnp:albumArtURI,omitempty"`
+	Class       string    `xml:"upnp:class"`
+	Res         []didlRes `xml:"res"`
 	// Samsung renderers read the caption from this element rather than a second res.
 	CaptionInfoEx *secCaption `xml:"sec:CaptionInfoEx"`
 }
@@ -59,17 +64,20 @@ type didlRes struct {
 
 // buildDIDLMetadata returns the DIDL-Lite XML announcing streamURL as the device's own sink entry describes it.
 // Its caption, when there is one, is announced both as a second res and as Samsung's CaptionInfoEx.
-func buildDIDLMetadata(streamURL *url.URL, entry sinkEntry, caption *mediav1.DeviceCommand_Caption) (string, error) {
+func buildDIDLMetadata(streamURL *url.URL, entry sinkEntry, caption *mediav1.DeviceCommand_Caption, info *castorv1.MediaInfo) (string, error) {
 	item := didlLite{
 		XMLNS: "urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/",
 		DC:    "http://purl.org/dc/elements/1.1/",
 		UPnP:  "urn:schemas-upnp-org:metadata-1-0/upnp/",
 		Item: didlItem{
-			ID:         "0",
-			ParentID:   "-1",
-			Restricted: "1",
-			Title:      "Castor Stream",
-			Class:      "object.item.videoItem",
+			ID:          "0",
+			ParentID:    "-1",
+			Restricted:  "1",
+			Title:       cmp.Or(info.GetTitle(), "Castor Stream"),
+			Description: info.GetSynopsis(),
+			Date:        info.GetReleaseDate(),
+			AlbumArtURI: info.GetImageUrl(),
+			Class:       "object.item.videoItem",
 			Res: []didlRes{{
 				ProtocolInfo: fmt.Sprintf("http-get:*:%s:%s", entry.mime, entry.features),
 				Value:        streamURL.String(),

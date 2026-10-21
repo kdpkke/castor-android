@@ -56,11 +56,16 @@ func (fs Formats) identities() []Identity {
 const sniffBytes = 64 << 10
 
 // Identify names what a link carries: its name first, else the grammar of its body, since a script serves a playlist under any name.
-func (fs Formats) Identify(ctx context.Context, c Client, u *url.URL) string {
+func (fs Formats) Identify(ctx context.Context, c Client, u *url.URL, headers http.Header) string {
 	if ct := fs.ContentTypeOf(u, ""); ct != "" {
 		return ct
 	}
-	body, _, _, err := c.Fetch(ctx, u, http.Header{"Range": {timeline.Range{Length: sniffBytes}.Header()}})
+	headers = headers.Clone()
+	if headers == nil {
+		headers = make(http.Header)
+	}
+	headers.Set("Range", timeline.Range{Length: sniffBytes}.Header())
+	body, _, _, err := c.Fetch(ctx, u, headers)
 	if err != nil {
 		return ""
 	}

@@ -34,6 +34,32 @@ const (
 	coverArt   = `{"codec_type":"video","codec_name":"mjpeg","width":640,"height":360,"disposition":{"attached_pic":1}}`
 )
 
+func TestStreamPresenceSurvivesMissingCodecParameters(t *testing.T) {
+	for _, tc := range []struct {
+		name, streams string
+		video, audio  bool
+	}{
+		{"unknown codecs", `{"codec_type":"video","width":640,"height":360},{"codec_type":"audio","channels":2}`, true, true},
+		{"dimensionless picture", `{"codec_type":"video","codec_name":"h264","width":0,"height":0}`, true, false},
+		{"cover art only", coverArt, false, false},
+		{"no streams", "", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			info, err := decode(probeJSON(vodFormat, tc.streams), 0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.HasVideo() != tc.video || info.HasAudio() != tc.audio {
+				t.Fatalf("presence lost: %+v", info)
+			}
+			carried := (media.ProbeInfo{}).TakeVideo(info).TakeAudio(info)
+			if carried.HasVideo() != tc.video || carried.HasAudio() != tc.audio {
+				t.Fatalf("selected track projection lost presence: %+v", carried)
+			}
+		})
+	}
+}
+
 func TestDecodeSelectsThePictureAndTheDefaultAudio(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

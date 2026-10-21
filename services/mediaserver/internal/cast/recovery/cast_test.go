@@ -177,6 +177,27 @@ func TestUnreadableLinksAreMovedPastInRankOrder(t *testing.T) {
 	}
 }
 
+func TestRecoveryTriesSameURLWithDifferentReplayHeaders(t *testing.T) {
+	first := link(t, "https://cdn.example/movie.m3u8")
+	first.Headers.Set("Referer", "https://one.example/")
+	second := link(t, first.URL.String())
+	second.Headers.Set("Referer", "https://two.example/")
+	in := Intent{Turns: unheard{}, Candidates: []*source.Stream{first, second}, Deadline: 30 * time.Second}
+	run := &scriptedRunner{outcomes: []Outcome{judged(health.Dead, health.Reading, health.Vitals{}), delivered}}
+	if err := Cast(t.Context(), in, run, &fakeProgram{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(run.seen) != 2 || run.seen[0].candidate != 0 || run.seen[1].candidate != 1 {
+		t.Fatalf("attempts = %+v, want each same-URL candidate", run.seen)
+	}
+	if got := primaryInput(t, run.seen[0].Program).Headers.Get("Referer"); got != "https://one.example/" {
+		t.Errorf("first request Referer = %q", got)
+	}
+	if got := primaryInput(t, run.seen[1].Program).Headers.Get("Referer"); got != "https://two.example/" {
+		t.Errorf("second request Referer = %q", got)
+	}
+}
+
 func TestATimelineCastorCouldNotReadMovesToTheNextLink(t *testing.T) {
 	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.mpd", "https://other.example/two.m3u8"), Deadline: 30 * time.Second}
 	unread := errors.New("HTTP 503")
@@ -341,8 +362,8 @@ func TestCastEndsWithTheCancellationRatherThanAFault(t *testing.T) {
 	}, delivered}}
 
 	err := Cast(ctx, in, run, &fakeProgram{})
-	if _, isFault := errors.AsType[*fault](err); !errors.Is(err, context.Canceled) || isFault || len(run.seen) != 1 {
-		t.Fatalf("Cast error = %v after %d attempts, want the bare cancellation after 1", err, len(run.seen))
+	if _, isFault := errors.AsType[*fault](err); !errors.Is(err, context.Canceled) || isFault || len(run.seen) != 0 {
+		t.Fatalf("Cast error = %v after %d attempts, want cancellation without starting an attempt", err, len(run.seen))
 	}
 }
 
@@ -386,3 +407,54 @@ type unheard struct{}
 
 func (unheard) Attempting(int)          {}
 func (unheard) Revising(Action, string) {}
+
+// A resolver can finish after cancellation; recovery must not start another
+// resolver or an attempt using a late successful result.
+type cancellingResolver struct {
+	cancel  context.CancelCauseFunc
+	cause   error
+	calls   int
+	succeed bool
+}
+
+func (r *cancellingResolver) Resolve(ctx context.Context, s *source.Stream, chosen source.Rendition) (source.Resolution, error) {
+	r.calls++
+	r.cancel(r.cause)
+	if r.succeed {
+		return (&fakeProgram{}).Resolve(ctx, s, chosen)
+	}
+	return source.Resolution{}, ctx.Err()
+}
+func TestCancellationDuringResolutionStartsNoFurtherWork(t *testing.T) {
+	for _, success := range []bool{false, true} {
+		ctx, cancel := context.WithCancelCause(t.Context())
+		cause := errors.New("cast cancelled while resolving")
+		resolver := &cancellingResolver{cancel: cancel, cause: cause, succeed: success}
+		runner := &scriptedRunner{}
+		err := Cast(ctx, Intent{Candidates: candidates(t, "https://example.test/a.mp4", "https://example.test/b.mp4"), Turns: unheard{}}, runner, resolver)
+		cancel(nil)
+		if !errors.Is(err, cause) || resolver.calls != 1 || len(runner.seen) != 0 {
+			t.Fatalf("late success=%v error=%v resolutions=%d attempts=%d", success, err, resolver.calls, len(runner.seen))
+		}
+	}
+}
+
+type runnerFunc func(context.Context, Attempt) Outcome
+
+func (f runnerFunc) Run(ctx context.Context, a Attempt) Outcome { return f(ctx, a) }
+
+func TestCancellationDoesNotEraseAnAttemptsCleanupFailure(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	cause, cleanup := errors.New("cast stopped"), errors.New("storage cleanup failed")
+	calls := 0
+	run := runnerFunc(func(context.Context, Attempt) Outcome {
+		calls++
+		cancel(cause)
+		return Outcome{Err: &Interrupted{Cause: cause, Failure: cleanup}, Evidence: Evidence{Cancelled: true}}
+	})
+	err := Cast(ctx, Intent{Candidates: candidates(t, "https://cdn.example/one.mp4"), Turns: unheard{}}, run, &fakeProgram{})
+	if calls != 1 || !errors.Is(err, cause) || !errors.Is(err, cleanup) {
+		t.Fatalf("attempts=%d result=%v", calls, err)
+	}
+}

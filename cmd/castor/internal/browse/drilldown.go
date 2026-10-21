@@ -1,6 +1,7 @@
 package browse
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"strconv"
@@ -31,6 +32,7 @@ type drilldown struct {
 	mode         drillMode
 	tvID         int
 	tvName       string
+	posterPath   string
 	seasonNum    int
 	tok          int
 	seasonsCache []list.Item
@@ -54,9 +56,10 @@ type drillOutcome struct {
 }
 
 // begin loads seasons for a picked show; model updates display via showSeasons.
-func (d *drilldown) begin(id int, name string) tea.Cmd {
+func (d *drilldown) begin(id int, name, posterPath string) tea.Cmd {
 	d.tvID = id
 	d.tvName = name
+	d.posterPath = posterPath
 	d.tok++
 	return tvCmd(d.ctx, d.client, id, d.tok)
 }
@@ -130,11 +133,14 @@ func (d *drilldown) enter() drillOutcome {
 	case modeEpisodes:
 		if it, ok := d.list.SelectedItem().(episodeItem); ok {
 			sel := Selection{
-				Kind:    KindEpisode,
-				TMDBID:  strconv.Itoa(d.tvID),
-				Title:   fmt.Sprintf("%s · S%02dE%02d · %s", d.tvName, d.seasonNum, it.e.EpisodeNumber, it.e.Name),
-				Season:  uint(d.seasonNum),
-				Episode: uint(it.e.EpisodeNumber),
+				Kind:        KindEpisode,
+				TMDBID:      strconv.Itoa(d.tvID),
+				Title:       fmt.Sprintf("%s · S%02dE%02d · %s", d.tvName, d.seasonNum, it.e.EpisodeNumber, it.e.Name),
+				Synopsis:    it.e.Overview,
+				ImageURL:    tmdb.ImageURL(cmp.Or(it.e.StillPath, d.posterPath)),
+				ReleaseDate: it.e.AirDate,
+				Season:      uint(d.seasonNum),
+				Episode:     uint(it.e.EpisodeNumber),
 			}
 			return drillOutcome{selected: &sel}
 		}

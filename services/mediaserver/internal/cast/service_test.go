@@ -2,10 +2,14 @@ package cast
 
 import (
 	"context"
-	"net/url"
+	"errors"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -13,7 +17,6 @@ import (
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"github.com/stupside/castor/internal/castid"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/deliver"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/execute"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
@@ -22,7 +25,7 @@ import (
 
 func TestACastNobodyLendsADeviceIsAbandonedAfterItsGrace(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		svc := New(func(*mediav1.PlaybackSettings) Caster { return nil }, &url.URL{Scheme: "http", Host: "127.0.0.1:8410"})
+		svc := New(func(*mediav1.PlaybackSettings) Caster { return nil }, nil)
 		t.Cleanup(func() { svc.Drain(context.Background()) })
 		id := castid.New()
 		if _, err := svc.Start(t.Context(), &mediav1.StartRequest{CastId: id}); err != nil {
@@ -55,7 +58,7 @@ func (retrying) Measure(_ context.Context, stream *source.Stream) (*source.Strea
 	return stream, nil
 }
 
-func (retrying) Play(ctx context.Context, _ execute.Device, _ deliver.Listeners, _ []*source.Stream, turns recovery.Turns) error {
+func (retrying) Play(ctx context.Context, _ execute.Device, _ output.Publisher, _ []*source.Stream, turns recovery.Turns) error {
 	turns.Attempting(1)
 	turns.Attempting(2)
 	turns.Revising(recovery.RelaxRead, "stalled")
@@ -66,7 +69,7 @@ func (retrying) Play(ctx context.Context, _ execute.Device, _ deliver.Listeners,
 func TestALentCastOutlivesItsGraceAndShowsNothingAfterItsEnd(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		stream := &mediav1.Source{Source: &mediav1.Source_Stream{Stream: &castorv1.Stream{Url: "https://cdn.example/direct"}}}
-		s := newCast(t.Context(), "cast", &url.URL{Scheme: "http", Host: "127.0.0.1:8410"}, retrying{}, stream)
+		s := newCast(t.Context(), "cast", nil, retrying{}, stream)
 		if err := s.lend(media.Capabilities{}); err != nil {
 			t.Fatal(err)
 		}
@@ -93,7 +96,7 @@ func TestALentCastOutlivesItsGraceAndShowsNothingAfterItsEnd(t *testing.T) {
 }
 
 func TestMeasurementCountsSurviveAttemptsAndRevisions(t *testing.T) {
-	s := newCast(t.Context(), "cast", &url.URL{}, nil, nil)
+	s := newCast(t.Context(), "cast", nil, nil, nil)
 	now, _ := s.now.Load()
 	if measuring := now.status.GetMeasuring(); measuring == nil || measuring.Castable != nil {
 		t.Fatalf("initial status %v, want measuring before ranking", now.status)
@@ -121,5 +124,46 @@ func TestMeasurementCountsSurviveAttemptsAndRevisions(t *testing.T) {
 	now, _ = s.now.Load()
 	if now.ended.GetCompleted() == nil {
 		t.Errorf("ended %v, want completed", now.ended)
+	}
+}
+
+func TestStoppedCastReportsFailuresFoundDuringCleanup(t *testing.T) {
+	for _, cleanup := range []error{nil, errors.New("storage cleanup failed")} {
+		c := newCast(t.Context(), "cleanup-result", nil, nil, nil)
+		c.fire(eventLendStream, func(*view) {})
+		c.cancel(errStopped)
+		result := outcome(c.ctx, &recovery.Interrupted{Cause: errStopped, Failure: cleanup})
+		c.end(eventEnd, result)
+		v, _ := c.now.Load()
+		if cleanup == nil {
+			if v.ended.GetStopped() == nil {
+				t.Fatalf("normal cancellation failed: %v", v.ended)
+			}
+		} else if failure := v.ended.GetFailed(); failure == nil || !strings.Contains(failure.Message, cleanup.Error()) {
+			t.Fatalf("cleanup failure hidden by stop: %v", v.ended)
+		}
+	}
+}
+
+func TestTerminalSnapshotIsPublishedBeforeCompletionSignal(t *testing.T) {
+	c := newCast(t.Context(), "publication-order", nil, nil, nil)
+	c.fire(eventLendStream, func(*view) {})
+	if !c.fire(eventEnd, func(next *view) {
+		select {
+		case <-c.done:
+			t.Error("completion signalled before terminal snapshot publication")
+		default:
+		}
+		next.ended = &castorv1.Ended{Result: &castorv1.Ended_Completed{Completed: &emptypb.Empty{}}}
+	}) {
+		t.Fatal("terminal transition rejected")
+	}
+	<-c.done
+	v, _ := c.now.Load()
+	if v.ended.GetCompleted() == nil {
+		t.Fatal("completed cast has no terminal snapshot")
+	}
+	if c.fire(eventEnd, func(*view) { t.Error("terminal snapshot overwritten") }) {
+		t.Fatal("duplicate completion accepted")
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"testing/iotest"
 	"time"
 
+	"github.com/stupside/castor/services/mediaserver/internal/source/hls"
 	"github.com/stupside/castor/services/mediaserver/internal/source/timeline"
 )
 
@@ -148,9 +149,13 @@ func TestAnAES128FragmentIsDecryptedBeforeItIsRepackaged(t *testing.T) {
 	cipher.NewCBCEncrypter(block, iv).CryptBlocks(sealed, padded)
 	m.resources["https://origin.example/1.m4s"], m.resources["https://origin.example/key"] = sealed, secret
 	for i := range m.window.Segments {
-		m.window.Segments[i].Key = timeline.Key{Method: aes128, URI: "https://origin.example/key", IV: fmt.Sprintf("0x%x", iv)}
+		m.window.Segments[i].Key = timeline.Key{Method: "AES-128", URI: "https://origin.example/key", IV: fmt.Sprintf("0x%x", iv)}
 	}
-	server := serving(t, m, labelled)
+	server, err := serve(newFeed(t.Context(), "primary", timeline.Reading{Source: m, Decoder: hls.Decoder{}}, labelled))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = server.Close() })
 	_, playlist := fetch(t, server.URL("primary").String())
 	if strings.Contains(playlist, "#EXT-X-KEY:METHOD=AES-128") {
 		t.Errorf("castor serves the segments decrypted, yet the playlist still names the key:\n%s", playlist)
@@ -165,12 +170,15 @@ func TestNothingIsListedBeforeCastorKnowsHowToServeIt(t *testing.T) {
 	m := fragmented("avc1")
 	init := m.resources["https://origin.example/init.mp4"]
 	delete(m.resources, "https://origin.example/init.mp4")
-	feed := newFeed(t.Context(), "primary", m, labelled)
-	if err := feed.refresh(t.Context()); err == nil || feed.render != nil {
-		t.Fatalf("rendered %q before the init section deciding its addressing could be read", feed.render)
+	feed := testFeed(t.Context(), "primary", m, labelled)
+	result, err := feed.refresh(t.Context())
+	if err == nil || result.body != nil || refusal(result.err) != http.StatusNotFound {
+		t.Fatalf("missing init: result=%+v error=%v", result, err)
 	}
 	m.resources["https://origin.example/init.mp4"] = init
-	if err := feed.refresh(t.Context()); err != nil || !strings.Contains(string(feed.render), "primary/0.ts") {
-		t.Errorf("once the init was read, render = %q (%v), want castor's MPEG-TS", feed.render, err)
+	result, err = feed.refresh(t.Context())
+	if err != nil || result.err != nil || !strings.Contains(string(result.body), "primary/0.ts") {
+		t.Errorf("once the init was read, result=%+v error=%v, want castor's MPEG-TS", result, err)
 	}
+
 }

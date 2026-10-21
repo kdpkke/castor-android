@@ -3,7 +3,6 @@ package execute
 import (
 	"context"
 	"errors"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/output/adapters"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,15 +13,60 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stupside/castor/services/mediaserver/internal/cast/codec"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/container"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/deliver"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/fetch"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/codec"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/container"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/fetch"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/transcode"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output/storage"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
+	"github.com/stupside/castor/services/mediaserver/internal/probe"
 )
+
+type artifactMechanism struct {
+	fakeMechanism
+	path string
+}
+
+func (m *artifactMechanism) Artifact() output.Artifact {
+	return output.Artifact{Path: m.path}
+}
+
+func TestOutputRetainsTracksDiscoveredByTheBufferedRead(t *testing.T) {
+	ffmpegPath, ffprobePath := requireFFmpegTools(t)
+	for _, missing := range []string{"video", "audio"} {
+		t.Run(missing, func(t *testing.T) {
+			args := []string{"-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-f", "mpegts"}
+			if missing == "video" {
+				args = append(args, "-vn")
+			} else {
+				args = append(args, "-an")
+			}
+			path := generateFixture(t, ffmpegPath, "output.ts", 1, args)
+			s := testPreparation(t.Context(), Cast{Probes: probe.FFprobe(ffprobePath)}, recovery.Attempt{})
+			t.Cleanup(func() { _ = s.releases.release() })
+			p := took(t, over)
+			close(p.buf.reader.done)
+			d := delivery{sink: &artifactMechanism{path: path}, output: p.buf.reader}
+			opts := encodePlan{
+				Format:   encoding.SpoolFormat,
+				delivery: output.Selection{Capabilities: dlnaLike()},
+			}
+			// A sparse later probe and an unmeasured optional source cannot erase
+			// tracks already established by the read into the buffer.
+			if err := s.validateOutput(d, opts, feed{}); err != nil {
+				t.Fatalf("single-track control artifact is not playable: %v", err)
+			}
+			p.buf.expected = media.TrackRequirements{Video: true, Audio: true}
+			if err := s.validateOutput(d, opts, feed{buffered: p.buf}); err == nil {
+				t.Fatalf("output lost buffered %s without failing validation", missing)
+			}
+		})
+	}
+}
 
 // playing is a buffered cast handed to a device, whose delivery ends as its mechanism says.
 type playing struct {
@@ -56,15 +100,15 @@ type fakeMechanism struct {
 	asked    atomic.Int64
 }
 
-func (m *fakeMechanism) URL() *url.URL                  { return &url.URL{} }
-func (m *fakeMechanism) Wait(ctx context.Context) error { return m.wait(ctx) }
-func (m *fakeMechanism) Drained() <-chan struct{}       { return nil }
-func (m *fakeMechanism) Audience() health.Audience      { return m.audience }
-func (m *fakeMechanism) Settled() error                 { m.asked.Add(1); return m.settled }
-func (m *fakeMechanism) Close() error                   { return nil }
+func (m *fakeMechanism) Path() string                                      { return "" }
+func (m *fakeMechanism) Handler() http.Handler                             { return http.NotFoundHandler() }
+func (m *fakeMechanism) Wait(ctx context.Context, _ <-chan struct{}) error { return m.wait(ctx) }
+func (m *fakeMechanism) Audience() health.Audience                         { return m.audience }
+func (m *fakeMechanism) Settled(media.Progress) error                      { m.asked.Add(1); return m.settled }
+func (m *fakeMechanism) Close() error                                      { return nil }
 
-func (m *fakeMechanism) Artifact() deliver.Artifact {
-	return deliver.Artifact{Subject: "a stated delivery", Landed: func() int64 { return 8 << 20 }}
+func (m *fakeMechanism) Artifact() output.Artifact {
+	return output.Artifact{Subject: "a stated delivery", Landed: func() (int64, error) { return 8 << 20, nil }}
 }
 
 // observedDevice is a device whose playback lifecycle a case states.
@@ -82,7 +126,7 @@ func TestAPlayingRemuxIsWatchedOverItsEncoder(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	_, err := supervising(ctx, p.dev, p.delivery(), feed{})
+	_, err := superviseFixture(ctx, p.dev, p.delivery(), feed{})
 	fault, ok := errors.AsType[*health.Fault](err)
 	if !ok {
 		t.Fatal("a remux whose device took nothing was never judged in flight")
@@ -97,23 +141,20 @@ func TestADeviceThatWentAwayIsReportedAsItselfNotAsTeardown(t *testing.T) {
 	p := took(t, blocking)
 	p.dev = observedDevice{wait: func(context.Context) error { return gone }}
 
-	_, err := supervising(t.Context(), p.dev, p.delivery(), feed{buffered: p.buf})
+	_, err := superviseFixture(t.Context(), p.dev, p.delivery(), feed{buffered: p.buf})
 	if away, ok := errors.AsType[*media.Gone](err); !ok || away != gone {
-		t.Fatalf("supervising = %v, want the device's own account of having gone away", err)
+		t.Fatalf("playback = %v, want the device's own account of having gone away", err)
 	}
 	if errors.Is(err, context.Canceled) {
-		t.Errorf("supervising = %v, teardown cancellation reported as another failure", err)
+		t.Errorf("playback = %v, teardown cancellation reported as another failure", err)
 	}
 }
 
 func TestOnlyADeliveryThatRanItsCourseIsAskedWhetherTheDeviceTookIt(t *testing.T) {
 	short := errors.New("the device was handed a fraction of what this cast produced")
 	inFlight := func(ctx context.Context, p playing) error {
-		ran, err := supervising(ctx, p.dev, p.delivery(), feed{buffered: p.buf})
-		if err != nil || !ran {
-			return err
-		}
-		return p.mech.Settled()
+		_, err := superviseFixture(ctx, p.dev, p.delivery(), feed{buffered: p.buf})
+		return err
 	}
 
 	t.Run("a delivery that ran its course is asked", func(t *testing.T) {
@@ -148,22 +189,22 @@ func TestADeliveryPublishesItsOwnArtifactsAndNothingElseOfTheCasts(t *testing.T)
 	if err := awaitArtifact(t.Context(), d); err != nil {
 		t.Fatalf("the playlist never appeared: %v", err)
 	}
-	leak := d.sink.URL()
+	leak := d.URL()
 	leak.Path = "/spool.ts"
 	if got := statusOf(t, leak); got == http.StatusOK {
 		t.Errorf("GET %s = 200: the delivery publishes the cast's private files", leak.Path)
 	}
-	if got := statusOf(t, d.sink.URL()); got != http.StatusOK {
+	if got := statusOf(t, d.URL()); got != http.StatusOK {
 		t.Errorf("GET playlist = %d, so this is a broken server rather than isolation", got)
 	}
 }
 
 // TestARelayedCastIsOpenedOverItsRead: with no encoder, the read is the producer whose end the opening judges.
 func TestARelayedCastIsOpenedOverItsRead(t *testing.T) {
-	s, buf := servingPipeline(t, ""), gateFixture(t)
+	s, buf := servingAttempt(t, ""), gateFixture(t)
 	buf.reader.spool.CloseWrite(nil)
 	close(buf.reader.done)
-	s.cast.Device = observedDevice{wait: blocking}
+	s.capabilities = observedDevice{}.Capabilities()
 	d, err := s.produce(t.TempDir(), feed{buffered: buf}, testEncoding(t, verbatim()), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -181,24 +222,25 @@ func TestARelayedCastIsOpenedOverItsRead(t *testing.T) {
 // TestARelayedCastFailsWithItsRead: the read writes the served bytes, so its failure is the cast's as an encoder's was.
 func TestARelayedCastFailsWithItsRead(t *testing.T) {
 	failed := errors.New("upstream pull: the origin refused a segment on every retry")
-	s, buf := servingPipeline(t, ""), gateFixture(t)
+	s, buf := servingAttempt(t, ""), gateFixture(t)
 	buf.reader.err = failed
 	buf.reader.spool.CloseWrite(failed)
 	close(buf.reader.done)
-	s.cast.Device = observedDevice{wait: blocking}
-	if _, err := s.produce(t.TempDir(), feed{buffered: buf}, testEncoding(t, verbatim()), nil); err != nil {
+	s.capabilities = observedDevice{}.Capabilities()
+	d, err := s.produce(t.TempDir(), feed{buffered: buf}, testEncoding(t, verbatim()), nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.releases.release(); !errors.Is(err, failed) {
-		t.Errorf("releasing a cast whose read failed reported %v, want the read's own failure", err)
+	if err := awaitArtifact(t.Context(), d); !errors.Is(err, failed) {
+		t.Fatalf("readiness = %v, want upstream failure", err)
 	}
 }
 
 // verbatim is an encode that would rewrite the buffer unchanged, so the buffer is served instead.
-func verbatim() transcode.EncodeOptions {
-	return transcode.EncodeOptions{
-		Input:  transcode.FromPipe(fetch.Pace{}),
-		Format: transcode.SpoolFormat,
+func verbatim() encoding.EncodeOptions {
+	return encoding.EncodeOptions{
+		Input:  encoding.FromPipe(fetch.Pace{}),
+		Format: encoding.SpoolFormat,
 		Video:  codec.CopyVideo(),
 		Audio:  codec.CopyAudio(),
 	}
@@ -227,8 +269,8 @@ func TestTeardownStopsAnEncoderParkedOnAnInputThatWentQuiet(t *testing.T) {
 		t.Fatal("the format registry cannot produce mpegts")
 	}
 	head := programHead(t, ffmpegPath)
-	copying := func(input transcode.EncodeInput) transcode.EncodeOptions {
-		return transcode.EncodeOptions{
+	copying := func(input encoding.EncodeInput) encoding.EncodeOptions {
+		return encoding.EncodeOptions{
 			Format: format,
 			Input:  input,
 			Probe:  media.ProbeInfo{VideoCodec: media.CodecH264, AudioCodec: media.CodecAAC},
@@ -239,11 +281,11 @@ func TestTeardownStopsAnEncoderParkedOnAnInputThatWentQuiet(t *testing.T) {
 
 	for _, tt := range []struct {
 		name  string
-		setup func(t *testing.T, s *pipeline, work string) (feed, transcode.EncodeOptions)
+		setup func(t *testing.T, s *preparation, work string) (feed, encoding.EncodeOptions)
 	}{{
 		name: "reading a buffer nothing will grow",
-		setup: func(t *testing.T, s *pipeline, work string) (feed, transcode.EncodeOptions) {
-			sp, err := deliver.NewSpool(filepath.Join(work, "spool.ts"))
+		setup: func(t *testing.T, s *preparation, work string) (feed, encoding.EncodeOptions) {
+			sp, err := storage.NewSpool(filepath.Join(work, "spool.ts"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -251,20 +293,20 @@ func TestTeardownStopsAnEncoderParkedOnAnInputThatWentQuiet(t *testing.T) {
 			if _, err := sp.Write(head); err != nil {
 				t.Fatal(err)
 			}
-			opts := copying(transcode.FromPipe(fetch.Pace{}))
+			opts := copying(encoding.FromPipe(fetch.Pace{}))
 			// A buffer copied whole into its own container is served with no encoder at all.
 			opts.Audio = codec.Encode(codec.AudioEncode{Codec: media.CodecAAC})
 			return feed{buffered: &buffered{reader: &pull{spool: sp, done: make(chan struct{})}}}, opts
 		},
 	}, {
 		name: "reading an origin that went quiet",
-		setup: func(t *testing.T, s *pipeline, _ string) (feed, transcode.EncodeOptions) {
-			return feed{}, copying(transcode.FromSource(programSourceWithin(t, quietOrigin(t, head), media.MPEGTS, time.Hour)))
+		setup: func(t *testing.T, s *preparation, _ string) (feed, encoding.EncodeOptions) {
+			return feed{}, copying(encoding.FromSource(programSourceWithin(t, quietOrigin(t, head), media.MPEGTS, time.Hour)))
 		},
 	}} {
 		t.Run(tt.name, func(t *testing.T) {
-			s, work := servingPipeline(t, ffmpegPath), t.TempDir()
-			s.cast.Device = probingDevice{}
+			s, work := servingAttempt(t, ffmpegPath), t.TempDir()
+			s.capabilities = probingDevice{}.Capabilities()
 			f, opts := tt.setup(t, s, work)
 			d, err := s.produce(work, f, testEncoding(t, opts), nil)
 			if err != nil {
@@ -273,7 +315,7 @@ func TestTeardownStopsAnEncoderParkedOnAnInputThatWentQuiet(t *testing.T) {
 			if err := awaitArtifact(t.Context(), d); err != nil {
 				t.Fatal(err)
 			}
-			if err := hand(t.Context(), s.cast.Device, d.sink.URL(), opts.Format.ContentType, nil, false); err != nil {
+			if err := hand(t.Context(), probingDevice{}, d.URL(), opts.Format.ContentType, nil, false); err != nil {
 				t.Fatal(err)
 			}
 
@@ -324,14 +366,12 @@ func programHead(t *testing.T, ffmpegPath string) []byte {
 	return program[:len(program)*2/3]
 }
 
-// servingPipeline is the pipeline a delivery is opened in, released when the test ends.
-func servingPipeline(t *testing.T, ffmpegPath string) *pipeline {
+// servingAttempt is the attempt a delivery is opened in, released when the test ends.
+func servingAttempt(t *testing.T, ffmpegPath string) *preparation {
 	t.Helper()
-	s := &pipeline{
-		cast:     Cast{Machinery: Machinery{FFmpegPath: ffmpegPath, Encoders: ffmpeg.Encoders(ffmpegPath), Timelines: direct{}, InputArgs: formats.InputArgs, Outputs: adapters.Default()}, Listeners: loopback{}},
-		ctx:      t.Context(),
-		releases: &releases{},
-	}
+	s := testPreparation(t.Context(),
+		Cast{FFmpegPath: ffmpegPath, Encoders: ffmpeg.Encoders(ffmpegPath), InputArgs: formats.InputArgs, Outputs: testOutputs(), Publisher: loopback{}, Timelines: direct{}},
+		recovery.Attempt{})
 	t.Cleanup(func() { _ = s.releases.release() })
 	return s
 }
@@ -341,20 +381,20 @@ func openFixture(t *testing.T, contentType, workDir string) delivery {
 	t.Helper()
 	ffmpegPath, _ := requireFFmpegTools(t)
 	origin := serveFixture(t, ffmpegPath)
-	s := servingPipeline(t, ffmpegPath)
-	selected, err := adapters.Default().Select(chromecastLike(contentType), nil)
+	s := servingAttempt(t, ffmpegPath)
+	selected, err := testOutputs().Select(chromecastLike(contentType), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	format := selected.Plan.Format()
-	opts := transcode.EncodeOptions{
+	opts := encoding.EncodeOptions{
 		Format: format,
-		Input:  transcode.FromSource(programSourceWithin(t, origin.stream().URL, media.MP4, 30*time.Second)),
+		Input:  encoding.FromSource(programSourceWithin(t, origin.stream().URL, media.MP4, 30*time.Second)),
 		Probe:  media.ProbeInfo{VideoCodec: media.CodecH264},
 		Video:  codec.CopyVideo(),
 		Audio:  codec.Encode(codec.AudioEncode{Codec: media.CodecAAC}),
 	}
-	s.cast.Device = probingDevice{}
+	s.capabilities = probingDevice{}.Capabilities()
 	d, err := s.produce(workDir, feed{}, testEncoding(t, opts), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -384,7 +424,7 @@ func (probingDevice) AwaitEnd(ctx context.Context) error {
 
 func (probingDevice) Capabilities() media.Capabilities { return media.Capabilities{} }
 
-func programSourceWithin(t *testing.T, sourceURL *url.URL, contentType string, rwTimeout time.Duration) transcode.ProgramSource {
+func programSourceWithin(t *testing.T, sourceURL *url.URL, contentType string, rwTimeout time.Duration) encoding.ProgramSource {
 	t.Helper()
 	program, err := media.NewProgram(media.Program{
 		Inputs: []media.Input{{ID: media.PrimaryInputID, URL: sourceURL, ContentType: contentType}},
@@ -398,7 +438,7 @@ func programSourceWithin(t *testing.T, sourceURL *url.URL, contentType string, r
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := transcode.NewProgramSource(program, map[media.InputID]fetch.Policy{
+	source, err := encoding.NewProgramSource(program, map[media.InputID]fetch.Policy{
 		media.PrimaryInputID: fetch.For(media.Fetch{}, rwTimeout),
 	}, ffmpeg.Binary{}, formats.InputArgs)
 	if err != nil {
@@ -413,11 +453,11 @@ func (observedDevice) Resume(context.Context) error { return nil }
 func (probingDevice) Pause(context.Context) error  { return nil }
 func (probingDevice) Resume(context.Context) error { return nil }
 
-func testEncoding(t *testing.T, opts transcode.EncodeOptions) encoding {
+func testEncoding(t *testing.T, opts encoding.EncodeOptions) encodePlan {
 	t.Helper()
-	selected, err := adapters.Default().Select(chromecastLike(opts.Format.ContentType), nil)
+	selected, err := testOutputs().Select(chromecastLike(opts.Format.ContentType), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return encoding{EncodeOptions: opts, delivery: selected}
+	return encodePlan{EncodeOptions: opts, delivery: selected}
 }

@@ -2,13 +2,15 @@ package execute
 
 import (
 	"errors"
-	"golang.org/x/sync/semaphore"
 	"io"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/stupside/castor/services/mediaserver/internal/cast/deliver"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output/storage"
+
+	"golang.org/x/sync/semaphore"
+
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
@@ -25,7 +27,7 @@ func TestTheReadsFloorEncodeIsCappedAtTheCastsCeiling(t *testing.T) {
 	c.MaxHeight = 120
 	program := programFromStream(t, origin.stream())
 
-	s := readingPipeline(t, c, recovery.Attempt{Program: program, Fetch: sourceFetchPlan(t, program, testReadDeadline), Decode: media.Axes{Video: true}})
+	s := readingAttempt(t, c, recovery.Attempt{Program: program, Fetch: sourceFetchPlan(t, program, testReadDeadline), Decode: media.Axes{Video: true}})
 	followed, err := s.follow(program)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +52,7 @@ func TestTheReadsFloorEncodeIsCappedAtTheCastsCeiling(t *testing.T) {
 
 // A spool that stops taking writes ends the read at once instead of leaving its ffmpeg blocked on a full pipe.
 func TestAFailedSpoolWriteKillsTheReader(t *testing.T) {
-	sp, err := deliver.NewSpool(filepath.Join(t.TempDir(), "spool.ts"))
+	sp, err := storage.NewSpool(filepath.Join(t.TempDir(), "spool.ts"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +78,7 @@ func TestAFailedSpoolWriteKillsTheReader(t *testing.T) {
 }
 
 func TestSpoolExhaustionSurvivesKilledFFmpegPipe(t *testing.T) {
-	sp, err := deliver.NewSpoolWithLimit(filepath.Join(t.TempDir(), "limited.ts"), 4)
+	sp, err := storage.NewSpoolWithLimit(filepath.Join(t.TempDir(), "limited.ts"), 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,17 +94,17 @@ func TestSpoolExhaustionSurvivesKilledFFmpegPipe(t *testing.T) {
 		proc.Kill()
 		t.Fatal("writer did not stop")
 	}
-	if !errors.Is(p.Err(), deliver.ErrSpoolLimit) {
+	if !errors.Is(p.Err(), storage.ErrSpoolLimit) {
 		t.Fatalf("lost budget error: %v", p.Err())
 	}
 	e := evidence(ran{reader: p}, p.Err(), false)
-	if !errors.Is(e.ResourceErr, deliver.ErrSpoolLimit) {
+	if !errors.Is(e.ResourceErr, storage.ErrSpoolLimit) {
 		t.Fatalf("lost budget evidence: %+v", e)
 	}
 }
 
 func TestEncoderResultPreservesExpiredLiveInput(t *testing.T) {
-	sp, err := deliver.NewLiveSpoolWithBudget(filepath.Join(t.TempDir(), "live.ts"), 8, semaphore.NewWeighted(16))
+	sp, err := storage.NewLiveSpoolWithBudget(filepath.Join(t.TempDir(), "live.ts"), 8, semaphore.NewWeighted(16))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,10 +123,10 @@ func TestEncoderResultPreservesExpiredLiveInput(t *testing.T) {
 	}
 	_, _ = io.Copy(io.Discard, proc.Stdout)
 	err = encoderResult(t.Context(), proc)
-	if !errors.Is(err, deliver.ErrSpoolExpired) {
+	if !errors.Is(err, storage.ErrSpoolExpired) {
 		t.Fatalf("encoder erased expiry: %v", err)
 	}
-	if got := evidence(ran{}, err, false); !errors.Is(got.ResourceErr, deliver.ErrSpoolExpired) {
+	if got := evidence(ran{}, err, false); !errors.Is(got.ResourceErr, storage.ErrSpoolExpired) {
 		t.Fatalf("lost expiry evidence: %+v", got)
 	}
 }

@@ -106,16 +106,43 @@ message HLSSupport {
   }
   // Subtitle rendition playlists refreshed alongside the media playlist.
   Subtitles subtitles = 1 [(buf.validate.field).enum.defined_only = true];
+  enum ExtraSegmentFormat {
+    EXTRA_SEGMENT_FORMAT_UNSPECIFIED = 0;
+    EXTRA_SEGMENT_FORMAT_TIKTIKPX = 1; // PNG/gzip/MPEG-TS envelope
+  }
+  // Nonstandard segment formats accepted in addition to ordinary HLS segments.
+  repeated ExtraSegmentFormat extra_segment_formats = 2 [(buf.validate.field).repeated = {
+    max_items: 16
+    unique: true
+    items: {
+      enum: {
+        not_in: [0]
+      }
+    }
+  }];
 }
 
 message VideoSupport {
-  VideoCodec codec = 1 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
-  }];
-  // profiles are those decoded; none is any.
-  repeated Profile profiles = 2 [(buf.validate.field).repeated = {
-    max_items: 16
+  oneof codec {
+    option (buf.validate.oneof).required = true;
+    H264Support h264 = 1;
+    HEVCSupport hevc = 2;
+    VP8Support vp8 = 3;
+  }
+}
+
+message H264Support {
+  enum Profile {
+    PROFILE_UNSPECIFIED = 0;
+    PROFILE_CONSTRAINED_BASELINE = 1;
+    PROFILE_BASELINE = 2;
+    PROFILE_MAIN = 3;
+    PROFILE_HIGH = 4;
+  }
+  // Empty means any H.264 profile within the advertised level.
+  repeated Profile profiles = 1 [(buf.validate.field).repeated = {
+    max_items: 4
+    unique: true
     items: {
       enum: {
         defined_only: true
@@ -123,8 +150,30 @@ message VideoSupport {
       }
     }
   }];
-  repeated uint32 bit_depths = 3 [(buf.validate.field).repeated = {
-    max_items: 8
+  uint32 max_level = 2;
+}
+
+message HEVCSupport {
+  enum Profile {
+    PROFILE_UNSPECIFIED = 0;
+    PROFILE_MAIN = 1;
+    PROFILE_MAIN_10 = 2;
+  }
+  // Empty means any HEVC profile at the advertised bit depths.
+  repeated Profile profiles = 1 [(buf.validate.field).repeated = {
+    max_items: 2
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  // Empty means 8-bit only.
+  repeated uint32 bit_depths = 2 [(buf.validate.field).repeated = {
+    max_items: 3
+    unique: true
     items: {
       uint32: {
         in: [
@@ -135,8 +184,10 @@ message VideoSupport {
       }
     }
   }];
-  uint32 max_level = 4;
+  uint32 max_level = 3;
 }
+
+message VP8Support {}
 
 message AudioSupport {
   AudioCodec codec = 1 [(buf.validate.field).enum = {
@@ -168,13 +219,6 @@ extend google.protobuf.EnumValueOptions {
   string mime = 51000;
 }
 
-enum VideoCodec {
-  VIDEO_CODEC_UNSPECIFIED = 0;
-  VIDEO_CODEC_H264 = 1;
-  VIDEO_CODEC_HEVC = 2;
-  VIDEO_CODEC_VP8 = 3;
-}
-
 enum AudioCodec {
   AUDIO_CODEC_UNSPECIFIED = 0;
   AUDIO_CODEC_AAC = 1;
@@ -182,16 +226,6 @@ enum AudioCodec {
   AUDIO_CODEC_EAC3 = 3;
   AUDIO_CODEC_MP3 = 4;
   AUDIO_CODEC_VORBIS = 5;
-}
-
-// Profile is a video codec profile a device decodes.
-enum Profile {
-  PROFILE_UNSPECIFIED = 0;
-  PROFILE_BASELINE = 1;
-  PROFILE_CONSTRAINED_BASELINE = 2;
-  PROFILE_MAIN = 3;
-  PROFILE_MAIN_10 = 4;
-  PROFILE_HIGH = 5;
 }
 
 // DeviceCommand is one call a cast makes on the device lent to it.

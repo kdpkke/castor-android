@@ -5,15 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"time"
+
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
 
 	"connectrpc.com/connect"
 
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	"github.com/stupside/castor/internal/registry"
 	"github.com/stupside/castor/internal/telemetry"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/deliver"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/execute"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
 	"github.com/stupside/castor/services/mediaserver/internal/source"
@@ -31,7 +31,7 @@ var errShutdown = errors.New("server shutting down")
 type Caster interface {
 	Rank(ctx context.Context, streams []*source.Stream) ([]*source.Stream, error)
 	Measure(ctx context.Context, stream *source.Stream) (*source.Stream, error)
-	Play(ctx context.Context, device execute.Device, listeners deliver.Listeners, streams []*source.Stream, turns recovery.Turns) error
+	Play(ctx context.Context, device execute.Device, publisher output.Publisher, streams []*source.Stream, turns recovery.Turns) error
 }
 
 // Service runs every cast behind the media contract: it starts, stops and follows them, takes the device each is lent, and ranks streams without casting.
@@ -41,19 +41,19 @@ type Service struct {
 	ctx         context.Context
 	shut        context.CancelCauseFunc
 	caster      func(asked *mediav1.PlaybackSettings) Caster
-	reach       *url.URL
+	publisher   output.Publisher
 	casts       *registry.Registry[*cast]
 }
 
-// New casts with caster, telling devices to reach the media route at reach.
-func New(caster func(asked *mediav1.PlaybackSettings) Caster, reach *url.URL) *Service {
+// New runs casts with caster and publishes their media through publisher.
+func New(caster func(asked *mediav1.PlaybackSettings) Caster, publisher output.Publisher) *Service {
 	// Casts outlive the request that started them, and end only once the server shuts down.
 	ctx, shut := context.WithCancelCause(context.Background())
-	return &Service{watchers: semaphore.NewWeighted(256), resolutions: semaphore.NewWeighted(resolutionCapacity), ctx: ctx, shut: shut, caster: caster, reach: reach, casts: registry.New[*cast](linger)}
+	return &Service{watchers: semaphore.NewWeighted(256), resolutions: semaphore.NewWeighted(resolutionCapacity), ctx: ctx, shut: shut, caster: caster, publisher: publisher, casts: registry.New[*cast](linger)}
 }
 
 func (s *Service) Start(ctx context.Context, req *mediav1.StartRequest) (*mediav1.StartResponse, error) {
-	c := newCast(telemetry.WithTrace(s.ctx, ctx), req.GetCastId(), s.reach, s.caster(req.GetSettings()), req.GetSource())
+	c := newCast(telemetry.WithTrace(s.ctx, ctx), req.GetCastId(), s.publisher, s.caster(req.GetSettings()), req.GetSource())
 	if err := s.casts.Add(c.id, c, c.done); err != nil {
 		c.cancel(errShutdown)
 		if errors.Is(err, registry.ErrCapacity) {
@@ -74,12 +74,6 @@ func (s *Service) Stop(_ context.Context, req *mediav1.StopRequest) (*mediav1.St
 	}
 	c.cancel(errStopped)
 	return &mediav1.StopResponse{}, nil
-}
-
-// Serves reports whether cast id serves port to devices.
-func (s *Service) Serves(id, port string) bool {
-	c, ok := s.casts.Find(id)
-	return ok && c.deliveries.Serves(port)
 }
 
 // Drain cancels casts and source resolutions, then waits for their cleanup or ctx to end.

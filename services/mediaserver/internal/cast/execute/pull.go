@@ -1,16 +1,18 @@
 package execute
 
 import (
-	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 
-	"github.com/stupside/castor/services/mediaserver/internal/cast/codec"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/deliver"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/codec"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/transcode"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/output/storage"
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
@@ -21,7 +23,7 @@ type pull struct {
 	pcmOut *io.PipeWriter
 
 	floor codec.Plan
-	spool *deliver.Spool
+	spool *storage.Spool
 	proc  *ffmpeg.Process
 
 	// done is closed once the read has ended, publishing err with it.
@@ -35,7 +37,7 @@ var _ health.Producer = (*pull)(nil)
 type pullSpec struct {
 	live       bool
 	ffmpegPath string
-	source     transcode.ProgramSource
+	source     encoding.ProgramSource
 	probe      media.ProbeInfo
 	spoolPath  string
 	floor      codec.Plan
@@ -44,9 +46,9 @@ type pullSpec struct {
 }
 
 func startPull(ctx context.Context, spec pullSpec) (*pull, error) {
-	openSpool := deliver.NewSpool
+	openSpool := storage.NewSpool
 	if spec.live {
-		openSpool = deliver.NewLiveSpool
+		openSpool = storage.NewLiveSpool
 	}
 	sp, err := openSpool(spec.spoolPath)
 	if err != nil {
@@ -66,6 +68,7 @@ func startPull(ctx context.Context, spec pullSpec) (*pull, error) {
 		_ = sp.Close()
 		if pcmOut != nil {
 			_ = pcmOut.CloseWithError(err)
+			_ = pcm.Close()
 		}
 		return nil, err
 	}
@@ -77,7 +80,7 @@ func startPull(ctx context.Context, spec pullSpec) (*pull, error) {
 
 // startPuller runs the read's ffmpeg, teeing PCM into pcmOut where there is one.
 func startPuller(ctx context.Context, spec pullSpec, pcmOut *io.PipeWriter) (*ffmpeg.Process, error) {
-	cmd, err := transcode.PullArgs(transcode.PullOptions{
+	cmd, err := encoding.PullArgs(encoding.PullOptions{
 		Source:        spec.source,
 		Probe:         spec.probe,
 		Video:         spec.floor.Video,
@@ -106,6 +109,18 @@ func startPuller(ctx context.Context, spec pullSpec, pcmOut *io.PipeWriter) (*ff
 
 func (p *pull) run(ctx context.Context) {
 	defer close(p.done)
+	// The read owns this pipe. Cancellation must unblock the PCM tee even if
+	// transcription has stopped consuming but has not returned yet.
+	if p.pcmOut != nil {
+		closePCM := sync.OnceFunc(func() { _ = p.pcmOut.CloseWithError(ctx.Err()) })
+		stop := context.AfterFunc(ctx, closePCM)
+		defer func() {
+			if !stop() {
+				closePCM()
+			}
+			_ = p.pcmOut.CloseWithError(p.err)
+		}()
+	}
 
 	_, err := io.Copy(p.spool, p.proc.Stdout)
 	if err != nil {
@@ -113,19 +128,23 @@ func (p *pull) run(ctx context.Context) {
 		p.proc.Kill()
 	}
 	// A clean exit is not a complete read: the demuxer skips or truncates media and still exits 0.
-	err = cmp.Or(err, p.proc.Wait(), p.proc.SilentFailure())
+	processErr := p.proc.Wait()
+	if p.proc.Evidence().ExitStatus < 0 {
+		processErr = nil
+	}
+	if ctx.Err() != nil {
+		err = output.InterruptedIO(err)
+	}
+	err = errors.Join(err, unlessTeardown(processErr), p.proc.SilentFailure())
 
 	switch {
-	case ctx.Err() != nil:
-		err = ctx.Err()
 	case err != nil:
 		err = fmt.Errorf("upstream pull: %w", err)
+	case ctx.Err() != nil:
+		err = ctx.Err()
 	}
 	p.err = err
 	p.spool.CloseWrite(err)
-	if p.pcmOut != nil {
-		_ = p.pcmOut.CloseWithError(err)
-	}
 
 	if err == nil {
 		slog.InfoContext(ctx, "upstream pull complete", "spooled_bytes", p.spool.Size())
@@ -155,4 +174,4 @@ func (p *pull) lostMedia() bool { return p.proc.LostMedia() }
 func (p *pull) exitStatus() int { return p.proc.Evidence().ExitStatus }
 
 // copying is the halves this read passed through untouched, which is what a recovery must stop asking for.
-func (p *pull) copying() media.Axes { return p.floor.Encoded().Copying() }
+func (p *pull) copying() media.Axes { return p.floor.Copied() }

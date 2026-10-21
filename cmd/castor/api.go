@@ -6,6 +6,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/stupside/castor/gen/castor/v1/castorv1connect"
+	"github.com/stupside/castor/internal/settings"
 	"github.com/stupside/castor/internal/transport"
 )
 
@@ -19,7 +20,7 @@ type clients struct {
 }
 
 // dial reaches the API api names, or the one local runs; release stops what local runs.
-func dial(ctx context.Context, cmd *cli.Command, api apiConfig, local Local) (_ clients, release func(), err error) {
+func dial(ctx context.Context, cmd *cli.Command, api settings.Endpoint, local Local) (_ clients, release func(), err error) {
 	at, release := transport.Endpoint{URL: api.URL, Token: api.Token}, func() {}
 	if at.URL == "" {
 		if at, release, err = local(ctx, cmd); err != nil {

@@ -23,7 +23,7 @@ func (opaque) Resolve(_ context.Context, env Env, s Subject) (Resolution, error)
 		program.Inputs[i].Fetch.Framing = s.Origin.Framing
 	}
 	var chosen Rendition
-	if probe := s.Stream.Probe; probe != nil && len(probe.AudioTracks) > 0 {
+	if probe, observed := program.Measurement(); observed && len(probe.AudioTracks) > 0 {
 		index, preferred := selectAudioTrack(probe.AudioTracks, env.AudioLanguages)
 		for i := range program.Tracks {
 			if program.Tracks[i].Kind == media.TrackAudio {
@@ -57,7 +57,9 @@ func selectAudioTrack(tracks []media.AudioTrack, languages []string) (index int,
 	return 0, false
 }
 
-func (opaque) Timeline(Client, media.Input, media.TrackKind) timeline.Source { return nil }
+func (opaque) Timeline(Client, media.Input, media.TrackKind) timeline.Reading {
+	return timeline.Reading{}
+}
 
 func (opaque) InputArgs(int) []string { return nil }
 

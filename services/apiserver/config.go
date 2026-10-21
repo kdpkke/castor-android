@@ -7,18 +7,19 @@ import (
 
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
+	"github.com/stupside/castor/internal/settings"
 	"github.com/stupside/castor/services/apiserver/internal/device/roku"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Config is the API server's sections of castor's configuration.
 type Config struct {
-	Cast    CastConfig    `yaml:"cast"`
+	Cast    CastConfig    `yaml:"cast" settings:"strict"`
 	Servers ServersConfig `yaml:"servers" validate:"required"`
 }
 
 type ServersConfig struct {
-	API   APIConfig    `yaml:"api" validate:"required"`
+	API   APIConfig    `yaml:"api" settings:"strict" validate:"required"`
 	Media ServerConfig `yaml:"media"`
 	// Scraping names only the resolver endpoint and credentials, never browser settings.
 	Scraping ServerConfig `yaml:"scraping"`
@@ -78,17 +79,14 @@ func (d *Delivery) UnmarshalText(text []byte) error {
 
 // APIConfig is where `castor api-server` listens, and the token it asks every request to carry.
 type APIConfig struct {
-	Listen  string        `yaml:"listen" validate:"required,hostname_port|startswith=:"`
-	Token   string        `yaml:"token"`
-	Network NetworkConfig `yaml:"network" validate:"required"`
-	Devices DevicesConfig `yaml:"devices"`
+	settings.Endpoint `yaml:",inline"`
+	Listen            string        `yaml:"listen" validate:"required,hostname_port|startswith=:"`
+	Network           NetworkConfig `yaml:"network" validate:"required"`
+	Devices           DevicesConfig `yaml:"devices"`
 }
 
-// ServerConfig is the media server this API server casts through; unset, castor runs one beside it in its own process.
-type ServerConfig struct {
-	URL   string `yaml:"url" validate:"omitempty,http_url"`
-	Token string `yaml:"token"`
-}
+// ServerConfig is the media or scraping service this API server reaches.
+type ServerConfig = settings.Endpoint
 
 // NetworkConfig is how long discovery and a device protocol are given.
 type NetworkConfig struct {

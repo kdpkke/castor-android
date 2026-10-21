@@ -7,16 +7,13 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
-	"slices"
-	"sync"
 	"time"
 )
 
-// Registry is every family this process reaches devices through, and how long each step is given.
+// Registry connects to devices through their protocol families.
 type Registry struct {
-	Discovery func(context.Context) []Info
-	Families  []Family
-	Timeout   time.Duration
+	Families []Family
+	Timeout  time.Duration
 }
 
 func (r Registry) family(t Type) (Family, error) {
@@ -26,28 +23,6 @@ func (r Registry) family(t Type) (Family, error) {
 		}
 	}
 	return nil, fmt.Errorf("unknown device type: %q", t)
-}
-
-// Discover sweeps every family at once, each device once however often it announced itself.
-func (r Registry) Discover(ctx context.Context) []Info {
-	ctx, cancel := context.WithTimeout(ctx, r.Timeout)
-	defer cancel()
-	if r.Discovery != nil {
-		return r.Discovery(ctx)
-	}
-	found := make([][]Info, len(r.Families))
-	var wg sync.WaitGroup
-	for i, f := range r.Families {
-		wg.Go(func() { found[i] = f.Discover(ctx) })
-	}
-	wg.Wait()
-	seen := map[Info]bool{}
-	return slices.DeleteFunc(slices.Concat(found...), func(info Info) bool {
-		key := Info{Type: info.Type, ID: info.ID}
-		dup := seen[key]
-		seen[key] = true
-		return dup
-	})
 }
 
 // Connect opens the device at target's address, as its family locates it.

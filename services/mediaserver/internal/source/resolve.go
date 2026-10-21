@@ -87,27 +87,24 @@ func ProgramFor(stream *Stream) (media.Program, error) {
 	if err != nil {
 		return media.Program{}, err
 	}
-	if stream.Probe != nil {
-		program.SetMeasurement(*stream.Probe)
+	if stream.Observation != nil {
+		program.SetObservation(*stream.Observation)
 	}
 	return program, nil
 }
 
-// Narrowed builds program to read chosen out of stream, carrying a measurement of that very reading, else the rung's declaration.
+// Narrowed keeps the selected rung's declaration apart from an observation of
+// the exact inputs and tracks this resolution will read.
 func Narrowed(program media.Program, chosen Rendition, stream *Stream) (media.Program, error) {
 	narrowed, err := media.NewProgram(program)
 	if err != nil {
 		return media.Program{}, err
 	}
-	published, err := ProgramFor(stream)
-	if err != nil {
-		return media.Program{}, err
+	if chosen.Declared != nil {
+		narrowed.SetDeclaration(*chosen.Declared)
 	}
-	switch measured, ok := published.Measurement(); {
-	case ok && published.SameBindings(narrowed):
-		narrowed.SetMeasurement(measured)
-	case chosen.Declared != nil:
-		narrowed.SetMeasurement(*chosen.Declared)
+	if stream.Observation != nil {
+		narrowed.SetObservation(*stream.Observation)
 	}
 	return narrowed, nil
 }
