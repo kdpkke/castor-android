@@ -6,6 +6,11 @@ plugins {
   alias(libs.plugins.compose.compiler)
 }
 
+val targetAbi = providers.gradleProperty("castor.abi").orNull
+require(targetAbi == null || targetAbi in listOf("arm64-v8a", "x86_64")) {
+    "castor.abi must be arm64-v8a or x86_64"
+}
+
 android {
     namespace = "io.github.stupside.castor"
     buildToolsVersion = "37.0.0"
@@ -13,6 +18,7 @@ android {
     defaultConfig {
         applicationId = "io.github.stupside.castor"
         minSdk = 28
+        ndk { abiFilters += targetAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "x86_64") }
         targetSdk = 37
         versionCode = 15
         versionName = "1.0.0"
@@ -87,6 +93,7 @@ kotlin {
 }
 
 dependencies {
+  implementation(libs.geckoview)
   implementation(libs.protobuf.java)
   implementation(libs.protovalidate)
   implementation(libs.connect.okhttp)

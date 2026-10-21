@@ -22,9 +22,18 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 
 class BrowserSessionTest {
+  @Before
+  fun prepareBrowserProtection() =
+    runBlocking<Unit> {
+      withContext(Dispatchers.Main) {
+        BrowserEngine.get(InstrumentationRegistry.getInstrumentation().targetContext).ready.await()
+      }
+    }
+
   @Test
   fun playlistRedirectDoesNotForwardCredentialsToAnotherOrigin() = runBlocking {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -144,11 +153,12 @@ class BrowserSessionTest {
     val bridge = BrowserServer(resolver, { emptyList() }, "fixture-token")
     try {
       val api = Rpc(bridge.url, "fixture-token")
-      val response = api.result {
-        api.scraping.resolve(
-          ResolveRequest.newBuilder().addUrls(origin.url("/page").toString()).build()
-        )
-      }
+      val response =
+        api.result {
+          api.scraping.resolve(
+            ResolveRequest.newBuilder().addUrls(origin.url("/page").toString()).build()
+          )
+        }
       assertEquals("application/x-mpegURL", response.streamsList.single().stream.contentType)
       val playlist = response.streamsList.single().stream.url
       ticket.set(2)

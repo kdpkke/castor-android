@@ -1,4 +1,5 @@
 [versions]
+geckoview = "158.0.20261021001945"
 androidGradlePlugin = "9.4.1"
 androidxCore = "1.19.1"
 androidxLifecycle = "2.11.0"
@@ -20,6 +21,7 @@ bufPlugin = "0.11.2"
 buf = "1.74.0"
 
 [libraries]
+geckoview = { module = "org.mozilla.geckoview:geckoview", version.ref = "geckoview" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidxActivity" }
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "androidxComposeBom" }

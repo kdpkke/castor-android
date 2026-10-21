@@ -1,135 +1,208 @@
 package io.github.stupside.castor
 
-import android.annotation.SuppressLint
 import android.content.Context
-import android.webkit.CookieManager
-import android.webkit.PermissionRequest
-import android.webkit.ServiceWorkerClient
-import android.webkit.ServiceWorkerController
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import castor.scraping.v1.Scraping.ResolveRequest
 import castor.scraping.v1.Scraping.ResolveResponse
 import castor.v1.StreamOuterClass.Stream
 import castor.v1.StreamOuterClass.StreamCandidate
 import java.net.URI
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
-import org.json.JSONArray
+import org.json.JSONObject
+import org.mozilla.geckoview.*
 
-data class BrowserPage(val url: String, val loading: Boolean = true, val error: String? = null)
+data class BrowserPage(
+  val url: String,
+  val loading: Boolean = true,
+  val error: String? = null,
+  val protectionReady: Boolean = false,
+)
 
-// A private WebView profile captures requests; no JavaScript interface is exposed to websites.
-@SuppressLint("SetJavaScriptEnabled")
-class BrowserResolver internal constructor(context: Context, private val adBlock: BrowserAdBlock) {
-  constructor(context: Context) : this(context, BrowserAdBlock.bundled(context))
-
+// The service owns a single page. Only the app's isolated extension can report captured responses.
+class BrowserResolver(private val context: Context) {
   val active = MutableStateFlow(false)
   val page = MutableStateFlow<BrowserPage?>(null)
-  val webView = WebView(context)
+  // TextureView participates in Compose scrolling/clipping; SurfaceView uses a separate surface.
+  val view = GeckoView(context).apply { setViewBackend(GeckoView.BACKEND_TEXTURE_VIEW) }
+  private val engine by lazy { BrowserEngine.get(context) }
+  private val session =
+    GeckoSession(GeckoSessionSettings.Builder().suspendMediaWhenInactive(false).build())
   private val mutex = Mutex()
-  private val userAgent = webView.settings.userAgentString
   private val candidates = ConcurrentHashMap<String, StreamCandidate>()
-  @Volatile private var sourcePage = ""
-  @Volatile private var capturing = false
+  internal val requestErrors = mutableMapOf<String, String>()
+  private var opened = false
+  private var closed = false
+  private var sourcePage = ""
+  private var capturing = false
   @Volatile private var loadFailure: String? = null
+  private var loadingUrl: String? = null
+  private var mainPort: WebExtension.Port? = null
+  private var evaluationId = 0
+  private val evaluations = mutableMapOf<Int, (String) -> Unit>()
+  private val pageError: (String, Int) -> Unit = { url, status ->
+    if (!closed && capturing && url == (page.value?.url ?: sourcePage))
+      failedLoading("The page returned HTTP $status.")
+  }
 
   init {
-    with(webView.settings) {
-      javaScriptEnabled = true
-      domStorageEnabled = true
-      mediaPlaybackRequiresUserGesture = false
-      allowFileAccess = false
-      allowContentAccess = false
-      mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-      // With false, target=_blank/window.open can replace the current page in this WebView.
-      // Handle new-window requests explicitly and refuse them instead.
-      setSupportMultipleWindows(true)
-      javaScriptCanOpenWindowsAutomatically = false
-    }
-    CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
-    webView.webChromeClient =
-      object : WebChromeClient() {
-        override fun onCreateWindow(
-          view: WebView,
-          isDialog: Boolean,
-          isUserGesture: Boolean,
-          resultMsg: android.os.Message,
-        ): Boolean = false
+    session.navigationDelegate =
+      object : GeckoSession.NavigationDelegate {
+        override fun onLoadRequest(
+          session: GeckoSession,
+          request: GeckoSession.NavigationDelegate.LoadRequest,
+        ): GeckoResult<AllowOrDeny> =
+          GeckoResult.fromValue(
+            if (
+              (isHttp(request.uri) || request.uri == "about:blank" && request.isDirectNavigation) &&
+                request.target != GeckoSession.NavigationDelegate.TARGET_WINDOW_NEW
+            )
+              AllowOrDeny.ALLOW
+            else AllowOrDeny.DENY
+          )
 
-        override fun onPermissionRequest(request: PermissionRequest) {
-          request.deny()
+        override fun onSubframeLoadRequest(
+          session: GeckoSession,
+          request: GeckoSession.NavigationDelegate.LoadRequest,
+        ): GeckoResult<AllowOrDeny> =
+          GeckoResult.fromValue(
+            if (isHttp(request.uri) || request.uri == "about:blank") AllowOrDeny.ALLOW
+            else AllowOrDeny.DENY
+          )
+
+        override fun onLocationChange(
+          session: GeckoSession,
+          url: String?,
+          permissions: MutableList<GeckoSession.PermissionDelegate.ContentPermission>,
+          hasUserGesture: Boolean,
+        ) {
+          if (url != null && isHttp(url)) page.value = page.value?.copy(url = url)
+        }
+
+        override fun onLoadError(
+          session: GeckoSession,
+          uri: String?,
+          error: WebRequestError,
+        ): GeckoResult<String>? {
+          if (uri != "about:blank") failedLoading("The page could not load: $error")
+          return null
         }
       }
-    // Service-worker network requests bypass WebViewClient. The app has a single browser profile;
-    // install the same immutable rules there, without retaining the WebView or its context.
-    val serviceWorkerRules = adBlock
-    ServiceWorkerController.getInstance()
-      .setServiceWorkerClient(
-        object : ServiceWorkerClient() {
-          override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? =
-            serviceWorkerRules.intercept(request.url.toString())
-        }
-      )
-    webView.webViewClient =
-      object : WebViewClient() {
-        override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
-          if (url != "about:blank") {
-            // Some WebView versions deliver an HTTP failure before this callback.
-            // Only an actual navigation to a different page clears that failure.
+    session.progressDelegate =
+      object : GeckoSession.ProgressDelegate {
+        override fun onPageStart(session: GeckoSession, url: String) {
+          loadingUrl = url
+          if (isHttp(url)) {
+            mainPort = null
+            finishEvaluations()
             if (page.value?.url != url) loadFailure = null
             page.value =
               page.value?.copy(url = url, loading = loadFailure == null, error = loadFailure)
           }
         }
 
-        override fun onPageFinished(view: WebView, url: String) {
-          if (url != "about:blank" && page.value?.url == url)
+        override fun onPageStop(session: GeckoSession, success: Boolean) {
+          if (loadingUrl != "about:blank" && loadingUrl == page.value?.url)
             page.value = page.value?.copy(loading = false)
         }
-
-        override fun onReceivedError(
-          view: WebView,
-          request: WebResourceRequest,
-          error: WebResourceError,
-        ) {
-          if (request.isForMainFrame) failedLoading("The page could not load: ${error.description}")
-        }
-
-        override fun onReceivedHttpError(
-          view: WebView,
-          request: WebResourceRequest,
-          response: WebResourceResponse,
-        ) {
-          if (request.isForMainFrame)
-            failedLoading("The page returned HTTP ${response.statusCode}.")
-        }
-
-        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-          !isHttp(request.url.toString()) || adBlock.blocks(request.url.toString())
-
-        override fun shouldInterceptRequest(
-          view: WebView,
-          request: WebResourceRequest,
-        ): android.webkit.WebResourceResponse? {
-          adBlock.intercept(request.url.toString())?.let {
-            return it
-          }
-          capture(request.url.toString(), request.requestHeaders)
-          return null
-        }
       }
+    session.permissionDelegate =
+      object : GeckoSession.PermissionDelegate {
+        override fun onContentPermissionRequest(
+          session: GeckoSession,
+          perm: GeckoSession.PermissionDelegate.ContentPermission,
+        ): GeckoResult<Int> =
+          GeckoResult.fromValue(
+            if (
+              perm.permission in
+                setOf(
+                  GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_AUDIBLE,
+                  GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE,
+                )
+            )
+              GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW
+            else GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY
+          )
+      }
+  }
+
+  internal suspend fun prepare() =
+    withContext(Dispatchers.Main) {
+      check(!closed) { "The browser is closed" }
+      val extension = withTimeout(90_000) { engine.ready.await() }
+      val enabled = engine.runtime.webExtensionController.list().await().associateBy { it.id }
+      check(BrowserEngine.blockers.keys.all { enabled[it]?.metaData?.disabledFlags == 0 }) {
+        "Browser protection is unavailable: uBlock Origin and AdGuard must both be active"
+      }
+      if (!opened) {
+        engine.pageErrors += pageError
+        session.open(engine.runtime)
+        view.setSession(session)
+        opened = true
+        session.webExtensionController.setMessageDelegate(
+          extension,
+          object : WebExtension.MessageDelegate {
+            override fun onConnect(port: WebExtension.Port) {
+              if (
+                port.sender.session !== session ||
+                  !port.sender.isTopLevel ||
+                  !isHttp(port.sender.url)
+              ) {
+                port.disconnect()
+                return
+              }
+              if (port.sender.isTopLevel) mainPort = port
+              port.setDelegate(
+                object : WebExtension.PortDelegate {
+                  override fun onPortMessage(message: Any, port: WebExtension.Port) {
+                    if (closed || port !== mainPort || message !is JSONObject) return
+                    when (message.optString("type")) {
+                      "candidate" -> capture(message)
+                      "page" ->
+                        if (
+                          message.optInt("status") >= 400 &&
+                            message.optString("url") == page.value?.url
+                        )
+                          failedLoading("The page returned HTTP ${message.optInt("status")}.")
+                      "requestError" ->
+                        if (requestErrors.size < 100)
+                          requestErrors[message.optString("url")] = message.optString("error")
+                      "evaluation" ->
+                        evaluations
+                          .remove(message.optInt("id"))
+                          ?.invoke(message.optString("value", "null"))
+                    }
+                  }
+
+                  override fun onDisconnect(port: WebExtension.Port) {
+                    if (mainPort === port) {
+                      mainPort = null
+                      finishEvaluations()
+                    }
+                  }
+                }
+              )
+            }
+          },
+          "castor",
+        )
+      }
+      session.setActive(true)
+    }
+
+  // App-to-extension diagnostics only. No method is exposed to page JavaScript.
+  internal fun evaluateJavascript(code: String, callback: (String) -> Unit) {
+    val port =
+      mainPort
+        ?: run {
+          callback("null")
+          return
+        }
+    val id = ++evaluationId
+    evaluations[id] = callback
+    port.postMessage(JSONObject().put("type", "evaluate").put("id", id).put("code", code))
   }
 
   private fun failedLoading(message: String) {
@@ -137,33 +210,42 @@ class BrowserResolver internal constructor(context: Context, private val adBlock
     page.value = page.value?.copy(loading = false, error = message)
   }
 
-  private fun capture(
-    url: String,
-    headers: Map<String, String> = emptyMap(),
-    htmlVideo: Boolean = false,
-  ) {
+  private fun capture(message: JSONObject) {
+    val url = message.optString("url")
     if (!capturing || !isHttp(url) || url.length > 8192 || candidates.size >= 1600) return
-    // DOM currentSrc/src can expose blocked media even when its request never reached the network.
-    if (adBlock.blocks(url)) return
+    val mime = message.optString("mime").substringBefore(';').lowercase()
     val type =
-      when (URI(url).path.orEmpty().substringAfterLast('.').lowercase()) {
-        // Use Castor's canonical identity so inspection selects its HLS decoder.
-        "m3u8" -> "application/x-mpegURL"
-        "mpd" -> "application/dash+xml"
-        "mp4",
-        "m4v" -> "video/mp4"
-        "webm" -> "video/webm"
-        "mkv" -> "video/x-matroska"
-        else -> if (htmlVideo) "" else return
+      when {
+        mime in setOf("application/vnd.apple.mpegurl", "application/x-mpegurl") ->
+          "application/x-mpegURL"
+        mime == "application/dash+xml" || mime.startsWith("video/") -> mime
+        else ->
+          when (URI(url).path.orEmpty().substringAfterLast('.').lowercase()) {
+            "m3u8" -> "application/x-mpegURL"
+            "mpd" -> "application/dash+xml"
+            "mp4",
+            "m4v" -> "video/mp4"
+            "webm" -> "video/webm"
+            "mkv" -> "video/x-matroska"
+            else -> if (message.optBoolean("htmlVideo")) "" else return
+          }
       }
-    val replay =
-      headers
-        .filterKeys { it.lowercase() !in setOf("host", "connection", "content-length", "range") }
-        .toMutableMap()
-    CookieManager.getInstance().getCookie(url)?.let { replay["Cookie"] = it }
-    replay.putIfAbsent("User-Agent", userAgent)
-    replay.putIfAbsent("Referer", sourcePage)
-    val stream = Stream.newBuilder().setUrl(url).setContentType(type).putAllHeaders(replay).build()
+    val raw = message.optJSONObject("headers") ?: JSONObject()
+    val headers = mutableMapOf<String, String>()
+    if (raw.length() > 100 || raw.toString().length > 65536) return
+    for (name in raw.keys()) {
+      if (name.lowercase() in setOf("host", "connection", "content-length", "range")) continue
+      val canonical =
+        when (name.lowercase()) {
+          "cookie" -> "Cookie"
+          "user-agent" -> "User-Agent"
+          "referer" -> "Referer"
+          else -> name
+        }
+      headers[canonical] = raw.optString(name)
+    }
+    headers.putIfAbsent("Referer", sourcePage)
+    val stream = Stream.newBuilder().setUrl(url).setContentType(type).putAllHeaders(headers).build()
     candidates[url] =
       StreamCandidate.newBuilder().setStream(stream).setSourcePage(sourcePage).build()
   }
@@ -178,24 +260,25 @@ class BrowserResolver internal constructor(context: Context, private val adBlock
       val streams = mutableListOf<StreamCandidate>()
       var keepPage = false
       try {
+        withContext(Dispatchers.Main) {
+          active.value = interactive
+          if (interactive && page.value == null) page.value = BrowserPage(request.getUrls(0))
+        }
+        prepare()
         for (address in request.urlsList) {
           withContext(Dispatchers.Main) {
-            // Retry a failed interactive page without losing the user's Play click.
             val reuse =
               interactive && page.value != null && sourcePage == address && loadFailure == null
-            if (!reuse) candidates.clear()
+            if (!reuse) {
+              candidates.clear()
+              requestErrors.clear()
+            }
             sourcePage = address
             loadFailure = null
             capturing = true
-            active.value = interactive
             if (!reuse) {
-              page.value = if (interactive) BrowserPage(address) else null
-              if (adBlock.blocks(address)) {
-                capturing = false
-                webView.stopLoading()
-                webView.loadUrl("about:blank")
-                failedLoading("The page address was blocked by the browser's ad filter.")
-              } else webView.loadUrl(address)
+              page.value = if (interactive) BrowserPage(address, protectionReady = true) else null
+              session.loadUri(address)
             }
           }
           var firstSeen = 0L
@@ -203,22 +286,6 @@ class BrowserResolver internal constructor(context: Context, private val adBlock
           while (android.os.SystemClock.elapsedRealtime() - started < 30_000) {
             delay(500)
             if (loadFailure != null) break
-            withContext(Dispatchers.Main) {
-              webView.evaluateJavascript(
-                """
-                JSON.stringify(Array.from(document.querySelectorAll('video,video source')).map(v => {
-                  if (v.tagName === 'VIDEO') v.play().catch(() => {});
-                  return v.currentSrc || v.src;
-                }).filter(Boolean))
-                """
-                  .trimIndent()
-              ) { encoded ->
-                runCatching {
-                  val urls = JSONArray(JSONArray("[$encoded]").getString(0))
-                  for (i in 0 until urls.length()) capture(urls.getString(i), htmlVideo = true)
-                }
-              }
-            }
             if (candidates.isNotEmpty()) {
               val now = android.os.SystemClock.elapsedRealtime()
               if (firstSeen == 0L) firstSeen = now
@@ -238,7 +305,7 @@ class BrowserResolver internal constructor(context: Context, private val adBlock
         ResolveResponse.newBuilder().addAllStreams(streams).build()
       } finally {
         val retain = keepPage && currentCoroutineContext().isActive
-        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) {
+        withContext(NonCancellable + Dispatchers.Main) {
           active.value = false
           if (!retain) clearPage()
         }
@@ -246,26 +313,38 @@ class BrowserResolver internal constructor(context: Context, private val adBlock
     }
 
   fun dismissPage() {
-    // Background playlist renewal also owns the WebView, without presenting interactive UI.
     if (!mutex.isLocked) clearPage()
+  }
+
+  private fun finishEvaluations() {
+    val callbacks = evaluations.values.toList()
+    evaluations.clear()
+    callbacks.forEach { it("null") }
   }
 
   private fun clearPage() {
     page.value = null
     capturing = false
     loadFailure = null
-    webView.stopLoading()
-    webView.loadUrl("about:blank")
+    mainPort = null
+    finishEvaluations()
+    if (opened) {
+      session.stop()
+      session.loadUri("about:blank")
+    }
     candidates.clear()
   }
 
   fun close() {
     active.value = false
-    page.value = null
-    capturing = false
-    (webView.parent as? android.view.ViewGroup)?.removeView(webView)
-    webView.stopLoading()
-    webView.destroy()
+    clearPage()
+    closed = true
+    (view.parent as? android.view.ViewGroup)?.removeView(view)
+    if (opened) {
+      engine.pageErrors -= pageError
+      view.releaseSession()
+      session.close()
+    }
   }
 
   companion object {

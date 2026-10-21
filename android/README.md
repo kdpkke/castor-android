@@ -23,11 +23,10 @@ The Android interface uses a shared Liquid Glass material with **Dark** as the d
 
 Subtitles offer **Off**, **App language**, or an explicit language code such as `en` or `it`. Castor selects source captions in that language, with Whisper transcription as a fallback when captions are missing. The saved `auto` preference now follows the selected app language (English or Italian), matching upstream’s explicit language policy. First transcription use downloads a pinned, checksum-verified Whisper model; caption delivery follows the receiver’s capabilities and requires served playback. Real-time software encoding and transcription can consume substantial battery and may exceed a phone's sustained processing speed.
 
-Webpages use an always-on, bundled AdAway domain blocklist before requests or
-video sources are captured. Advertising hosts are filtered in WebView and
-service-worker requests, and new-window popups are refused. Ads delivered through
-unlisted or shared content hosts can still get through. See [browser ad blocking](docs/ADBLOCK.md)
-for the list's license, updates and exact limits.
+Webpages use GeckoView with the real uBlock Origin and AdGuard Firefox extensions
+enabled together. The page opens only after both are enabled; new-window popups
+are refused. Blocked video URLs left in the HTML cannot become stream candidates.
+See [browser ad blocking](docs/ADBLOCK.md) for startup, licensing, updates and limits.
 
 ## Architecture
 
@@ -35,7 +34,7 @@ for the list's license, updates and exact limits.
 - Loopback alone does not isolate Android apps. API, media, and browser RPCs require independent ephemeral bearer tokens; internal HTTP media and device-facing playback URLs use unguessable capability paths. Android FFmpeg side outputs use Unix sockets in an app-private cache directory. Anyone given a playback URL can consume that cast's media.
 - `CastorService` owns the native process, foreground notification, wake lock, and multicast lock. Casting continues when the activity is backgrounded. The native host reports cast activity, so the wake lock is held only during a cast. Service shutdown cancels the engine and browser.
 - At engine startup, Android's default trust anchors are exported to an app-private PEM file and passed to OpenSSL through `SSL_CERT_FILE`. Android's hashed certificate-directory filenames are incompatible with OpenSSL's lookup scheme. TLS certificate and hostname verification remain enabled.
-- Android WebView implements the existing `castor.scraping.v1` contract. It uses an app-private profile, captures stream requests and their replay headers, and exposes no JavaScript-to-native bridge. File/content URLs and protected-media permission requests are refused.
+- GeckoView implements the existing `castor.scraping.v1` contract. Two signed ad blockers filter requests before an app-owned isolated extension captures successful video responses and their replay headers. Websites have no native bridge. File/content URLs and protected-media permission requests are refused. The runtime starts only when a webpage is needed and preserves extension storage across session closure.
 - Android NSD handles Chromecast discovery. SSDP uses multicast sockets on active tethered interfaces reported by Android 16+, falling back to the default route when none are present or on older versions. It looks up only those interface names through Java, without enumerating restricted netlink interfaces. Results enter the API's existing device directory; device protocols remain in Go.
 - Protobuf Java classes and the official Connect-Kotlin clients use the same `../proto` contracts as the Go engine. The `client` Gradle project runs the pinned Buf CLI and Connect generator before Android compilation; generated sources stay in `client/build/` and are not committed. The app uses generated methods instead of maintaining RPC paths and protocol decoding. Its endpoint adapter retains bearer authentication, bounded responses, cancellation and the requirement for an explicit cast `Ended` result.
 - The shared HLS segment reader recognizes bounded `TIKTIKPX` PNG/gzip envelopes carrying MPEG-TS. HLS detected as PNG or without usable video dimensions is measured again through that same reader before admission; ordinary static images remain ineligible. This handles the media envelope without adding site-specific URL templates or disabling admission checks.
@@ -106,8 +105,8 @@ It records the page document, an available browser screenshot, and the number of
 - DLNA uses the existing AVTransport implementation, including pinned hosts. If the initial `Play` acknowledgement times out, Castor keeps serving only when bounded AVTransport queries confirm `PLAYING` and the requested media URI; explicit refusals and cancellation still fail. Chromecast and Roku retain their upstream experimental status; real-device verification remains necessary.
 - Roku still requires the upstream developer-channel setup. This initial Android screen does not edit Roku credentials or published channel IDs.
 - The desktop TMDB catalog and configurable source templates are not part of the Android screen. Paste or share the authorized page directly.
-- WebView capture recognizes MP4/WebM/Matroska and HLS/DASH URL suffixes, plus HTML video sources. It does not duplicate every desktop Chromium capture heuristic. Extensionless endpoints, service-worker-only interception, logins, anti-bot checks, and some iframe players can need further extraction work.
-- No bundled video, site-specific sources, DRM decryption, paywall bypass, or geo-restriction circumvention is added. WebView receives no protected-media permission.
+- Browser capture recognizes video and HLS/DASH response MIME types, common media suffixes, and HTML video URLs backed by a successful response. It does not duplicate every desktop Chromium capture heuristic. Blob/MSE-only playback, logins, anti-bot checks and some players can need further extraction work. GeckoView increases package size; `-Pcastor.abi=arm64-v8a` produces a smaller phone-only APK.
+- No bundled video, site-specific sources, DRM decryption, paywall bypass, or geo-restriction circumvention is added. Gecko receives no protected-media permission.
 - As on desktop, the TV must be able to reach the phone's LAN media URL. Guest-network isolation, VPN routing, or a Wi-Fi AP blocking multicast can prevent discovery or playback.
 
 ## Interface previews

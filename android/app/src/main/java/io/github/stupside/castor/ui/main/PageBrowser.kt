@@ -29,10 +29,7 @@ internal fun PageBrowser(
     withFrameNanos {}
     bringIntoView.bringIntoView()
   }
-  Column(
-    Modifier.fillMaxWidth().bringIntoViewRequester(bringIntoView),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
+  Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
     Row(verticalAlignment = Alignment.CenterVertically) {
       Text(
         stringResource(R.string.page_browser),
@@ -63,11 +60,22 @@ internal fun PageBrowser(
       color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     if (page.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+    Text(
+      stringResource(
+        if (page.protectionReady) R.string.browser_protection_active
+        else R.string.browser_protection_starting
+      ),
+      style = MaterialTheme.typography.bodySmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
     page.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     AndroidView(
-      factory = { browser.webView.also { (it.parent as? android.view.ViewGroup)?.removeView(it) } },
+      factory = { browser.view.also { (it.parent as? android.view.ViewGroup)?.removeView(it) } },
       modifier =
-        Modifier.fillMaxWidth().height(if (compact) 220.dp else 360.dp).testTag("page-browser"),
+        Modifier.fillMaxWidth()
+          .height(if (compact) 220.dp else 360.dp)
+          .bringIntoViewRequester(bringIntoView)
+          .testTag("page-browser"),
       onRelease = { (it.parent as? android.view.ViewGroup)?.removeView(it) },
     )
   }

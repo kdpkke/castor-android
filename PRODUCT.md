@@ -25,7 +25,7 @@ progress, and stopping or recovering from failure without technical guesswork.
 ## Operating Context
 
 Android 9 or later, ARM64 phones and x86-64 emulators. The phone runs the engine,
-extracts media through WebView, and serves or transcodes video in a foreground
+extracts media through GeckoView with uBlock Origin and AdGuard, and serves or transcodes video in a foreground
 service. No computer, NAS, root, or remote server is required during use.
 
 ## Capabilities and Constraints

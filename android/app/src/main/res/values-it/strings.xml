@@ -106,4 +106,6 @@
     <string name="theme_light">Chiaro</string>
     <string name="theme_dark">Scuro</string>
     <string name="theme_default">Predefinito</string>
+    <string name="browser_protection_active">uBlock Origin + AdGuard · Attivi</string>
+    <string name="browser_protection_starting">Avvio di uBlock Origin + AdGuard…</string>
 </resources>

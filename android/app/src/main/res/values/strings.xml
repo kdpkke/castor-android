@@ -106,4 +106,6 @@
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_default">Default</string>
+    <string name="browser_protection_active">uBlock Origin + AdGuard · Active</string>
+    <string name="browser_protection_starting">Starting uBlock Origin + AdGuard…</string>
 </resources>

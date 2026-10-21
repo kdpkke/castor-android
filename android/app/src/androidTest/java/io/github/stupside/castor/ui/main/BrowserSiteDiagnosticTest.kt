@@ -44,6 +44,23 @@ class BrowserSiteDiagnosticTest {
           .apply { mkdirs() }
       Log.i("CastorBrowserTest", "Report: ${output.name}")
       val browser = withContext(Dispatchers.Main) { BrowserResolver(context) }
+      browser.prepare()
+      val firstPaint = CompletableDeferred<Unit>()
+      compose.runOnIdle {
+        browser.view.session!!.contentDelegate =
+          object : org.mozilla.geckoview.GeckoSession.ContentDelegate {
+            override fun onFirstContentfulPaint(session: org.mozilla.geckoview.GeckoSession) {
+              firstPaint.complete(Unit)
+            }
+          }
+      }
+      val locations = mutableListOf<String>()
+      val observing =
+        launch(start = CoroutineStart.UNDISPATCHED) {
+          browser.page.collect { current ->
+            current?.url?.let { if (locations.lastOrNull() != it) locations += it }
+          }
+        }
       val model = MainScreenViewModel()
       model.uiState.value =
         MainScreenUiState(
@@ -60,18 +77,35 @@ class BrowserSiteDiagnosticTest {
         val pending = async {
           runCatching { browser.resolve(ResolveRequest.newBuilder().addUrls(page).build()) }
         }
-        delay(8_000)
+        // A page can extract successfully before all iframes finish loading. Snapshot on first
+        // actual paint, before resolution closes the session, rather than waiting for network idle.
+        withTimeout(30_000) {
+          kotlinx.coroutines.selects.select<Unit> {
+            firstPaint.onAwait {}
+            pending.onAwait {}
+          }
+        }
         if (browser.page.value != null) {
+          val before = browser.page.value
+          val screenshot =
+            InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+          File(output, "snapshot-state.txt")
+            .writeText(
+              "Before: $before\nAfter: ${browser.page.value}\nPainted: ${firstPaint.isCompleted}"
+            )
+          File(output, "browser.png").outputStream().use {
+            screenshot.compress(Bitmap.CompressFormat.PNG, 100, it)
+          }
           val document = CompletableDeferred<String>()
           compose.runOnIdle {
-            val view = browser.webView
+            val view = browser.view
             assertTrue("The browser must be attached to the screen", view.isAttachedToWindow)
             assertTrue("The browser must have a real viewport", view.width > 0 && view.height > 0)
             Log.i(
               "CastorBrowserTest",
               "Attached=${view.isAttachedToWindow}, shown=${view.isShown}, viewport=${view.width}x${view.height}",
             )
-            view.evaluateJavascript(
+            browser.evaluateJavascript(
               "JSON.stringify({title:document.title,href:location.href,width:innerWidth,height:innerHeight,ready:document.readyState,scrollY:scrollY,bodyOpacity:getComputedStyle(document.body).opacity,stack:document.elementsFromPoint(innerWidth/2,innerHeight/2).slice(0,8).map(e=>({tag:e.tagName,id:e.id,cls:e.className,src:e.src,opacity:getComputedStyle(e).opacity,visibility:getComputedStyle(e).visibility,z:getComputedStyle(e).zIndex})),text:document.body.innerText.substring(0,1500),frames:Array.from(document.querySelectorAll('iframe')).map(f=>({src:f.src,width:f.clientWidth,height:f.clientHeight}))})"
             ) {
               Log.i("CastorBrowserTest", "Page: $it")
@@ -79,11 +113,6 @@ class BrowserSiteDiagnosticTest {
             }
           }
           File(output, "document.json").writeText(withTimeout(5000) { document.await() })
-          val screenshot =
-            InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
-          File(output, "browser.png").outputStream().use {
-            screenshot.compress(Bitmap.CompressFormat.PNG, 100, it)
-          }
         }
         val result = pending.await()
         File(output, "result.txt")
@@ -94,6 +123,8 @@ class BrowserSiteDiagnosticTest {
             )
           )
       } finally {
+        observing.cancelAndJoin()
+        File(output, "locations.json").writeText(org.json.JSONArray(locations).toString())
         withContext(Dispatchers.Main) { browser.close() }
       }
     }

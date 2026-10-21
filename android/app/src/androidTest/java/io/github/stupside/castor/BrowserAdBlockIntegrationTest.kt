@@ -2,159 +2,209 @@ package io.github.stupside.castor
 
 import androidx.test.platform.app.InstrumentationRegistry
 import castor.scraping.v1.Scraping.ResolveRequest
-import java.net.InetAddress
 import java.util.concurrent.CopyOnWriteArrayList
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.*
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
+import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.WebExtensionController
 
 class BrowserAdBlockIntegrationTest {
   private val context
     get() = InstrumentationRegistry.getInstrumentation().targetContext
 
-  @Test
-  fun bundledRulesBlockKnownAdHostsAndPreserveLocalPlayback() {
-    val rules = BrowserAdBlock.bundled(context)
-    assertTrue(rules.blocks("https://doubleclick.net/preroll.mp4"))
-    assertTrue(rules.blocks("https://pagead2.googlesyndication.com/ad.m3u8"))
-    assertFalse(rules.blocks("http://localhost:4500/media/main.m3u8"))
-    assertFalse(rules.blocks("https://cdn.example.org/main.m3u8"))
-  }
-
-  @Test
-  fun adsNeverReachTheOriginOrWinOverTheRealVideo() =
+  @Before
+  fun prepareBrowserProtection() =
     runBlocking<Unit> {
-      val requests = CopyOnWriteArrayList<RecordedRequest>()
-      val origin = MockWebServer()
-      origin.start(InetAddress.getByName("0.0.0.0"), 0)
-      val page = "http://127.0.0.1:${origin.port}"
-      val ads = "http://127.0.0.2:${origin.port}"
-      origin.dispatcher =
-        object : Dispatcher() {
-          override fun dispatch(request: RecordedRequest): MockResponse {
-            requests += request
-            val body =
-              when (request.path) {
-                "/page" ->
-                  """
-            <script src="$ads/ad.js"></script><iframe src="$ads/frame"></iframe>
-            <video src="$ads/preroll.mp4"></video><video src="$ads/extensionless"></video>
-            <video><source src="$ads/source.webm"></video>
-            <script>
-              fetch('$ads/ad.m3u8'); fetch('$ads/ad.mpd');
-              setTimeout(() => { location.href='$ads/hijack'; }, 1000);
-              // An ad candidate must not end extraction before this real player starts.
-              setTimeout(() => {
-                fetch('/main.m3u8');
-                const iframe = document.createElement('iframe'); iframe.src='/player';
-                document.body.appendChild(iframe);
-              }, 4500);
-            </script>
-          """
-                    .trimIndent()
-                "/player" -> "<script>fetch('/iframe.m3u8')</script>"
-                else -> "#EXTM3U\n#EXT-X-ENDLIST\n"
-              }
-            return MockResponse().setHeader("Content-Type", "text/html").setBody(body)
-          }
-        }
-      val browser =
-        withContext(Dispatchers.Main) {
-          BrowserResolver(context, BrowserAdBlock.read("0.0.0.0 127.0.0.2".reader()))
-        }
-      try {
-        val result =
-          withTimeout(15_000) {
-            browser.resolve(
-              ResolveRequest.newBuilder().addUrls("$ads/blocked-page").addUrls("$page/page").build()
-            )
-          }
-        assertEquals(
-          setOf("$page/main.m3u8", "$page/iframe.m3u8"),
-          result.streamsList.map { it.stream.url }.toSet(),
-        )
-        assertTrue(
-          "No blocked script, frame, video or fetch should reach the origin: $requests",
-          requests.none { it.getHeader("Host")?.startsWith("127.0.0.2:") == true },
-        )
-        assertNull(browser.page.value)
-      } finally {
-        withContext(Dispatchers.Main) { browser.close() }
-        origin.shutdown()
+      withContext(Dispatchers.Main) {
+        withTimeout(90_000) { BrowserEngine.get(context).ready.await() }
       }
     }
 
   @Test
-  fun workerRequestsUseTheSameFilterAndNormalFetchesStillWork() =
+  fun bothOfficialBlockersAreInstalledAndEnabled() =
     runBlocking<Unit> {
-      val requests = CopyOnWriteArrayList<RecordedRequest>()
-      val origin = MockWebServer()
-      origin.start(InetAddress.getByName("0.0.0.0"), 0)
-      val page = "http://127.0.0.1:${origin.port}"
-      val ads = "http://127.0.0.2:${origin.port}"
-      origin.dispatcher =
-        object : Dispatcher() {
-          override fun dispatch(request: RecordedRequest): MockResponse {
-            requests += request
-            val body =
-              when (request.path) {
-                "/page" ->
-                  """
-            <script>
-              navigator.serviceWorker.register('/worker.js').then(() => navigator.serviceWorker.ready)
-                .then(r => r.active.postMessage('start'));
-            </script>
-          """
-                    .trimIndent()
-                "/worker.js" ->
-                  """
-            self.addEventListener('install', e => self.skipWaiting());
-            self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
-            self.addEventListener('message', e => e.waitUntil((async () => {
-              try { await fetch('$ads/worker-ad.mp4', {mode:'no-cors'}); } catch (_) {}
-              await fetch('/worker-ok');
-              const pages = await self.clients.matchAll();
-              pages.forEach(p => p.postMessage('done'));
-            })()));
-          """
-                    .trimIndent()
-                else -> "ok"
-              }
-            return MockResponse()
-              .setHeader(
-                "Content-Type",
-                if (request.path == "/worker.js") "application/javascript" else "text/html",
+      val extensions =
+        withContext(Dispatchers.Main) {
+            BrowserEngine.get(context).runtime.webExtensionController.list().await()
+          }
+          .associateBy { it.id }
+      for (id in BrowserEngine.blockers.keys) {
+        assertTrue(id, extensions.containsKey(id))
+        assertEquals(id, 0, extensions.getValue(id).metaData!!.disabledFlags)
+      }
+    }
+
+  @Test
+  fun adScriptsCannotReplaceThePlayerAndBlockedDomVideosAreNotCaptured() =
+    runBlocking<Unit> {
+      val requests = CopyOnWriteArrayList<String>()
+      MockWebServer().use { origin ->
+        origin.dispatcher =
+          object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+              requests += request.path.orEmpty()
+              val body =
+                when (request.path) {
+                  "/page" ->
+                    """
+              <script src='/ads/custom_ads.js'></script>
+              <video src='/adverts/preroll.mp4'></video><video src='/adverts/extensionless'></video>
+              <script>setTimeout(() => {
+                fetch('/main.m3u8');
+                const frame=document.createElement('iframe'); frame.src='/player'; document.body.appendChild(frame);
+              }, 4500)</script>
+            """
+                      .trimIndent()
+                  // Real generic rules bundled in both extensions block these same-origin
+                  // resources.
+                  // No external advertising service is contacted, even if filtering regresses.
+                  "/ads/custom_ads.js" -> "location.href='/amazon-offer';"
+                  "/player" -> "<script>fetch('/iframe.m3u8')</script>"
+                  else -> "#EXTM3U\n#EXT-X-ENDLIST\n"
+                }
+              return MockResponse()
+                .setHeader(
+                  "Content-Type",
+                  if (request.path == "/ads/custom_ads.js") "application/javascript"
+                  else "text/html",
+                )
+                .setBody(body)
+            }
+          }
+        origin.start()
+        val browser = withContext(Dispatchers.Main) { BrowserResolver(context) }
+        try {
+          val result =
+            withTimeout(20_000) {
+              browser.resolve(
+                ResolveRequest.newBuilder().addUrls(origin.url("/page").toString()).build()
               )
-              .setBody(body)
+            }
+          assertEquals(
+            setOf(origin.url("/main.m3u8").toString(), origin.url("/iframe.m3u8").toString()),
+            result.streamsList.map { it.stream.url }.toSet(),
+          )
+          assertTrue(
+            "Blocked ads must never reach the local origin: $requests",
+            requests.none {
+              it.startsWith("/ads/") || it.startsWith("/adverts/") || it == "/amazon-offer"
+            },
+          )
+          assertTrue(
+            "A real blocker rejection must be observed, not a network failure: ${browser.requestErrors}",
+            browser.requestErrors.any {
+              it.key.endsWith("/ads/custom_ads.js") &&
+                it.value in setOf("NS_ERROR_ABORT", "NS_ERROR_BLOCKED_BY_POLICY")
+            },
+          )
+        } finally {
+          withContext(Dispatchers.Main) { browser.close() }
+        }
+      }
+    }
+
+  @Test
+  fun eachBlockerIndependentlyStopsTheAdScript() =
+    runBlocking<Unit> {
+      val engine = withContext(Dispatchers.Main) { BrowserEngine.get(context) }
+      val controller = engine.runtime.webExtensionController
+      val extensions =
+        withContext(Dispatchers.Main) { controller.list().await() }.associateBy { it.id }
+      val requests = CopyOnWriteArrayList<String>()
+      MockWebServer().use { origin ->
+        origin.dispatcher =
+          object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+              requests += request.path.orEmpty()
+              return MockResponse()
+                .setHeader("Content-Type", "text/html")
+                .setHeader("Cache-Control", "no-store")
+                .setBody(
+                  if (request.path == "/page")
+                    "<script src='/ads/custom_ads.js'></script><script>fetch('/control')</script>"
+                  else "ok"
+                )
+            }
+          }
+        origin.start()
+        for (id in BrowserEngine.blockers.keys) {
+          val other = extensions.getValue(BrowserEngine.blockers.keys.single { it != id })
+          withContext(Dispatchers.Main) {
+            controller.disable(other, WebExtensionController.EnableSource.APP).await()
+          }
+          // Only this local fixture uses a raw session. Production refuses loads with a blocker
+          // off.
+          val session =
+            withContext(Dispatchers.Main) {
+              GeckoSession().also {
+                it.open(engine.runtime)
+                it.setActive(true)
+              }
+            }
+          try {
+            // Re-enabling an event-page extension completes before its filter engine has warmed.
+            // Probe only local fixtures until actual filtering is observable, rather than sleeping
+            // for an assumed startup duration or treating the enabled flag as proof.
+            withTimeout(20_000) {
+              while (true) {
+                requests.clear()
+                withContext(Dispatchers.Main) { session.loadUri(origin.url("/page").toString()) }
+                while ("/control" !in requests) delay(100)
+                if ("/ads/custom_ads.js" !in requests) break
+                delay(250)
+              }
+            }
+            assertFalse("$id must block on its own: $requests", "/ads/custom_ads.js" in requests)
+          } finally {
+            withContext(Dispatchers.Main) {
+              session.close()
+              controller.enable(other, WebExtensionController.EnableSource.APP).await()
+            }
           }
         }
-      val browser =
-        withContext(Dispatchers.Main) {
-          BrowserResolver(context, BrowserAdBlock.read("0.0.0.0 127.0.0.2".reader()))
-        }
-      val pending = async {
-        browser.resolve(ResolveRequest.newBuilder().addUrls("$page/page").build())
       }
-      try {
-        withTimeout(15_000) { while (requests.none { it.path == "/worker-ok" }) delay(100) }
-        assertTrue(
-          "Worker ads must be intercepted before connecting",
-          requests.none { it.getHeader("Host")?.startsWith("127.0.0.2:") == true },
-        )
-      } finally {
-        pending.cancelAndJoin()
-        withContext(Dispatchers.Main) { browser.close() }
-        origin.shutdown()
+    }
+
+  @Test
+  fun aDisabledBlockerPreventsAnyPageFromLoading() =
+    runBlocking<Unit> {
+      val controller =
+        withContext(Dispatchers.Main) { BrowserEngine.get(context).runtime.webExtensionController }
+      val extensions =
+        withContext(Dispatchers.Main) { controller.list().await() }.associateBy { it.id }
+      MockWebServer().use { origin ->
+        origin.start()
+        for (id in BrowserEngine.blockers.keys) {
+          val extension = extensions.getValue(id)
+          withContext(Dispatchers.Main) {
+            controller.disable(extension, WebExtensionController.EnableSource.APP).await()
+          }
+          val browser = withContext(Dispatchers.Main) { BrowserResolver(context) }
+          try {
+            val failure =
+              withTimeout(10_000) {
+                runCatching {
+                    browser.resolve(
+                      ResolveRequest.newBuilder().addUrls(origin.url("/page").toString()).build()
+                    )
+                  }
+                  .exceptionOrNull()
+              }
+            assertTrue(failure?.message.orEmpty().contains("both be active"))
+            assertEquals(0, origin.requestCount)
+          } finally {
+            withContext(Dispatchers.Main) {
+              browser.close()
+              controller.enable(extension, WebExtensionController.EnableSource.APP).await()
+            }
+          }
+        }
       }
     }
 }

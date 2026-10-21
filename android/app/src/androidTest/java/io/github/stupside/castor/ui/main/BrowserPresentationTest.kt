@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.platform.app.InstrumentationRegistry
 import castor.scraping.v1.Scraping.ResolveRequest
+import io.github.stupside.castor.BrowserEngine
 import io.github.stupside.castor.BrowserResolver
 import io.github.stupside.castor.theme.CastorTheme
 import java.util.concurrent.atomic.AtomicInteger
@@ -23,6 +24,14 @@ import org.junit.Test
 
 class BrowserPresentationTest {
   @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+  @Before
+  fun prepareBrowserProtection() =
+    runBlocking<Unit> {
+      withContext(Dispatchers.Main) {
+        BrowserEngine.get(InstrumentationRegistry.getInstrumentation().targetContext).ready.await()
+      }
+    }
 
   @Before
   fun keepFixtureVisible() {
@@ -58,6 +67,16 @@ class BrowserPresentationTest {
           ready = true,
           castId = "interactive-fixture",
           phase = CastPhase.Extracting,
+          activeCast =
+            castor.v1.CastOuterClass.Cast.newBuilder()
+              .setSource(
+                castor.v1.CastOuterClass.Source.newBuilder()
+                  .setPages(
+                    castor.v1.CastOuterClass.Source.Pages.newBuilder()
+                      .addUrls(server.url("/page").toString())
+                  )
+              )
+              .build(),
         )
       compose.setContent { CastorTheme { MainScreen(model, browser, "", {}) } }
       val pending = async {
@@ -69,8 +88,11 @@ class BrowserPresentationTest {
           while (true) {
             var ready = false
             compose.runOnIdle {
-              browser.webView.getLocationOnScreen(location)
-              ready = browser.webView.isShown && browser.webView.contentHeight > 0
+              browser.view.getLocationOnScreen(location)
+              ready =
+                browser.view.isShown &&
+                  browser.view.height > 0 &&
+                  browser.page.value?.loading == false
             }
             if (ready) break
             delay(100)
@@ -81,16 +103,30 @@ class BrowserPresentationTest {
           browser.dismissPage()
           assertNotNull("Dismiss must not interrupt an active resolution", browser.page.value)
         }
-        compose.onNodeWithTag("page-browser").performScrollTo()
-        compose.runOnIdle { browser.webView.getLocationOnScreen(location) }
+        // The production automatic scroll must expose the browser; do not repair it in the test.
+        compose.runOnIdle { browser.view.getLocationOnScreen(location) }
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         val screenshot = automation.takeScreenshot()
         val x = location[0] + 20
         val y = location[1] + 20
         assertEquals(
-          "The embedded page must paint instead of leaving a blank WebView",
+          "The embedded page must paint instead of leaving a blank browser",
           Color.rgb(33, 122, 57),
           screenshot.getPixel(x, y),
+        )
+        var whiteTextPixels = 0
+        val width = browser.view.width
+        val height = browser.view.height
+        for (sy in location[1] until minOf(location[1] + height, screenshot.height)) {
+          for (sx in location[0] until minOf(location[0] + width, screenshot.width)) {
+            val pixel = screenshot.getPixel(sx, sy)
+            if (Color.red(pixel) > 225 && Color.green(pixel) > 225 && Color.blue(pixel) > 225)
+              whiteTextPixels++
+          }
+        }
+        assertTrue(
+          "The player must paint its Play text as well as its background",
+          whiteTextPixels > 50,
         )
         java.io
           .File(context.getExternalFilesDir(null), "page-player-fixture.png")
@@ -160,7 +196,7 @@ class BrowserPresentationTest {
               phase = CastPhase.Failed,
               error = failure!!.message,
             )
-          assertEquals(server.url("/page").toString(), browser.webView.url)
+          assertEquals(server.url("/page").toString(), browser.page.value?.url)
         }
         compose.onNodeWithTag("page-browser").performScrollTo().assertExists()
         java.io
@@ -173,7 +209,7 @@ class BrowserPresentationTest {
               .compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
           }
         val location = IntArray(2)
-        compose.runOnIdle { browser.webView.getLocationOnScreen(location) }
+        compose.runOnIdle { browser.view.getLocationOnScreen(location) }
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         val now = android.os.SystemClock.uptimeMillis()
         for ((action, time) in

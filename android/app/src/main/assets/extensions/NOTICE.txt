@@ -1,0 +1,33 @@
+Castor's embedded browser includes these unmodified third-party components.
+Castor's own source remains MIT licensed.
+
+uBlock Origin 1.75.0
+Copyright Raymond Hill and uBlock Origin contributors.
+GNU General Public License version 3; see uBlock-GPL3.txt and the XPI's notices.
+Signed package: https://addons.mozilla.org/firefox/downloads/file/5034826/ublock_origin-1.75.0.xpi
+Corresponding source and build instructions:
+https://github.com/gorhill/uBlock/tree/1.75.0
+Source archive: https://github.com/gorhill/uBlock/archive/refs/tags/1.75.0.tar.gz
+
+AdGuard AdBlocker 5.5.3.5
+Copyright 2015-2026 Adguard Software Ltd. and contributors.
+GNU General Public License version 3 or later; see AdGuard-LICENSE.txt and XPI notices.
+Signed package: https://addons.mozilla.org/firefox/downloads/file/5116233/adguard_adblocker-5.5.3.5.xpi
+Corresponding source and build instructions:
+https://github.com/AdguardTeam/AdguardBrowserExtension/tree/v5.5.3.5
+Source archive: https://github.com/AdguardTeam/AdguardBrowserExtension/archive/refs/tags/v5.5.3.5.tar.gz
+
+Mozilla GeckoView 158.0.20261021001945
+Copyright Mozilla and contributors. Mozilla Public License 2.0; see Gecko-MPL2.txt.
+The engine also bundles third-party code; its original notices are in about:license
+inside Gecko's shipped omni.ja. No Mozilla source files were modified.
+Artifact and Java sources:
+https://maven.mozilla.org/maven2/org/mozilla/geckoview/geckoview/158.0.20261021001945/
+Exact native source revision recorded in the shipped engine's about:buildconfig:
+https://hg.mozilla.org/releases/mozilla-release/rev/e4ce606692cd81e6898547e2edd7c552fefcbb04
+Source archive:
+https://hg.mozilla.org/releases/mozilla-release/archive/e4ce606692cd81e6898547e2edd7c552fefcbb04.tar.gz
+Build instructions: https://firefox-source-docs.mozilla.org/mobile/android/geckoview/contributor/geckoview-quick-start.html
+
+The extension packages retain their own bundled filter-list and dependency notices.
+The app-owned castor-browser extension is part of Castor and uses its MIT license.
