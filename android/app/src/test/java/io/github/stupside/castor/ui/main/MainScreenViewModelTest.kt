@@ -32,7 +32,7 @@ class MainScreenViewModelTest {
   }
 
   @Test
-  fun legacyAndManualEntriesAreConfirmedOnlyAtTheirSavedAddress() {
+  fun legacyEntriesFollowTheirReceiverWhileManualOnesKeepTheirAddress() {
     val device =
       Device.newBuilder()
         .setId("dlna:living-room")
@@ -40,11 +40,18 @@ class MainScreenViewModelTest {
         .setType(DeviceType.DEVICE_TYPE_DLNA)
         .setAddress("http://192.0.2.10:1938/")
         .build()
-    val legacy = SavedTv("Old preference", device.address, device.type)
+    val moved = device.toBuilder().setAddress("http://192.0.2.10:1487/").build()
+    // Saved before identities: the same name on the same host is the receiver after a restart.
+    val legacy = SavedTv(device.name, device.address, device.type)
     assertEquals(SavedTv(device), legacy.available(listOf(device)))
+    assertEquals(SavedTv(moved), legacy.available(listOf(moved)))
+    assertNull(legacy.available(listOf(moved.toBuilder().setName("Bedroom").build())))
     assertNull(
-      legacy.available(listOf(device.toBuilder().setAddress("http://192.0.2.10:1487/").build()))
+      legacy.available(listOf(moved.toBuilder().setAddress("http://192.0.2.11:1487/").build()))
     )
+    val manual = SavedTv("Typed address", device.address, device.type, manual = true)
+    assertEquals(SavedTv(device), manual.available(listOf(device)))
+    assertNull(manual.available(listOf(moved.toBuilder().setName("Typed address").build())))
   }
 
   @Test

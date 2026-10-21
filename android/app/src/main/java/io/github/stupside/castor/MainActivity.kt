@@ -102,10 +102,7 @@ class MainActivity : ComponentActivity() {
               contentAlignment = androidx.compose.ui.Alignment.Center,
             ) {
               GlassPanel {
-                Column(
-                  Modifier.padding(24.dp),
-                  verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                   Text(
                     stringResource(R.string.permission_title),
                     style = MaterialTheme.typography.headlineMedium,
@@ -134,7 +131,7 @@ class MainActivity : ComponentActivity() {
               model,
               service?.browser,
               intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty(),
-              restart = { startEngine() },
+              restart = { restartEngine() },
               close = {
                 stopService(Intent(this, CastorService::class.java))
                 model.connect(null)
@@ -179,6 +176,18 @@ class MainActivity : ComponentActivity() {
       permissionDenied = false
       startEngine()
     } else permissions.launch(needed.toTypedArray())
+  }
+
+  // A stopped engine leaves its service bound to this activity; binding again alone does nothing.
+  // Unbind first so a stopped service is destroyed and a running one is reconnected and recovered.
+  private fun restartEngine() {
+    if (bound) {
+      unbindService(connection)
+      bound = false
+      service = null
+      model.connect(null)
+    }
+    startEngine()
   }
 
   private fun startEngine() {

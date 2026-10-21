@@ -44,6 +44,8 @@ data class SavedTv(
   val address: String,
   val type: DeviceType,
   val id: String = "",
+  // Entered by hand: used at its exact address and never required to appear in a search.
+  val manual: Boolean = false,
 ) {
   constructor(
     device: Device
@@ -53,12 +55,21 @@ data class SavedTv(
   // discovery identity; never substitute another receiver that happens to reuse its address.
   fun available(devices: List<Device>): SavedTv? =
     devices
-      .firstOrNull {
-        it.type == type &&
-          it.address.isNotBlank() &&
-          if (id.isNotBlank()) it.id == id else it.address == address
-      }
+      .firstOrNull { it.type == type && it.address.isNotBlank() && matches(it) }
       ?.let(::SavedTv)
+
+  private fun matches(device: Device): Boolean =
+    when {
+      id.isNotBlank() -> device.id == id
+      device.address == address -> true
+      manual -> false
+      // Receivers saved before discovery identities kept only an address whose port changes when
+      // the TV restarts. The same name and protocol on the same host is that receiver.
+      else -> device.name == name && host(address)?.let { it == host(device.address) } == true
+    }
+
+  private fun host(value: String): String? =
+    runCatching { URI(if ("://" in value) value else "http://$value").host }.getOrNull()
 
   fun target(): Target =
     Target.newBuilder()
@@ -107,11 +118,15 @@ class CastOptions(private val context: Context) {
     val type =
       DeviceType.forNumber(preferences.getInt("tv-type", DeviceType.DEVICE_TYPE_DLNA_VALUE))
     if (type !in receiverTypes) return null
+    val id = preferences.getString("tv-id", "").orEmpty()
     return SavedTv(
       preferences.getString("tv-name", address).orEmpty(),
       address,
       type,
-      preferences.getString("tv-id", "").orEmpty(),
+      id,
+      // Before identities every receiver was saved without "tv-id"; since then, only addresses
+      // entered by hand have none.
+      preferences.getBoolean("tv-manual", preferences.contains("tv-id") && id.isBlank()),
     )
   }
 
@@ -121,6 +136,7 @@ class CastOptions(private val context: Context) {
       .putString("tv-name", tv.name)
       .putString("tv-address", tv.address)
       .putString("tv-id", tv.id)
+      .putBoolean("tv-manual", tv.manual)
       .putInt("tv-type", tv.type.number)
       .apply()
   }

@@ -97,7 +97,7 @@ class MainScreenTest {
   @Test
   fun resumedCastShowsActualSourceAndTvInsteadOfIncomingShareAndSavedPreference() {
     CastOptions(context)
-      .television(SavedTv("Bedroom TV", "192.0.2.99", DeviceType.DEVICE_TYPE_DLNA))
+      .television(SavedTv("Bedroom TV", "192.0.2.99", DeviceType.DEVICE_TYPE_DLNA, manual = true))
     val actual =
       Cast.newBuilder()
         .setId("already-active")
@@ -150,7 +150,9 @@ class MainScreenTest {
   @Test
   fun newCastSnapshotsSubmittedSourceAndPinnedReceiver() {
     CastOptions(context)
-      .television(SavedTv("Chosen receiver", "192.0.2.88", DeviceType.DEVICE_TYPE_DLNA))
+      .television(
+        SavedTv("Chosen receiver", "192.0.2.88", DeviceType.DEVICE_TYPE_DLNA, manual = true)
+      )
     val server = MockWebServer()
     server.dispatcher =
       object : Dispatcher() {
@@ -233,9 +235,76 @@ class MainScreenTest {
   }
 
   @Test
+  fun savedTvMustReappearAndAnEntryWithoutIdentityMovesToItsCurrentAddress() {
+    // Saved before receivers had identities: an address whose port the TV has since changed.
+    context
+      .getSharedPreferences("casting-options", 0)
+      .edit()
+      .putString("tv-name", "Living room")
+      .putString("tv-address", "http://192.0.2.10:1487/")
+      .putInt("tv-type", DeviceType.DEVICE_TYPE_DLNA_VALUE)
+      .commit()
+    val moved =
+      Device.newBuilder()
+        .setId("dlna:uuid:living-room")
+        .setName("Living room")
+        .setType(DeviceType.DEVICE_TYPE_DLNA)
+        .setAddress("http://192.0.2.10:1938/")
+        .build()
+    val online = java.util.concurrent.atomic.AtomicBoolean(false)
+    val server = MockWebServer()
+    server.dispatcher =
+      object : Dispatcher() {
+        override fun dispatch(request: RecordedRequest): MockResponse {
+          val body =
+            when (request.path) {
+              "/castor.v1.CastService/ListCasts" -> ListCastsResponse.getDefaultInstance()
+              "/castor.v1.DeviceService/ListDevices" ->
+                ListDevicesResponse.newBuilder()
+                  .apply { if (online.get()) addDevices(moved) }
+                  .build()
+              else -> return MockResponse().setResponseCode(404)
+            }
+          return MockResponse()
+            .setHeader("Content-Type", "application/proto")
+            .setBody(Buffer().write(body.toByteArray()))
+        }
+      }
+    server.start()
+    val model = MainScreenViewModel()
+    try {
+      compose.setContent {
+        io.github.stupside.castor.theme.CastorTheme {
+          MainScreen(model, null, "https://example.org/video.mp4", {})
+        }
+      }
+      compose.runOnIdle {
+        model.connect(Rpc(server.url("/").toString().removeSuffix("/"), "fixture"))
+      }
+      compose.waitUntil(5000) { model.uiState.value.ready && model.uiState.value.discoveryComplete }
+      compose
+        .onNodeWithText(context.getString(io.github.stupside.castor.R.string.tv_not_found))
+        .assertExists()
+      compose.onNodeWithTag("cast-action").assertIsNotEnabled()
+      online.set(true)
+      compose.runOnIdle { model.discover() }
+      compose.waitUntil(5000) { CastOptions(context).television()?.id == moved.id }
+      compose.onNodeWithTag("cast-action").assertIsEnabled()
+      compose.runOnIdle {
+        val saved = CastOptions(context).television()
+        assertEquals(moved.address, saved?.address)
+        assertEquals(false, saved?.manual)
+      }
+    } finally {
+      compose.runOnIdle { model.connect(null) }
+      server.shutdown()
+    }
+  }
+
+  @Test
   fun invalidLinkShowsRecoveryAndDisablesAnOtherwiseReadyCast() {
     CastOptions(context)
-      .television(SavedTv("Fixture TV", "192.0.2.65", DeviceType.DEVICE_TYPE_DLNA))
+      .television(SavedTv("Fixture TV", "192.0.2.65", DeviceType.DEVICE_TYPE_DLNA, manual = true))
     val model = MainScreenViewModel()
     model.uiState.value = MainScreenUiState(ready = true, phase = CastPhase.Ready)
     compose.setContent {
@@ -285,9 +354,7 @@ class MainScreenTest {
         )
     }
     compose.setContent {
-      io.github.stupside.castor.theme.CastorTheme {
-        MainScreen(model, null, "", {})
-      }
+      io.github.stupside.castor.theme.CastorTheme { MainScreen(model, null, "", {}) }
     }
     compose.onNodeWithText("Paste link").performClick()
     compose.onNodeWithText("Stream link").assertExists()
@@ -335,9 +402,7 @@ class MainScreenTest {
     val model = MainScreenViewModel()
     model.fail(IllegalStateException(error))
     compose.setContent {
-      io.github.stupside.castor.theme.CastorTheme {
-        MainScreen(model, null, "", {})
-      }
+      io.github.stupside.castor.theme.CastorTheme { MainScreen(model, null, "", {}) }
     }
     compose.onNodeWithText("Copy error").performScrollTo().performClick()
     compose.waitForIdle()

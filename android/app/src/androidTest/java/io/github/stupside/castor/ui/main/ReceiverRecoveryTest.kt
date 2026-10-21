@@ -154,6 +154,34 @@ class ReceiverRecoveryTest {
     }
   }
 
+  @Test
+  fun failedRecoveryKeepsItsErrorWithoutLockingCasting() {
+    val server = MockWebServer()
+    server.dispatcher =
+      object : Dispatcher() {
+        override fun dispatch(request: RecordedRequest): MockResponse =
+          MockResponse()
+            .setResponseCode(503)
+            .setHeader("Content-Type", "application/json")
+            .setBody("{\"code\":\"unavailable\",\"message\":\"engine busy\"}")
+      }
+    server.start()
+    val model = MainScreenViewModel()
+    try {
+      compose.runOnIdle {
+        model.connect(Rpc(server.url("/").toString().removeSuffix("/"), "fixture"))
+      }
+      compose.waitUntil(5000) { model.uiState.value.error != null }
+      compose.runOnIdle {
+        assertTrue("A failed lookup must not leave casting locked", model.uiState.value.ready)
+        assertFalse(model.uiState.value.recovering)
+      }
+    } finally {
+      compose.runOnIdle { model.connect(null) }
+      server.shutdown()
+    }
+  }
+
   private fun proto(bytes: ByteArray) =
     MockResponse().setHeader("Content-Type", "application/proto").setBody(Buffer().write(bytes))
 

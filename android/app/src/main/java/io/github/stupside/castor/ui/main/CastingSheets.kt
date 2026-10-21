@@ -208,7 +208,7 @@ internal fun TvPicker(
         }
         GlassButton(
           prominent = true,
-          onClick = { select(SavedTv(address.trim(), address.trim(), type)) },
+          onClick = { select(SavedTv(address.trim(), address.trim(), type, manual = true)) },
           enabled = address.isNotBlank(),
           modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
         ) {
@@ -271,7 +271,7 @@ internal fun TvPicker(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
         }
-        state.error?.let {
+        state.discoveryError?.let {
           Text(
             it,
             color = MaterialTheme.colorScheme.error,

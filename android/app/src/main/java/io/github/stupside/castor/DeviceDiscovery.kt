@@ -27,34 +27,63 @@ import org.xmlpull.v1.XmlPullParser
 // Android supplies mDNS and active hotspot interfaces; no restricted netlink enumeration is needed.
 class DeviceDiscovery(private val context: Context) {
   private val nsd = context.getSystemService(NsdManager::class.java)
+  // Before Android 16 an app cannot ask which interfaces tether; try the soft-AP names Android and
+  // OEMs use. Each is resolved by name only, never by enumerating every interface.
+  private val likelyHotspotNames = listOf("ap0", "swlan0", "softap0", "wlan1")
 
+  // Every route is searched independently: one that fails (a cellular default route refusing
+  // multicast, a hotspot that just stopped) neither hides receivers found on the others nor the
+  // Chromecasts. The search fails only when nothing was found and some route failed.
   suspend fun find(): List<Device> = coroutineScope {
-    val cast = async { chromecasts() }
-    val ssdp = async(Dispatchers.IO) {
-      val tethered = tetheredInterfaces()
-      if (tethered.isEmpty()) ssdp(null)
-      else coroutineScope { tethered.map { async { ssdp(it) } }.awaitAll().flatten() }
-    }
-    (ssdp.await() + cast.await()).distinctBy { "${it.type}:${it.id}" }
+    val cast = async { attempt { chromecasts() } }
+    val ssdp =
+      async(Dispatchers.IO) {
+        // The default route can be cellular while the TV sits on this phone's hotspot, and the
+        // phone
+        // can share a hotspot while staying on home Wi-Fi: search the route and each hotspot.
+        val routes = listOf<NetworkInterface?>(null) + hotspotInterfaces()
+        routes.map { async { attempt { ssdp(it) } } }.awaitAll()
+      }
+    val results = ssdp.await() + cast.await()
+    val found = results.flatMap { it.getOrNull().orEmpty() }.distinctBy { "${it.type}:${it.id}" }
+    if (found.isEmpty()) results.firstNotNullOfOrNull { it.exceptionOrNull() }?.let { throw it }
+    found
   }
 
-  private suspend fun tetheredInterfaces(): List<NetworkInterface> {
-    if (Build.VERSION.SDK_INT < 36) return emptyList()
-    val manager = context.getSystemService(TetheringManager::class.java)
-    val names = withTimeoutOrNull(2000) {
+  private suspend fun <T> attempt(search: suspend () -> T): Result<T> =
+    try {
+      Result.success(search())
+    } catch (cancelled: CancellationException) {
+      throw cancelled
+    } catch (failure: Exception) {
+      Result.failure(failure)
+    }
+
+  private suspend fun hotspotInterfaces(): List<NetworkInterface> {
+    val names = tetheredInterfaceNames() ?: likelyHotspotNames
+    return names.mapNotNull { name ->
+      runCatching { NetworkInterface.getByName(name)?.takeIf { it.isUp && it.supportsMulticast() } }
+        .getOrNull()
+    }
+  }
+
+  // Android 16+ reports the active hotspot interfaces; null when unknown.
+  private suspend fun tetheredInterfaceNames(): List<String>? {
+    if (Build.VERSION.SDK_INT < 36) return null
+    val manager = context.getSystemService(TetheringManager::class.java) ?: return null
+    return withTimeoutOrNull(1000) {
       callbackFlow {
-        val callback = object : TetheringManager.TetheringEventCallback {
-          override fun onTetheredInterfacesChanged(interfaces: Set<TetheringInterface>) {
-            trySend(interfaces.map { it.getInterface() })
-          }
+          val callback =
+            object : TetheringManager.TetheringEventCallback {
+              override fun onTetheredInterfacesChanged(interfaces: Set<TetheringInterface>) {
+                trySend(interfaces.map { it.getInterface() })
+              }
+            }
+          // Delivered on the binder thread: a busy main thread must not stall discovery.
+          manager.registerTetheringEventCallback({ it.run() }, callback)
+          awaitClose { manager.unregisterTetheringEventCallback(callback) }
         }
-        manager.registerTetheringEventCallback(context.mainExecutor, callback)
-        awaitClose { manager.unregisterTetheringEventCallback(callback) }
-      }.first()
-    } ?: throw java.io.IOException("Android did not report the hotspot network. Search again.")
-    return names.map { name ->
-      NetworkInterface.getByName(name)
-        ?: throw java.io.IOException("The hotspot network changed. Search again.")
+        .first()
     }
   }
 
@@ -70,7 +99,7 @@ class DeviceDiscovery(private val context: Context) {
             .toByteArray()
         repeat(2) {
           socket.send(
-            DatagramPacket(message, message.size, InetAddress.getByName("239.255.255.250"), 1900),
+            DatagramPacket(message, message.size, InetAddress.getByName("239.255.255.250"), 1900)
           )
         }
       }
@@ -103,39 +132,48 @@ class DeviceDiscovery(private val context: Context) {
         found.putIfAbsent(headers["usn"] ?: location, location to family)
       }
     }
-    return found.mapNotNull { (id, value) ->
-      currentCoroutineContext().ensureActive()
-      val (location, family) = value
-      try {
-        val connection = URL(location).openConnection() as HttpURLConnection
-        connection.connectTimeout = 500
-        connection.readTimeout = 500
-        connection.instanceFollowRedirects = false
-        val name =
-          try {
-            connection.inputStream.use { input ->
-              val bytes = io.github.stupside.castor.data.Rpc.readLimited(input, 1_048_576)
-              val parser = Xml.newPullParser()
-              parser.setFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
-              parser.setInput(bytes.inputStream(), null)
-              var label = ""
-              while (parser.next() != XmlPullParser.END_DOCUMENT) {
-                if (parser.eventType == XmlPullParser.START_TAG && parser.name == "friendlyName") {
-                  label = parser.nextText()
-                  break
-                }
-              }
-              label.ifBlank { URI(location).host }
-            }
-          } finally {
-            connection.disconnect()
-          }
-        Device.newBuilder().setId(id).setName(name).setType(family).setAddress(location).build()
-      } catch (_: java.io.IOException) {
-        null
-      } catch (_: org.xmlpull.v1.XmlPullParserException) {
-        null
+    // Descriptions are read concurrently so several receivers fit the engine's listing deadline.
+    return coroutineScope {
+        found.map { (id, value) -> async { describe(id, value.first, value.second) } }.awaitAll()
       }
+      .filterNotNull()
+  }
+
+  private fun describe(id: String, location: String, family: DeviceType): Device? {
+    try {
+      val connection = URL(location).openConnection() as HttpURLConnection
+      connection.connectTimeout = 500
+      connection.readTimeout = 500
+      connection.instanceFollowRedirects = false
+      val name =
+        try {
+          connection.inputStream.use { input ->
+            val bytes = io.github.stupside.castor.data.Rpc.readLimited(input, 1_048_576)
+            val parser = Xml.newPullParser()
+            parser.setFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
+            parser.setInput(bytes.inputStream(), null)
+            var label = ""
+            while (parser.next() != XmlPullParser.END_DOCUMENT) {
+              if (parser.eventType == XmlPullParser.START_TAG && parser.name == "friendlyName") {
+                label = parser.nextText()
+                break
+              }
+            }
+            label.ifBlank { URI(location).host }
+          }
+        } finally {
+          connection.disconnect()
+        }
+      return Device.newBuilder()
+        .setId(id)
+        .setName(name)
+        .setType(family)
+        .setAddress(location)
+        .build()
+    } catch (_: java.io.IOException) {
+      return null
+    } catch (_: org.xmlpull.v1.XmlPullParserException) {
+      return null
     }
   }
 

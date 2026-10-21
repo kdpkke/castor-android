@@ -68,9 +68,29 @@ fun MainScreen(
   var tvAddress by rememberSaveable { mutableStateOf(options.television()?.address.orEmpty()) }
   var tvType by rememberSaveable { mutableIntStateOf(options.television()?.type?.number ?: 1) }
   var tvId by rememberSaveable { mutableStateOf(options.television()?.id.orEmpty()) }
+  var tvManual by rememberSaveable { mutableStateOf(options.television()?.manual == true) }
   val tv =
     if (tvAddress.isBlank()) null
-    else SavedTv(tvName, tvAddress, DeviceType.forNumber(tvType), tvId)
+    else SavedTv(tvName, tvAddress, DeviceType.forNumber(tvType), tvId, tvManual)
+  fun saveTv(selected: SavedTv) {
+    tvName = selected.name
+    tvAddress = selected.address
+    tvType = selected.type.number
+    tvId = selected.id
+    tvManual = selected.manual
+    options.television(selected)
+  }
+  // A saved TV is only a hint until the current search finds it again. Manual addresses are used
+  // as entered; discovered ones must reappear, and come back with their current address.
+  val searched = state.discoveryComplete && !state.discovering
+  val found = tv?.takeUnless { it.manual }?.available(state.devices)?.takeIf { searched }
+  val tvMissing = tv != null && !tv.manual && searched && found == null
+  // Receivers saved before identities only have an address that may be stale: wait for a search.
+  val tvUnconfirmed = tv != null && !tv.manual && tv.id.isBlank() && found == null
+  LaunchedEffect(state.ready, tv?.manual) {
+    if (state.ready && tv != null && !tv.manual && !state.discoveryComplete) viewModel.discover()
+  }
+  LaunchedEffect(found) { found?.takeIf { it != tv }?.let(::saveTv) }
   var height by rememberSaveable { mutableStateOf(options.height()) }
   var subtitles by rememberSaveable { mutableStateOf(options.subtitles()) }
   var sheet by rememberSaveable { mutableStateOf<String?>(null) }
@@ -190,7 +210,14 @@ fun MainScreen(
                     )
                   }
                 },
-                enabled = state.ready && !state.submitting && validUrl && tv != null,
+                enabled =
+                  state.ready &&
+                    !state.recovering &&
+                    !state.submitting &&
+                    validUrl &&
+                    tv != null &&
+                    !tvMissing &&
+                    !tvUnconfirmed,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("cast-action"),
               ) {
                 if (state.submitting)
@@ -336,8 +363,12 @@ fun MainScreen(
             ActionRow(
               R.drawable.ic_tv,
               tv?.name ?: stringResource(R.string.choose_tv),
-              tv?.let { "${protocolName(it.type)} · ${it.address}" }
-                ?: stringResource(R.string.tv_help),
+              when {
+                tv == null -> stringResource(R.string.tv_help)
+                tvMissing -> stringResource(R.string.tv_not_found)
+                !tv.manual && found == null && state.ready -> stringResource(R.string.tv_checking)
+                else -> "${protocolName(tv.type)} · ${tv.address}"
+              },
               if (tv == null) R.string.choose_tv else R.string.change_tv,
             ) {
               sheet = "tv"
@@ -449,11 +480,7 @@ fun MainScreen(
   if (sheet == "theme") AppThemePicker(theme, { sheet = null }, selectTheme)
   if (sheet == "tv")
     TvPicker(state, tv, { sheet = null }, { viewModel.discover() }) { selected ->
-      tvName = selected.name
-      tvAddress = selected.address
-      tvType = selected.type.number
-      tvId = selected.id
-      options.television(selected)
+      saveTv(selected)
       sheet = null
     }
   if (sheet == "settings")

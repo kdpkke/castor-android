@@ -6,6 +6,8 @@ import castor.v1.CastOuterClass.*
 import castor.v1.DeviceOuterClass.*
 import castor.v1.DeviceOuterClass.Target
 import castor.v1.StreamOuterClass.Stream
+import com.connectrpc.Code
+import com.connectrpc.ConnectException
 import io.github.stupside.castor.BrowserResolver
 import io.github.stupside.castor.data.DataRepository
 import io.github.stupside.castor.data.Rpc
@@ -40,7 +42,10 @@ data class MainScreenUiState(
   val error: String? = null,
   val phase: CastPhase = CastPhase.Preparing,
   val discoveryComplete: Boolean = false,
+  val discoveryError: String? = null,
   val stopping: Boolean = false,
+  // The engine's existing cast is being looked up; no new cast may start meanwhile.
+  val recovering: Boolean = false,
 )
 
 class MainScreenViewModel : ViewModel() {
@@ -81,7 +86,7 @@ class MainScreenViewModel : ViewModel() {
   // including when a Cast response was lost or a different session still owns the TV.
   private fun recover(data: DataRepository) {
     recovery?.cancel()
-    uiState.value = uiState.value.copy(ready = false)
+    uiState.value = uiState.value.copy(recovering = true)
     recovery =
       viewModelScope.launch {
         try {
@@ -91,6 +96,7 @@ class MainScreenViewModel : ViewModel() {
           uiState.value =
             uiState.value.copy(
               ready = true,
+              recovering = false,
               phase =
                 if (cast == null && uiState.value.error == null) CastPhase.Ready
                 else uiState.value.phase,
@@ -99,7 +105,11 @@ class MainScreenViewModel : ViewModel() {
                 else uiState.value.status,
             )
         } catch (error: Exception) {
+          if (error is CancellationException) throw error
+          // The engine answered before; keep its error visible without locking casting. A later
+          // busy refusal recovers again and restores Stop for the cast that owns the TV.
           fail(error)
+          uiState.value = uiState.value.copy(ready = true, recovering = false)
         }
       }
   }
@@ -134,7 +144,7 @@ class MainScreenViewModel : ViewModel() {
             discovering = true,
             devices = emptyList(),
             discoveryComplete = false,
-            error = null,
+            discoveryError = null,
           )
         try {
           val devices = data.devices()
@@ -146,7 +156,9 @@ class MainScreenViewModel : ViewModel() {
                 else "Select a TV",
             )
         } catch (error: Exception) {
-          fail(error)
+          // A search failure belongs to the TV picker, not to a cast.
+          if (error !is CancellationException)
+            uiState.value = uiState.value.copy(discoveryError = error.message ?: "Search failed")
         } finally {
           uiState.value = uiState.value.copy(discovering = false, discoveryComplete = true)
         }
@@ -162,7 +174,13 @@ class MainScreenViewModel : ViewModel() {
     receiverName: String = "",
     subtitleLanguage: String = "en",
   ) {
-    if (!uiState.value.ready || submission?.isActive == true || uiState.value.castId != null) return
+    if (
+      !uiState.value.ready ||
+        uiState.value.recovering ||
+        submission?.isActive == true ||
+        uiState.value.castId != null
+    )
+      return
     submission =
       viewModelScope.launch {
         val data = repository ?: return@launch
@@ -179,7 +197,10 @@ class MainScreenViewModel : ViewModel() {
                     name = receiverName.ifBlank { target.pinned.address }
                     address = target.pinned.address
                     type = target.pinned.type
-                  } else id = target.deviceId
+                  } else {
+                    id = target.deviceId
+                    name = receiverName
+                  }
                 }
                 .build()
           val pending = Cast.newBuilder().setSource(request.source).setDevice(device).build()
@@ -246,9 +267,23 @@ class MainScreenViewModel : ViewModel() {
             }
           }
         } catch (error: Exception) {
-          fail(error)
+          if (ended(error)) forget(cast.id) else fail(error)
         }
       }
+  }
+
+  // The engine no longer knows this cast, so neither watching nor stopping it can succeed.
+  private fun ended(error: Exception) = (error.cause as? ConnectException)?.code == Code.NOT_FOUND
+
+  private fun forget(id: String) {
+    if (uiState.value.castId == id)
+      uiState.value =
+        uiState.value.copy(
+          castId = null,
+          activeCast = null,
+          stopping = false,
+          phase = CastPhase.Ready,
+        )
   }
 
   fun stop() =
@@ -259,7 +294,7 @@ class MainScreenViewModel : ViewModel() {
       try {
         repository?.stop(id)
       } catch (error: Exception) {
-        fail(error)
+        if (ended(error)) forget(id) else fail(error)
       }
     }
 
