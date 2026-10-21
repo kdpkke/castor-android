@@ -9,6 +9,7 @@ import castor.scraping.v1.Scraping.ResolveRequest
 import castor.v1.CastOuterClass.Cast
 import castor.v1.CastOuterClass.Source
 import io.github.stupside.castor.BrowserResolver
+import io.github.stupside.castor.ManualDiagnostic
 import io.github.stupside.castor.theme.CastorTheme
 import java.io.File
 import kotlinx.coroutines.*
@@ -19,6 +20,7 @@ import org.junit.Rule
 import org.junit.Test
 
 // Manual diagnostics only: never contact external websites in the fixture suite.
+@ManualDiagnostic
 class BrowserSiteDiagnosticTest {
   @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 

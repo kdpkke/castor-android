@@ -25,8 +25,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Manual diagnostics need real hardware or an explicitly supplied external URL.
         // Exclude them from Gradle/CI rather than reporting skipped tests as a successful run.
-        testInstrumentationRunnerArguments["notClass"] =
-            "io.github.stupside.castor.DeviceDiscoveryHotspotTest,io.github.stupside.castor.ui.main.BrowserSiteDiagnosticTest"
+        // One annotation, not a comma-separated notClass list: Gradle excluded only its first class.
+        testInstrumentationRunnerArguments["notAnnotation"] = "io.github.stupside.castor.ManualDiagnostic"
     }
 
     buildTypes {

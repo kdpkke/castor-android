@@ -25,6 +25,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 // Opt in only when a DLNA TV is connected to this phone's hotspot.
+@ManualDiagnostic
 @SdkSuppress(minSdkVersion = 36)
 class DeviceDiscoveryHotspotTest {
   @Test
