@@ -5,10 +5,10 @@ debug keys. The public [X.509 certificate](signing/release-cert.pem) identifies
 the signer; its SHA-256 fingerprint is:
 
 ```text
-9E:FA:FE:98:5C:04:D4:72:8B:9A:9D:93:A8:26:C9:E0:C3:2E:EA:EC:77:FD:35:87:C0:28:A4:83:EB:67:7C:85
+8B:08:59:49:3C:CA:B4:35:65:A7:19:D2:E8:67:BE:81:5D:65:1C:49:60:3E:70:7F:1E:8E:82:30:9A:CD:9D:BB
 ```
 
-The certificate expires on 2054-03-06. It contains no private key. Verify a
+The certificate expires on 2054-03-08. It contains no private key. Verify a
 download with the Android SDK Build Tools:
 
 ```sh
@@ -21,6 +21,15 @@ release. The certificate fingerprint stays the same across updates; each APK has
 its own checksum. This verifies the signing identity and file integrity, without
 guaranteeing that Android or Play Protect will accept an installation silently.
 A paid certificate is not required for APK distribution.
+
+## Key change in 1.1.0
+
+Android 1.0.0 was signed with a different release key (SHA-256
+`9E:FA:FE:98:5C:04:D4:72:8B:9A:9D:93:A8:26:C9:E0:C3:2E:EA:EC:77:FD:35:87:C0:28:A4:83:EB:67:7C:85`).
+That key is retired: it is no longer available to the maintainer. Starting with
+1.1.0, releases use the key above. Android treats the change like a different
+signer, so a 1.0.0 installation must be uninstalled before installing 1.1.0;
+uninstalling removes its saved app preferences. Later updates install normally.
 
 ## Moving from development builds
 

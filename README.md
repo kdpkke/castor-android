@@ -43,7 +43,7 @@ Release notes include SHA-256 checksums and the signing certificate fingerprint 
 
 Stable releases use a dedicated signing key; see [signature verification](android/docs/SIGNING.md) and its public certificate. Moving from a development build requires uninstalling it once before installing the stable APK, which removes saved app preferences. Later stable releases update normally.
 
-Android versions follow their own sequence, starting at **1.0.0**, with tags such as `android-v1.0.0`. The upstream core version is tracked separately in [android/upstream.json](android/upstream.json).
+Android versions follow their own sequence, starting at **1.0.0**, with tags such as `android-v1.0.0`. Changes are listed in [android/CHANGELOG.md](android/CHANGELOG.md). The upstream core version is tracked separately in [android/upstream.json](android/upstream.json).
 
 ## Build
 
