@@ -33,7 +33,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import castor.v1.DeviceOuterClass.DeviceType
 import io.github.stupside.castor.BrowserResolver
@@ -79,6 +78,7 @@ fun MainScreen(
   val busy = state.castId != null || state.submitting
   val validUrl = BrowserResolver.isHttp(url.trim()) && url.trim().length <= 8192
   val extracting = browser?.active?.collectAsStateWithLifecycle()?.value == true
+  val browserPage = browser?.page?.collectAsStateWithLifecycle()?.value
   val subtitleLabel =
     when (subtitles) {
       "off" -> stringResource(R.string.subtitles_off)
@@ -178,6 +178,7 @@ fun MainScreen(
                 prominent = true,
                 onClick = {
                   tv?.let {
+                    if (!mode.isPage(url.trim())) browser?.dismissPage()
                     viewModel.cast(
                       url.trim(),
                       mode.isPage(url.trim()),
@@ -373,15 +374,8 @@ fun MainScreen(
             }
           }
         }
-        if (extracting && browser != null) {
-          Text(stringResource(R.string.page_browser), style = MaterialTheme.typography.titleMedium)
-          AndroidView(
-            factory = {
-              browser.webView.also { (it.parent as? android.view.ViewGroup)?.removeView(it) }
-            },
-            modifier = Modifier.fillMaxWidth().height(360.dp),
-            onRelease = { (it.parent as? android.view.ViewGroup)?.removeView(it) },
-          )
+        if (browserPage != null && browser != null) {
+          PageBrowser(browser, browserPage, extracting, compact, busy)
         }
       }
     }

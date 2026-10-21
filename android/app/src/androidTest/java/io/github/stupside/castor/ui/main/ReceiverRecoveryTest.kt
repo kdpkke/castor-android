@@ -2,7 +2,9 @@ package io.github.stupside.castor.ui.main
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.platform.app.InstrumentationRegistry
 import castor.v1.CastOuterClass.*
@@ -43,9 +45,40 @@ class ReceiverRecoveryTest {
     compose.setContent { CastorTheme { TvPicker(state.value, SavedTv(device), {}, {}, {}) } }
     compose.onNodeWithText(lastUsed).assertDoesNotExist()
     compose.runOnIdle {
-      state.value = state.value.copy(devices = listOf(device), discoveryComplete = true)
+      state.value =
+        state.value.copy(
+          devices =
+            listOf(
+              device,
+              device
+                .toBuilder()
+                .setId("dlna:bedroom")
+                .setName("Bedroom")
+                .setAddress("http://192.0.2.20/")
+                .build(),
+            ),
+          discoveryComplete = true,
+        )
     }
     compose.onNodeWithText(lastUsed).assertExists()
+    compose.onAllNodesWithText(device.name).assertCountEquals(1)
+    compose
+      .onNodeWithText(
+        InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.other_tvs)
+      )
+      .assertExists()
+    compose.onNodeWithText("Bedroom").assertExists()
+    val evidence =
+      java.io.File(
+        InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null),
+        "receiver-groups-fixture.png",
+      )
+    evidence.outputStream().use {
+      InstrumentationRegistry.getInstrumentation()
+        .uiAutomation
+        .takeScreenshot()
+        .compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+    }
     compose.runOnIdle { state.value = state.value.copy(discovering = true) }
     compose.onNodeWithText(lastUsed).assertDoesNotExist()
     compose.runOnIdle { state.value = state.value.copy(devices = emptyList(), discovering = false) }

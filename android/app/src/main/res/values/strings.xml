@@ -24,6 +24,8 @@
     <string name="change_tv">Change TV</string>
     <string name="selected_tv">Selected television</string>
     <string name="last_tv">Last used</string>
+    <string name="other_tvs">Other TVs</string>
+    <string name="no_other_tvs">No other TVs found.</string>
     <string name="find_tvs">Find TVs</string>
     <string name="search_again">Search again</string>
     <string name="searching">Looking for TVs…</string>
@@ -79,6 +81,9 @@
     <string name="video_source">Video source</string>
     <string name="current_tv">Your TV</string>
     <string name="page_browser">Page player</string>
+    <string name="page_loading">Loading the page…</string>
+    <string name="page_play_help">Start the video here while Castor looks for a stream.</string>
+    <string name="page_retry_help">Try playing the video here, then tap %1$s again. If the channel is offline, try another link.</string>
     <string name="cast_error">Unable to finish casting</string>
     <string name="error_help">Review the link and selected TV, then try again. The full details are available below.</string>
     <string name="show_details">Show details</string>

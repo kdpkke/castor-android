@@ -15,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import castor.v1.DeviceOuterClass.DeviceType
@@ -157,6 +159,12 @@ internal fun TvPicker(
   var manual by rememberSaveable { mutableStateOf(false) }
   var address by rememberSaveable { mutableStateOf("") }
   var type by rememberSaveable { mutableStateOf(DeviceType.DEVICE_TYPE_DLNA) }
+  val lastUsed =
+    saved?.available(state.devices)?.takeIf { state.discoveryComplete && !state.discovering }
+  val otherTvs =
+    state.devices.filter {
+      it.address.isNotBlank() && it.type in receiverTypes && SavedTv(it) != lastUsed
+    }
   GlassSheet(dismiss) {
     Column(
       Modifier.fillMaxWidth()
@@ -211,39 +219,50 @@ internal fun TvPicker(
           stringResource(R.string.search_help),
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        saved
-          ?.available(state.devices)
-          ?.takeIf { state.discoveryComplete && !state.discovering }
-          ?.let { tv ->
-            GlassPanel(Modifier.fillMaxWidth(), onClick = { select(tv) }) {
-              ListItem(
-                headlineContent = { Text(tv.name) },
-                supportingContent = {
-                  Text("${stringResource(R.string.last_tv)} · ${protocolName(tv.type)}")
-                },
-                leadingContent = { CastIcon(R.drawable.ic_tv) },
-                trailingContent = { CastIcon(R.drawable.ic_next, stringResource(R.string.use_tv)) },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-              )
-            }
+        lastUsed?.let { tv ->
+          GlassPanel(Modifier.fillMaxWidth(), onClick = { select(tv) }) {
+            ListItem(
+              headlineContent = { Text(tv.name) },
+              supportingContent = {
+                Text("${stringResource(R.string.last_tv)} · ${protocolName(tv.type)}")
+              },
+              leadingContent = { CastIcon(R.drawable.ic_tv) },
+              trailingContent = { CastIcon(R.drawable.ic_next, stringResource(R.string.use_tv)) },
+              colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
           }
+        }
+        if (lastUsed != null) {
+          HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+          Text(
+            stringResource(R.string.other_tvs),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.semantics { heading() },
+          )
+          if (otherTvs.isEmpty()) {
+            Text(
+              stringResource(R.string.no_other_tvs),
+              style = MaterialTheme.typography.bodyMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+        }
         if (state.discovering) {
           LinearProgressIndicator(Modifier.fillMaxWidth())
           Text(stringResource(R.string.searching), style = MaterialTheme.typography.bodyMedium)
         }
-        state.devices
-          .filter { it.address.isNotBlank() && it.type in receiverTypes }
-          .forEach { device ->
-            GlassPanel(onClick = { select(SavedTv(device)) }) {
-              ListItem(
-                headlineContent = { Text(device.name.ifBlank { device.address }) },
-                supportingContent = { Text(protocolName(device.type)) },
-                leadingContent = { CastIcon(R.drawable.ic_tv) },
-                trailingContent = { CastIcon(R.drawable.ic_next) },
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-              )
-            }
+        otherTvs.forEach { device ->
+          GlassPanel(onClick = { select(SavedTv(device)) }) {
+            ListItem(
+              headlineContent = { Text(device.name.ifBlank { device.address }) },
+              supportingContent = { Text(protocolName(device.type)) },
+              leadingContent = { CastIcon(R.drawable.ic_tv) },
+              trailingContent = { CastIcon(R.drawable.ic_next) },
+              colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
           }
+        }
         if (!state.discovering && state.devices.isEmpty()) {
           Text(stringResource(R.string.no_tvs), style = MaterialTheme.typography.titleMedium)
           Text(

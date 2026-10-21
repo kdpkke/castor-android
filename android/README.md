@@ -17,6 +17,8 @@ On Android 16+, DLNA/Roku discovery also searches the phone's active hotspot int
 
 **Last used** appears only after the current search finds that receiver. Discovered TVs are saved by identity, so a changed IP address or description port uses the newly discovered address. Older saved entries require a matching address once; selecting a discovered result upgrades them automatically. Manual addresses remain supported through **Enter a TV address**. On reopening, the app recovers any running cast before enabling a new one. If a request fails while a cast still owns the receiver, the app restores that session so **Stop casting** can release it.
 
+The last-used receiver has its own row above a divider and **Other TVs**; it is not repeated in the other results. During webpage extraction, the page player scrolls into view and shows its address and loading state. If no stream is found, the page stays available: start its video, then cast again without reloading the page. Close the page when finished. A failed main-document request is reported explicitly; missing ads or other subresources do not fail the whole page. An offline channel or a DRM-protected video cannot be made playable by opening its webpage.
+
 The Android interface uses a shared Liquid Glass material with **Dark** as the default appearance. Choose **Appearance** from the app-bar menu for **System**, **Light** or **Dark**; the choice is saved and applies immediately without recreating the screen or restarting the cast. **System** follows device night-mode changes, while explicit choices override them, including the system-bar foregrounds. Native sheets, inputs and controls use translucent surfaces with a specular rim; Android 12+ blurs only the scenic backplate, keeping content sharp. Android 9–11 retain the same material without the native blur effect. English is the default language; choose **App language** from the app-bar menu to switch to **Italiano** or **English**. The choice is saved and applies immediately, including after reopening the app. Changing language recreates the screen while the casting service keeps running. Both language and appearance choosers stay open after selection, immediately updating their content and selected row; close them with the close button, Android Back or a native sheet gesture. The playback summary explicitly labels its subtitle value. Only language, appearance, receiver and playback preferences are saved in private preferences; video URLs and access tokens are not saved there. Errors have collapsible, selectable details; **Copy error** always copies the entire diagnostic.
 
 Subtitles offer **Off**, **App language**, or an explicit language code such as `en` or `it`. Castor selects source captions in that language, with Whisper transcription as a fallback when captions are missing. The saved `auto` preference now follows the selected app language (English or Italian), matching upstream’s explicit language policy. First transcription use downloads a pinned, checksum-verified Whisper model; caption delivery follows the receiver’s capabilities and requires served playback. Real-time software encoding and transcription can consume substantial battery and may exceed a phone's sustained processing speed.
@@ -83,7 +85,15 @@ To verify discovery on a physical Android 16+ phone, connect a powered-on DLNA T
 adb -s <phone-serial> shell am instrument -w -e class io.github.stupside.castor.DeviceDiscoveryHotspotTest -e hotspot true io.github.stupside.castor.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-These opt-in tests require a real TV. They verify discovery and connection through the native engine using the receiver's identity even with a deliberately stale saved URL. An invalid local video source ends the connection test before playback; no external streaming site is used. Stop active casts before running them. They are skipped in the normal fixture suite.
+These opt-in tests require a real TV. They verify discovery and connection through the native engine using the receiver's identity even with a deliberately stale saved URL. An invalid local video source ends the connection test before playback; no external streaming site is used. Stop active casts before running them. Gradle excludes manual diagnostics from its fixture suite so they do not appear as skipped tests in CI.
+
+To inspect a specific public webpage in the embedded browser without casting to a TV, run this manual diagnostic instead:
+
+```powershell
+adb -s <device-serial> shell am instrument -w -e class io.github.stupside.castor.ui.main.BrowserSiteDiagnosticTest -e publicPage "https://example.org/watch" io.github.stupside.castor.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+It records the page document, an available browser screenshot, and the number of captured candidates under the app's external files directory. Capturing a candidate is not proof of TV playback. Normal tests use a local page and real touchscreen input to verify rendering, late Play interactions, retry without reloading, HTTP failures, dismissal, and cancellation.
 
 ## Compatibility and limits
 

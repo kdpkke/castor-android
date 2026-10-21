@@ -292,7 +292,11 @@ Dark is the default for new and upgraded installs without a saved valid theme. A
 
 ### Active pairing and recovery
 
-The active panel reads source and television from retained/submitted activeCast metadata; a new incoming draft or saved last-used receiver cannot replace those labels. Missing metadata receives generic source/TV text. Headings announce politely through native semantics. Progress describes connection/extraction stages without claiming confirmed television playback. The reachable primary action becomes Stop casting, or engine restart when unavailable with an error. Interactive extraction embeds the existing site's WebView player when needed.
+The active panel reads source and television from retained/submitted activeCast metadata; a new incoming draft or saved last-used receiver cannot replace those labels. Missing metadata receives generic source/TV text. Headings announce politely through native semantics. Progress describes connection/extraction stages without claiming confirmed television playback. The reachable primary action becomes Stop casting, or engine restart when unavailable with an error.
+
+Interactive extraction presents the existing site's WebView through PageBrowser, brings it into view, and shows its address, loading state and concise EN/IT instructions. Main-document failures appear explicitly. A no-stream result retains the page for interaction and retry without discarding a Play click; successful extraction and cancellation clear it, and a retained page has a native Close action. Website content keeps its own rendering. The viewport is 360dp in portrait and 220dp in the compact layout.
+
+The receiver sheet shows a confirmed Last used row first, followed by an outline-variant divider and an Other TVs heading using the titleSmall role and on-surface-variant foreground. That receiver is excluded from the following list. An empty other group says no other TVs were found; without a confirmed last-used receiver, discovery results retain their ordinary layout. Labels are localized as Ultima utilizzata and Altre TV in Italian.
 
 App-owned permission recovery shares the scene and glass panel. Android permission prompts, foreground notifications, app settings and embedded website content keep their platform or site presentation. Only app language, appearance, receiver, height and subtitle preferences are stored by CastOptions; the URL draft uses rememberSaveable instance state rather than those preferences.
 

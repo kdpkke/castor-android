@@ -17,6 +17,10 @@ android {
         versionCode = 15
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Manual diagnostics need real hardware or an explicitly supplied external URL.
+        // Exclude them from Gradle/CI rather than reporting skipped tests as a successful run.
+        testInstrumentationRunnerArguments["notClass"] =
+            "io.github.stupside.castor.DeviceDiscoveryHotspotTest,io.github.stupside.castor.ui.main.BrowserSiteDiagnosticTest"
     }
 
     buildTypes {

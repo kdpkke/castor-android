@@ -5,7 +5,9 @@ import android.content.Context
 import android.webkit.CookieManager
 import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import castor.scraping.v1.Scraping.ResolveRequest
@@ -15,23 +17,29 @@ import castor.v1.StreamOuterClass.StreamCandidate
 import java.net.URI
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 
+data class BrowserPage(val url: String, val loading: Boolean = true, val error: String? = null)
+
 // A private WebView profile captures requests; no JavaScript interface is exposed to websites.
 @SuppressLint("SetJavaScriptEnabled")
 class BrowserResolver(context: Context) {
   val active = MutableStateFlow(false)
+  val page = MutableStateFlow<BrowserPage?>(null)
   val webView = WebView(context)
   private val mutex = Mutex()
   private val userAgent = webView.settings.userAgentString
   private val candidates = ConcurrentHashMap<String, StreamCandidate>()
   @Volatile private var sourcePage = ""
   @Volatile private var capturing = false
+  @Volatile private var loadFailure: String? = null
 
   init {
     with(webView.settings) {
@@ -52,6 +60,38 @@ class BrowserResolver(context: Context) {
       }
     webView.webViewClient =
       object : WebViewClient() {
+        override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+          if (url != "about:blank") {
+            // Some WebView versions deliver an HTTP failure before this callback.
+            // Only an actual navigation to a different page clears that failure.
+            if (page.value?.url != url) loadFailure = null
+            page.value =
+              page.value?.copy(url = url, loading = loadFailure == null, error = loadFailure)
+          }
+        }
+
+        override fun onPageFinished(view: WebView, url: String) {
+          if (url != "about:blank" && page.value?.url == url)
+            page.value = page.value?.copy(loading = false)
+        }
+
+        override fun onReceivedError(
+          view: WebView,
+          request: WebResourceRequest,
+          error: WebResourceError,
+        ) {
+          if (request.isForMainFrame) failedLoading("The page could not load: ${error.description}")
+        }
+
+        override fun onReceivedHttpError(
+          view: WebView,
+          request: WebResourceRequest,
+          response: WebResourceResponse,
+        ) {
+          if (request.isForMainFrame)
+            failedLoading("The page returned HTTP ${response.statusCode}.")
+        }
+
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
           !isHttp(request.url.toString())
 
@@ -63,6 +103,11 @@ class BrowserResolver(context: Context) {
           return null
         }
       }
+  }
+
+  private fun failedLoading(message: String) {
+    loadFailure = message
+    page.value = page.value?.copy(loading = false, error = message)
   }
 
   private fun capture(
@@ -102,19 +147,28 @@ class BrowserResolver(context: Context) {
         "Invalid page URL"
       }
       val streams = mutableListOf<StreamCandidate>()
+      var keepPage = false
       try {
-        for (page in request.urlsList) {
-          candidates.clear()
-          sourcePage = page
+        for (address in request.urlsList) {
           withContext(Dispatchers.Main) {
+            // Retry a failed interactive page without losing the user's Play click.
+            val reuse =
+              interactive && page.value != null && sourcePage == address && loadFailure == null
+            if (!reuse) candidates.clear()
+            sourcePage = address
+            loadFailure = null
             capturing = true
             active.value = interactive
-            webView.loadUrl(page)
+            if (!reuse) {
+              page.value = if (interactive) BrowserPage(address) else null
+              webView.loadUrl(address)
+            }
           }
           var firstSeen = 0L
           val started = android.os.SystemClock.elapsedRealtime()
           while (android.os.SystemClock.elapsedRealtime() - started < 30_000) {
             delay(500)
+            if (loadFailure != null) break
             withContext(Dispatchers.Main) {
               webView.evaluateJavascript(
                 """
@@ -140,23 +194,40 @@ class BrowserResolver(context: Context) {
           streams += candidates.values
           if (streams.isNotEmpty()) break
         }
-        check(streams.isNotEmpty()) {
-          "No playable stream found. Start the video in the browser below, or supply its direct URL. DRM is unsupported."
+        if (streams.isEmpty()) {
+          keepPage = interactive
+          throw java.io.IOException(
+            loadFailure
+              ?: "No playable stream was found on this page. The channel may be offline. Start the video in the page player and try casting again, or use a direct video URL. DRM-protected streams cannot be cast."
+          )
         }
         ResolveResponse.newBuilder().addAllStreams(streams).build()
       } finally {
+        val retain = keepPage && currentCoroutineContext().isActive
         withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) {
           active.value = false
-          capturing = false
-          webView.stopLoading()
-          webView.loadUrl("about:blank")
-          candidates.clear()
+          if (!retain) clearPage()
         }
       }
     }
 
+  fun dismissPage() {
+    // Background playlist renewal also owns the WebView, without presenting interactive UI.
+    if (!mutex.isLocked) clearPage()
+  }
+
+  private fun clearPage() {
+    page.value = null
+    capturing = false
+    loadFailure = null
+    webView.stopLoading()
+    webView.loadUrl("about:blank")
+    candidates.clear()
+  }
+
   fun close() {
     active.value = false
+    page.value = null
     capturing = false
     (webView.parent as? android.view.ViewGroup)?.removeView(webView)
     webView.stopLoading()
@@ -164,10 +235,11 @@ class BrowserResolver(context: Context) {
   }
 
   companion object {
-    internal fun isHttp(value: String): Boolean = runCatching {
-      val uri = URI(value)
-      uri.scheme in setOf("http", "https") && !uri.host.isNullOrBlank() && uri.userInfo == null
-    }
-      .getOrDefault(false)
+    internal fun isHttp(value: String): Boolean =
+      runCatching {
+          val uri = URI(value)
+          uri.scheme in setOf("http", "https") && !uri.host.isNullOrBlank() && uri.userInfo == null
+        }
+        .getOrDefault(false)
   }
 }
