@@ -1,5 +1,6 @@
 package io.github.stupside.castor.ui.main
 
+import android.app.Activity
 import android.content.ComponentName
 import android.content.Intent
 import android.content.ServiceConnection
@@ -7,12 +8,15 @@ import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.espresso.Espresso
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import io.github.stupside.castor.CastorService
 import io.github.stupside.castor.MainActivity
 import io.github.stupside.castor.R
@@ -59,12 +63,53 @@ class AppLanguageTest {
 
   @Test
   fun appearanceDefaultsToDarkAndPersistsWithoutLosingTheDraftOrCast() {
+    fun resumed(): Activity? {
+      var activity: Activity? = null
+      InstrumentationRegistry.getInstrumentation().runOnMainSync {
+        activity =
+          ActivityLifecycleMonitorRegistry.getInstance()
+            .getActivitiesInStage(Stage.RESUMED)
+            .firstOrNull()
+      }
+      return activity
+    }
+    fun nightActive(activity: Activity) =
+      (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+        Configuration.UI_MODE_NIGHT_YES
     fun night(mode: String) {
+      val before = resumed()
+      val target =
+        when (mode) {
+          "yes" -> true
+          "no" -> false
+          else -> null
+        }
       val descriptor =
         InstrumentationRegistry.getInstrumentation()
           .uiAutomation
           .executeShellCommand("cmd uimode night $mode")
       ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readBytes() }
+      // The system recreates the activity after the command returns. waitForIdle during that
+      // hand-over can wait forever on a frame posted to the view being detached, so it waits for
+      // the replacement first.
+      if (before != null && target != nightActive(before)) {
+        val deadline = SystemClock.uptimeMillis() + 10_000
+        while (true) {
+          val current = resumed()
+          if (
+            current != null &&
+              current !== before &&
+              (target == null || nightActive(current) == target)
+          )
+            break
+          if (SystemClock.uptimeMillis() > deadline) {
+            // "auto" can resolve to the mode already shown, which recreates nothing.
+            if (target != null) fail("MainActivity was not recreated for night mode $mode")
+            break
+          }
+          SystemClock.sleep(50)
+        }
+      }
       compose.waitForIdle()
     }
     fun assertDark(expected: Boolean) {
