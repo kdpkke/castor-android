@@ -26,6 +26,9 @@ const scope = "@castor-dev";
 const repository = { type: "git", url: "git+https://github.com/stupside/castor.git" } as const;
 const out = mkdtempSync(join(tmpdir(), "castor-npm-"));
 
+// npm only ships README and LICENSE on its own, so the docs people look for on the package page are listed.
+const docs = Object.fromEntries(["LICENSE", "README.md", "CHANGELOG.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "SECURITY.md"].map((f) => [f, f]));
+
 const sh = (program: string, ...args: string[]) => spawnSync(program, args, { stdio: "inherit" }).status === 0;
 const must = (ok: boolean, what: string) => {
   if (!ok) throw new Error(`${what} failed`);
@@ -54,7 +57,7 @@ for (const dir of globSync("prebuilt/castor-*")) {
       // The Linux builds link glibc, so musl installs must skip them instead of getting a binary that cannot run.
       libc: os === "linux" ? ["glibc"] : undefined,
     },
-    { [join(dir, "castor")]: exe, LICENSE: "LICENSE" },
+    { [join(dir, "castor")]: exe, ...docs },
   );
   chmodSync(join(pkg, exe), 0o755);
   packages.push({ dir: pkg, name });
@@ -72,7 +75,7 @@ stage(
     bin: { castor: "bin/castor.js" }, engines: { node: ">=20" },
     optionalDependencies: Object.fromEntries(packages.map(({ name }) => [name, version])),
   },
-  { LICENSE: "LICENSE", "README.md": "README.md" },
+  docs,
 );
 
 // A prerelease must not become `latest`; platform packages first so the launcher never resolves to nothing.
