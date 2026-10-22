@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModelProvider
 import io.github.stupside.castor.theme.*
+import io.github.stupside.castor.ui.main.BrowserRequestDialog
 import io.github.stupside.castor.ui.main.CastOptions
 import io.github.stupside.castor.ui.main.MainScreen
 import io.github.stupside.castor.ui.main.MainScreenViewModel
@@ -126,7 +127,11 @@ class MainActivity : ComponentActivity() {
                 }
               }
             }
-          else
+          service?.let { current ->
+            val asking by current.browserRequest.collectAsState()
+            if (asking) BrowserRequestDialog(current::answerBrowser)
+          }
+          if (!permissionDenied)
             MainScreen(
               model,
               service?.browser,

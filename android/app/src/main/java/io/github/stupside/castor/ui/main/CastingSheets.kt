@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -21,6 +22,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import castor.v1.DeviceOuterClass.DeviceType
+import io.github.stupside.castor.ExtensionAccess
 import io.github.stupside.castor.R
 import io.github.stupside.castor.theme.*
 import java.util.Locale
@@ -112,6 +114,80 @@ internal fun AppThemePicker(selected: AppTheme, dismiss: () -> Unit, select: (Ap
           }
         }
       }
+    }
+  }
+}
+
+@Composable
+internal fun browsersAllowed(count: Int): String =
+  if (count == 0) stringResource(R.string.browsers_none)
+  else pluralStringResource(R.plurals.browsers_allowed, count, count)
+
+// The browsers allowed to cast through this phone's Castor, and the way to take that back.
+@Composable
+internal fun BrowserAccess(access: ExtensionAccess, dismiss: () -> Unit) {
+  var count by remember { mutableIntStateOf(access.count()) }
+  GlassSheet(dismiss) {
+    Column(
+      Modifier.fillMaxWidth()
+        .verticalScroll(rememberScrollState())
+        .padding(horizontal = 24.dp)
+        .padding(bottom = 28.dp),
+      verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+          stringResource(R.string.browser_extension),
+          style = MaterialTheme.typography.headlineMedium,
+          modifier = Modifier.weight(1f).semantics { heading() },
+        )
+        IconButton(onClick = dismiss, modifier = Modifier.glassMaterial(RoundedCornerShape(50))) {
+          CastIcon(R.drawable.ic_close, stringResource(R.string.close))
+        }
+      }
+      Text(
+        stringResource(R.string.browser_extension_help),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+      Text(browsersAllowed(count), style = MaterialTheme.typography.titleMedium)
+      GlassButton(
+        onClick = {
+          access.revokeAll()
+          count = access.count()
+        },
+        enabled = count > 0,
+        modifier = Modifier.fillMaxWidth().testTag("remove-browsers"),
+      ) {
+        Text(stringResource(R.string.remove_browsers))
+      }
+    }
+  }
+}
+
+// The question Castor's notification asks, for an owner who opened the app instead.
+@Composable
+internal fun BrowserRequestDialog(answer: (Boolean) -> Unit) {
+  GlassDialog({ answer(false) }) {
+    Text(
+      stringResource(R.string.browser_allow_title),
+      style = MaterialTheme.typography.headlineSmall,
+      modifier = Modifier.semantics { heading() },
+    )
+    Text(
+      stringResource(R.string.browser_allow_text),
+      style = MaterialTheme.typography.bodyMedium,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    GlassButton(
+      prominent = true,
+      onClick = { answer(true) },
+      modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("allow-browser"),
+    ) {
+      Text(stringResource(R.string.browser_allow))
+    }
+    GlassButton(onClick = { answer(false) }, modifier = Modifier.fillMaxWidth()) {
+      Text(stringResource(R.string.browser_refuse))
     }
   }
 }

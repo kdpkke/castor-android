@@ -11,10 +11,13 @@ import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
 import io.github.stupside.castor.data.Rpc
+import io.github.stupside.castor.ui.main.CastOptions
 import java.io.File
 import java.util.UUID
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
@@ -23,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
 class CastorService : Service() {
@@ -34,12 +38,16 @@ class CastorService : Service() {
   val endpoint = MutableStateFlow<Rpc?>(null)
   val failure = MutableStateFlow<String?>(null)
   val stopped = MutableStateFlow(false)
+  /** True while a browser waits for the owner's answer; the app asks too when it is open. */
+  val browserRequest = MutableStateFlow(false)
   lateinit var browser: BrowserResolver
     private set
 
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private var process: Process? = null
   private var bridge: BrowserServer? = null
+  private var gateway: ExtensionGateway? = null
+  private var pairing: CompletableDeferred<Boolean>? = null
   private var multicast: WifiManager.MulticastLock? = null
   private var wake: PowerManager.WakeLock? = null
   private var closed = false
@@ -50,6 +58,13 @@ class CastorService : Service() {
     val notifications = getSystemService(NotificationManager::class.java)
     notifications.createNotificationChannel(
       NotificationChannel("casting", "Casting", NotificationManager.IMPORTANCE_LOW)
+    )
+    notifications.createNotificationChannel(
+      NotificationChannel(
+        "browser-access",
+        CastOptions(this).localizedContext().getString(R.string.browser_channel),
+        NotificationManager.IMPORTANCE_HIGH,
+      )
     )
     val stop =
       PendingIntent.getService(
@@ -147,6 +162,7 @@ class CastorService : Service() {
           val url = JSONObject(line).getString("url")
           check(url.startsWith("http://127.0.0.1:")) { "Unexpected native engine endpoint" }
           endpoint.value = Rpc(url, apiToken)
+          openGateway(url, apiToken)
           while (true) {
             val event = output.readLine() ?: break
             val active = JSONObject(event).getBoolean("active")
@@ -167,11 +183,98 @@ class CastorService : Service() {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    if (intent?.action == "STOP") {
-      failure.value = "Castor stopped. Reopen the app to restart the engine."
-      shutdown()
+    when (intent?.action) {
+      "STOP" -> {
+        failure.value = "Castor stopped. Reopen the app to restart the engine."
+        shutdown()
+      }
+      ALLOW_BROWSER -> pairing?.complete(true)
+      REFUSE_BROWSER -> pairing?.complete(false)
     }
     return START_NOT_STICKY
+  }
+
+  fun answerBrowser(allow: Boolean) {
+    pairing?.complete(allow)
+  }
+
+  // The Castor browser extension on this phone reaches the engine through a fixed local port. A
+  // port another app already holds leaves the extension reporting that Castor is not running.
+  private suspend fun openGateway(url: String, apiToken: String) {
+    val access = ExtensionAccess(this)
+    val version = packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
+    val opened =
+      try {
+        ExtensionGateway(url, apiToken, version, access::allowed, access::grant, ::askBrowser) {
+          android.util.Log.w("ExtensionGateway", "A browser request ended without an answer", it)
+        }
+      } catch (error: java.io.IOException) {
+        android.util.Log.w("CastorService", "The browser extension port is unavailable", error)
+        return
+      }
+    withContext(NonCancellable + Dispatchers.Main) {
+      if (closed) opened.close() else gateway = opened
+    }
+  }
+
+  // Asks the owner, through a notification, whether a browser on this phone may cast.
+  private suspend fun askBrowser(): Boolean? {
+    val text = CastOptions(this).localizedContext()
+    val notifications = getSystemService(NotificationManager::class.java)
+    if (!notifications.areNotificationsEnabled())
+      throw ExtensionGateway.Unavailable(text.getString(R.string.browser_notifications_off))
+    val decision = CompletableDeferred<Boolean>()
+    fun action(name: String, label: Int, code: Int) =
+      Notification.Action.Builder(
+          null,
+          text.getString(label),
+          PendingIntent.getService(
+            this,
+            code,
+            Intent(this, CastorService::class.java).setAction(name),
+            PendingIntent.FLAG_IMMUTABLE,
+          ),
+        )
+        .build()
+    // Tapping the notification instead of a button opens the app, which asks the same question.
+    val open =
+      PendingIntent.getActivity(
+        this,
+        3,
+        Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        PendingIntent.FLAG_IMMUTABLE,
+      )
+    withContext(Dispatchers.Main) {
+      pairing = decision
+      browserRequest.value = true
+      notifications.notify(
+        BROWSER_NOTIFICATION,
+        Notification.Builder(this@CastorService, "browser-access")
+          .setSmallIcon(android.R.drawable.ic_media_play)
+          .setContentTitle(text.getString(R.string.browser_allow_title))
+          .setContentText(text.getString(R.string.browser_allow_text))
+          .setStyle(
+            Notification.BigTextStyle().bigText(text.getString(R.string.browser_allow_text))
+          )
+          .setCategory(Notification.CATEGORY_STATUS)
+          .setContentIntent(open)
+          .setTimeoutAfter(PAIRING_TIMEOUT)
+          .addAction(action(ALLOW_BROWSER, R.string.browser_allow, 1))
+          .addAction(action(REFUSE_BROWSER, R.string.browser_refuse, 2))
+          .build(),
+      )
+    }
+    try {
+      return withTimeoutOrNull(PAIRING_TIMEOUT) { decision.await() }
+    } finally {
+      withContext(NonCancellable + Dispatchers.Main) {
+        if (pairing === decision) {
+          pairing = null
+          browserRequest.value = false
+        }
+        notifications.cancel(BROWSER_NOTIFICATION)
+      }
+    }
   }
 
   override fun onBind(intent: Intent): IBinder = LocalBinder()
@@ -189,6 +292,8 @@ class CastorService : Service() {
     stopped.value = true
     endpoint.value = null
     bridge?.close()
+    gateway?.close()
+    pairing?.complete(false)
     process?.destroy()
     scope.cancel()
     browser.close()
@@ -201,5 +306,12 @@ class CastorService : Service() {
   override fun onDestroy() {
     shutdown()
     super.onDestroy()
+  }
+
+  private companion object {
+    const val ALLOW_BROWSER = "ALLOW_BROWSER"
+    const val REFUSE_BROWSER = "REFUSE_BROWSER"
+    const val BROWSER_NOTIFICATION = 2
+    const val PAIRING_TIMEOUT = 120_000L
   }
 }

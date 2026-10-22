@@ -120,4 +120,18 @@
     <string name="browser_protection_failed">uBlock Origin and AdGuard could not start filtering, so the page was not opened. %1$s</string>
     <string name="tv_checking">Checking that this TV is still on the network…</string>
     <string name="tv_not_found">Not found on this network. Choose another TV or search again.</string>
+  <string name="browser_channel">Browser access</string>
+  <string name="browser_allow_title">Allow Firefox to cast?</string>
+  <string name="browser_allow_text">The Castor extension in a browser on this phone wants to send videos to your TV with Castor.</string>
+  <string name="browser_allow">Allow</string>
+  <string name="browser_refuse">Don’t allow</string>
+  <string name="browser_notifications_off">Turn on Castor’s notifications, then try again: Castor asks there before a browser can cast.</string>
+  <string name="browser_extension">Browser extension</string>
+  <string name="browser_extension_help">With the Castor extension for Firefox, a beaver appears on the videos you watch. The first time, Castor asks in a notification whether Firefox may cast. Keep Castor open while you cast.</string>
+  <plurals name="browsers_allowed">
+    <item quantity="one">%d browser allowed</item>
+    <item quantity="other">%d browsers allowed</item>
+  </plurals>
+  <string name="browsers_none">No browser allowed yet</string>
+  <string name="remove_browsers">Remove all permissions</string>
 </resources>

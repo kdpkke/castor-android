@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import castor.v1.DeviceOuterClass.DeviceType
 import io.github.stupside.castor.BrowserResolver
+import io.github.stupside.castor.ExtensionAccess
 import io.github.stupside.castor.R
 import io.github.stupside.castor.theme.*
 import kotlinx.coroutines.launch
@@ -57,6 +58,7 @@ fun MainScreen(
   val context = LocalContext.current
   val compact = LocalConfiguration.current.screenHeightDp < 480
   val options = remember(context) { CastOptions(context) }
+  val browsers = remember(context) { ExtensionAccess(context) }
   val clipboard = LocalClipboard.current
   val scope = rememberCoroutineScope()
   val snackbar = remember { SnackbarHostState() }
@@ -451,6 +453,15 @@ fun MainScreen(
           menu = false
           sheet = "theme"
         }
+        ActionRow(
+          R.drawable.ic_cast,
+          stringResource(R.string.browser_extension),
+          browsersAllowed(browsers.count()),
+          R.string.browser_extension,
+        ) {
+          menu = false
+          sheet = "browsers"
+        }
         GlassButton(
           onClick = {
             menu = false
@@ -478,6 +489,7 @@ fun MainScreen(
     }
   if (sheet == "language") AppLanguagePicker(language, { sheet = null }, selectLanguage)
   if (sheet == "theme") AppThemePicker(theme, { sheet = null }, selectTheme)
+  if (sheet == "browsers") BrowserAccess(browsers, { sheet = null })
   if (sheet == "tv")
     TvPicker(state, tv, { sheet = null }, { viewModel.discover() }) { selected ->
       saveTv(selected)

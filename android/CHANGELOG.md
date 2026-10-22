@@ -3,6 +3,36 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
+## 1.2.0 — 2026-10-22
+
+### Cast from Firefox
+- Works with the new **Castor extension for Firefox** on this phone: a beaver
+  appears on the videos you watch in Firefox; tap it, choose your TV and the
+  quality, and Castor sends the video.
+- The first time, Castor asks in a notification whether Firefox may cast. Tap
+  **Allow**. If you open Castor instead, it asks the same question there.
+- **Browser extension** in the menu shows how many browsers you allowed and
+  removes their permission with one tap.
+- Keep Castor open while you cast from Firefox. If it is closed, the extension
+  offers to open it.
+
+---
+
+## 1.2.0 — 22/10/2026 (italiano)
+
+### Trasmettere da Firefox
+- Funziona con la nuova **estensione Castor per Firefox** su questo telefono:
+  sui video che guardi in Firefox compare un castoro; toccalo, scegli la TV e
+  la qualità, e Castor invia il video.
+- La prima volta Castor chiede con una notifica se Firefox può trasmettere.
+  Tocca **Consenti**. Se invece apri Castor, la stessa domanda compare lì.
+- **Estensione del browser** nel menu mostra quanti browser hai autorizzato e
+  revoca il loro permesso con un tocco.
+- Lascia Castor aperto mentre trasmetti da Firefox. Se è chiuso, l'estensione
+  propone di aprirlo.
+
+---
+
 ## 1.1.0 — 2026-10-22
 
 **Before updating:** this version is signed with a new key. Uninstall Castor

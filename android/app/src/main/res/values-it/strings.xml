@@ -120,4 +120,19 @@
     <string name="browser_protection_failed">uBlock Origin e AdGuard non sono riusciti ad avviare i filtri, quindi la pagina non è stata aperta. %1$s</string>
     <string name="tv_checking">Verifica che la TV sia ancora in rete…</string>
     <string name="tv_not_found">Non trovata su questa rete. Scegli un’altra TV o ripeti la ricerca.</string>
+  <string name="browser_channel">Accesso dai browser</string>
+  <string name="browser_allow_title">Consentire a Firefox di trasmettere?</string>
+  <string name="browser_allow_text">L’estensione Castor di un browser su questo telefono vuole inviare video alla tua TV con Castor.</string>
+  <string name="browser_allow">Consenti</string>
+  <string name="browser_refuse">Non consentire</string>
+  <string name="browser_notifications_off">Attiva le notifiche di Castor e riprova: Castor chiede lì prima che un browser possa trasmettere.</string>
+  <string name="browser_extension">Estensione del browser</string>
+  <string name="browser_extension_help">Con l’estensione Castor per Firefox, sui video che guardi compare un castoro. La prima volta Castor chiede con una notifica se Firefox può trasmettere. Lascia Castor aperto mentre trasmetti.</string>
+  <plurals name="browsers_allowed">
+    <item quantity="one">%d browser autorizzato</item>
+    <item quantity="many">%d browser autorizzati</item>
+    <item quantity="other">%d browser autorizzati</item>
+  </plurals>
+  <string name="browsers_none">Nessun browser autorizzato</string>
+  <string name="remove_browsers">Revoca tutti i permessi</string>
 </resources>

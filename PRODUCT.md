@@ -35,6 +35,9 @@ service. No computer, NAS, root, or remote server is required during use.
 - Native quality retains the selected stream’s resolution; device compatibility may still require re-encoding. It is the default for new installations; existing height limits and saved settings remain available.
 - Disabled, app-language, or language-specific subtitles; source captions precede transcription fallback.
 - Active-cast status, stop, engine restart, and complete copyable errors.
+- Casting from the Castor extension for Firefox on the same phone, after the
+  owner allows that browser from a notification; permissions can be removed
+  from the menu.
 - English by default, with an immediate, saved choice of English or Italian.
   Interface language changes preserve the draft and running casting service.
 - Dark appearance by default, with saved System, Light and Dark choices.

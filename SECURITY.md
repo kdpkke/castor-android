@@ -38,4 +38,6 @@ docker buildx imagetools inspect ghcr.io/stupside/castor:latest --format '{{ jso
 
 ## Reporting a vulnerability
 
+**Browser extension gateway (Android):** the app listens on `127.0.0.1:8411` for the Castor extension in a browser on the same phone. Requests must name that exact host and must not come from a web page's Origin. Casting needs a token granted by the phone's owner through a notification; only its SHA-256 is stored, and **Browser extension** in the menu removes every granted token. The gateway forwards only device listing and cast control, never page resolution, and never reveals the engine's own token. Any app on the phone can ask for pairing, so allow only requests you started from Firefox.
+
 For the upstream core, use [stupside/castor](https://github.com/stupside/castor/issues) or the upstream maintainer’s private contact. For Android-specific vulnerabilities, use this project’s private contact described above.
