@@ -16,6 +16,16 @@ English one.
 - Keep Castor open while you cast from Firefox. If it is closed, the extension
   offers to open it.
 
+### Casting
+- When a TV accepts a video in more than one way, Castor keeps the picture as
+  it is and converts only the sound if needed: less work for the phone and the
+  original picture quality.
+- FLV videos are recognized straight away.
+
+### Under the hood
+- Updated to the Castor 2.1 casting engine, including the fixes for HLS streams
+  and for Stop that 1.1.0 carried on its own.
+
 ---
 
 ## 1.2.0 — 22/10/2026 (italiano)
@@ -30,6 +40,16 @@ English one.
   revoca il loro permesso con un tocco.
 - Lascia Castor aperto mentre trasmetti da Firefox. Se è chiuso, l'estensione
   propone di aprirlo.
+
+### Trasmissione
+- Quando una TV accetta un video in più modi, Castor lascia l'immagine com'è e
+  converte solo l'audio se serve: meno lavoro per il telefono e la qualità
+  d'immagine originale.
+- I video FLV vengono riconosciuti subito.
+
+### Dietro le quinte
+- Aggiornato al motore di trasmissione Castor 2.1, con le correzioni per le
+  dirette HLS e per Stop che la 1.1.0 aveva incluso per conto suo.
 
 ---
 

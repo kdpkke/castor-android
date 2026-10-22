@@ -1,6 +1,6 @@
 {
   "repository": "stupside/castor",
-  "tag": "v2.0.0",
-  "commit": "dc591b4cb5afc63bf4389d85bf2a79e5645b36eb",
-  "integrationBase": "dc591b4cb5afc63bf4389d85bf2a79e5645b36eb"
+  "tag": "v2.1.0",
+  "commit": "13cecdacf2594e54a8db8b82a230ceb93a0a2076",
+  "integrationBase": "56ac86927476f22ae8321fa285e8bc3dcf9f4313"
 }
