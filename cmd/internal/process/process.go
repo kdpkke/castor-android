@@ -82,7 +82,7 @@ func run(ctx context.Context, root *cli.Command, args []string, observed func(*c
 				if err != nil {
 					return err
 				}
-				stop, err := telemetry.Setup(ctx, cfg.Telemetry, cmp.Or(os.Getenv("OTEL_SERVICE_NAME"), root.Name))
+				stop, err := telemetry.Setup(ctx, cfg.Telemetry, cmp.Or(os.Getenv("OTEL_SERVICE_NAME"), root.Name), version)
 				if err != nil {
 					return err
 				}
@@ -148,5 +148,5 @@ func logger(level log.Level) *slog.Logger {
 		TimeFormat:      "15:04:05.000",
 		Level:           level,
 	})
-	return slog.New(castid.Tagged(logging.Redact(slog.NewMultiHandler(screen, telemetry.Handler()))))
+	return slog.New(logging.Redact(slog.NewMultiHandler(castid.Tagged(screen, castid.LogKey), telemetry.Handler())))
 }

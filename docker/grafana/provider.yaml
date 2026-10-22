@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: castor
+    type: file
+    allowUiUpdates: true
+    options:
+      path: /otel-lgtm/grafana/conf/provisioning/dashboards

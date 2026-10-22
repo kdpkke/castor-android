@@ -20,7 +20,7 @@ import (
 
 func TestARecordLoggedUnderACastCarriesItsID(t *testing.T) {
 	var out bytes.Buffer
-	log := slog.New(Tagged(slog.NewTextHandler(&out, nil)))
+	log := slog.New(Tagged(slog.NewTextHandler(&out, nil), LogKey))
 
 	log.InfoContext(With(t.Context(), "c1"), "in cast")
 	log.InfoContext(t.Context(), "outside")

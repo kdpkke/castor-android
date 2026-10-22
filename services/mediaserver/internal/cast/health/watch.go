@@ -183,6 +183,7 @@ const (
 )
 
 func (o *Observer) playbackMachine() *fsm.FSM {
+	track := telemetry.Track("health", playbackRunning)
 	return fsm.NewFSM(playbackRunning, fsm.Events{
 		{Name: pauseAccepted.String(), Src: []string{playbackRunning}, Dst: playbackPaused},
 		{Name: pauseRejected.String(), Src: []string{playbackRunning}, Dst: pauseUnavailable},
@@ -199,7 +200,7 @@ func (o *Observer) playbackMachine() *fsm.FSM {
 			o.pausedAt = time.Time{}
 			slog.InfoContext(ctx, "device released", "gate", o.m.Subject, "rule", o.rule.name, "held", held.Round(time.Millisecond))
 		},
-		"after_event": func(ctx context.Context, e *fsm.Event) { telemetry.Transition(ctx, "health", e.Event, e.Src, e.Dst) },
+		"after_event": func(ctx context.Context, e *fsm.Event) { track(ctx, e.Event, e.Src, e.Dst) },
 	})
 }
 

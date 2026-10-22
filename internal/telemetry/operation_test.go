@@ -49,8 +49,8 @@ func TestOperationsRecordBoundedOutcomesWithoutCredentialsOrCastLabels(t *testin
 				if point.Attributes.Len() != 2 {
 					t.Fatal("unbounded or private labels", point.Attributes)
 				}
-				operation, _ := point.Attributes.Value("operation")
-				outcome, _ := point.Attributes.Value("outcome")
+				operation, _ := point.Attributes.Value("castor.operation")
+				outcome, _ := point.Attributes.Value("castor.outcome")
 				if operation.AsString() != "extract" {
 					t.Fatal(operation)
 				}

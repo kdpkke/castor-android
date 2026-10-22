@@ -17,7 +17,7 @@ func TestSetupLeavesLoggerOwnershipWithTheCaller(t *testing.T) {
 	before := slog.Default()
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	shutdown, err := Setup(ctx, Config{Endpoint: server.URL}, "test")
+	shutdown, err := Setup(ctx, Config{Endpoint: server.URL}, "test", "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestSetupLeavesLoggerOwnershipWithTheCaller(t *testing.T) {
 	}
 	// With the stock default this used to recurse through log.Logger's mutex.
 	slog.InfoContext(ctx, "logger remains usable")
-	if _, err := Setup(ctx, Config{Endpoint: server.URL}, "duplicate"); err == nil {
+	if _, err := Setup(ctx, Config{Endpoint: server.URL}, "duplicate", "test"); err == nil {
 		t.Fatal("a second process exporter was silently installed")
 	}
 	if err := shutdown(ctx); err != nil {

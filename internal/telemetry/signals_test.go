@@ -51,7 +51,7 @@ func TestShutdownExportsOperationSignals(t *testing.T) {
 			}))
 			defer server.Close()
 			beforeTrace, beforeMeter := otel.GetTracerProvider(), otel.GetMeterProvider()
-			stop, err := Setup(t.Context(), Config{Endpoint: server.URL + prefix}, "castor-signals")
+			stop, err := Setup(t.Context(), Config{Endpoint: server.URL + prefix}, "castor-signals", "test")
 			if err != nil {
 				t.Fatal(err)
 			}

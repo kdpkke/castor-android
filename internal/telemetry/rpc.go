@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 
 	"connectrpc.com/connect"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -20,13 +22,13 @@ type rpc struct{}
 func (rpc) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 		headers := propagation.HeaderCarrier(req.Header())
-		operation, kind := "rpc.server", trace.SpanKindServer
+		operation, kind := RPCServer, trace.SpanKindServer
 		if req.Spec().IsClient {
-			operation, kind = "rpc.client", trace.SpanKindClient
+			operation, kind = RPCClient, trace.SpanKindClient
 		} else {
 			ctx = propagation.TraceContext{}.Extract(ctx, headers)
 		}
-		ctx, finish := start(ctx, operation, kind, attribute.String("rpc.method", req.Spec().Procedure))
+		ctx, finish := start(ctx, operation, kind, procedure(req.Spec().Procedure)...)
 		if req.Spec().IsClient {
 			propagation.TraceContext{}.Inject(ctx, headers)
 		}
@@ -39,7 +41,7 @@ func (rpc) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 func (rpc) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
 		ctx = propagation.TraceContext{}.Extract(ctx, propagation.HeaderCarrier(conn.RequestHeader()))
-		ctx, finish := start(ctx, "rpc.server", trace.SpanKindServer, attribute.String("rpc.method", conn.Spec().Procedure))
+		ctx, finish := start(ctx, RPCServer, trace.SpanKindServer, procedure(conn.Spec().Procedure)...)
 		err := next(ctx, conn)
 		finish(err)
 		return err
@@ -48,7 +50,7 @@ func (rpc) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.Strea
 
 func (rpc) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
 	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
-		ctx, finish := start(ctx, "rpc.client", trace.SpanKindClient, attribute.String("rpc.method", spec.Procedure))
+		ctx, finish := start(ctx, RPCClient, trace.SpanKindClient, procedure(spec.Procedure)...)
 		conn := next(ctx, spec)
 		propagation.TraceContext{}.Inject(ctx, propagation.HeaderCarrier(conn.RequestHeader()))
 		return &observedStream{StreamingClientConn: conn, ctx: ctx, finish: finish}
@@ -90,4 +92,9 @@ func (s *observedStream) CloseResponse() error {
 	err := s.StreamingClientConn.CloseResponse()
 	s.finish(errors.Join(err, context.Cause(s.ctx)))
 	return err
+}
+
+// procedure names a Connect procedure the way OpenTelemetry names an RPC method: service/method, without the leading slash.
+func procedure(p string) []attribute.KeyValue {
+	return []attribute.KeyValue{semconv.RPCSystemNameConnectrpc, semconv.RPCMethod(strings.TrimPrefix(p, "/"))}
 }

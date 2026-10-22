@@ -4,6 +4,7 @@ package codec
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/container"
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
@@ -37,6 +38,9 @@ type Plan struct {
 	Refusals []Reason
 }
 
+// DeviceRefusedVideo reports that the device's own envelope, not the container or the request, ruled out copying the video.
+func (p Plan) DeviceRefusedVideo() bool { return slices.Contains(p.Refusals, reasonDeviceVideo) }
+
 // Encoded returns which halves of the program this plan produces rather than passes through.
 func (p Plan) Encoded() media.Axes {
 	_, video := p.Video.Encode()
@@ -53,7 +57,7 @@ func (p Plan) Copied() media.Axes {
 func Served(ctx context.Context, in Inputs) (Plan, error) {
 	if len(in.Caps.Formats) > 0 {
 		var best Plan
-		score := 3
+		score := 4
 		var last error
 		for _, f := range in.Caps.Formats {
 			if f.Transport.ContentType() != in.Into.ContentType {
@@ -66,10 +70,11 @@ func Served(ctx context.Context, in Inputs) (Plan, error) {
 				last = err
 				continue
 			}
+			// A video encode outweighs an audio one, so a tie never re-encodes the picture to spare the sound.
 			cost := 0
 			axes := plan.Encoded()
 			if axes.Video {
-				cost++
+				cost += 2
 			}
 			if axes.Audio {
 				cost++
@@ -78,7 +83,7 @@ func Served(ctx context.Context, in Inputs) (Plan, error) {
 				best, score = plan, cost
 			}
 		}
-		if score < 3 {
+		if score < 4 {
 			return best, nil
 		}
 		return Plan{}, fmt.Errorf("no usable receiver combination for %s: %v", in.Into.ContentType, last)

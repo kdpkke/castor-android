@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 
+	"github.com/stupside/castor/internal/telemetry"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/codec"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/container"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/fetch"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output/storage"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/teardown"
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
@@ -101,16 +104,49 @@ func (s *preparation) decide(caps media.Capabilities, into container.Format, fac
 		"audio_codec", decided.Audio.Name(),
 		"source_video_codec", string(facts.probe.VideoCodec),
 		"source_audio_codec", string(facts.probe.AudioCodec),
+		"source_video", fmt.Sprintf("%s/%d/%d-bit", facts.probe.VideoProfile, facts.probe.VideoLevel, facts.probe.VideoBitDepth),
 	)
 	logRefusals(s.ctx, decided)
+	observePlan(s.ctx, decided)
+	if decided.DeviceRefusedVideo() {
+		slog.InfoContext(s.ctx, "device video envelope", "accepts", deviceVideo(caps))
+	}
 	return decided, nil
 }
 
 // logRefusals states once why each axis a plan encodes is not copied.
 func logRefusals(ctx context.Context, decided codec.Plan) {
-	for _, r := range decided.Refusals {
-		slog.InfoContext(ctx, "not copied", "reason", string(r))
+	if len(decided.Refusals) > 0 {
+		slog.InfoContext(ctx, "not copied", "reasons", decided.Refusals)
 	}
+}
+
+// observePlan counts how each axis is carried and why a copy was refused.
+func observePlan(ctx context.Context, decided codec.Plan) {
+	encoded, copied := decided.Encoded(), decided.Copied()
+	carry := func(axis telemetry.Axis, encode, copy bool) {
+		switch {
+		case encode:
+			telemetry.MediaPlanned(ctx, axis, telemetry.Encode)
+		case copy:
+			telemetry.MediaPlanned(ctx, axis, telemetry.Copy)
+		}
+	}
+	carry(telemetry.Video, encoded.Video, copied.Video)
+	carry(telemetry.Audio, encoded.Audio, copied.Audio)
+	for _, r := range decided.Refusals {
+		telemetry.MediaRefused(ctx, string(r))
+	}
+}
+
+// deviceVideo lists each video envelope the device accepts as codec/profiles/max level.
+func deviceVideo(caps media.Capabilities) []string {
+	var out []string
+	for _, f := range caps.Formats {
+		v := f.Video
+		out = append(out, fmt.Sprintf("%s/%v/%d", v.Codec, v.Profiles, v.MaxLevel))
+	}
+	return slices.Compact(out)
 }
 
 // startEncoder runs opts in dir, reading tail where it reads a pipe (nil where it reads the source).
@@ -134,9 +170,7 @@ func encoderResult(ctx context.Context, proc *ffmpeg.Process) error {
 	if ctx.Err() == nil && errors.Is(err, storage.ErrSpoolExpired) {
 		return fmt.Errorf("encoder input expired: %w", err)
 	}
-	if ctx.Err() != nil {
-		err = unlessTeardown(err)
-	}
+	err = teardown.Failures(ctx, err)
 	if err == nil || proc.Evidence().ExitStatus < 0 {
 		return nil
 	}

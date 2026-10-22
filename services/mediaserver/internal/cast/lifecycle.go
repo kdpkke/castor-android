@@ -52,6 +52,7 @@ const (
 // lifecycle validates cast progress. The owner publishes the terminal snapshot
 // after attempt cleanup, then signals completion to the device lender.
 func (c *cast) lifecycle() *fsm.FSM {
+	track := telemetry.Track("cast", stateAwaiting, stateEnded)
 	return fsm.NewFSM(stateAwaiting, fsm.Events{
 		{Name: eventLendStream.String(), Src: []string{stateAwaiting}, Dst: stateMeasuring},
 		{Name: eventMeasure.String(), Src: []string{stateMeasuring}, Dst: stateMeasuring},
@@ -62,7 +63,7 @@ func (c *cast) lifecycle() *fsm.FSM {
 		// Only a cast still awaiting is abandoned, so a grace that runs out as a device is lent changes nothing.
 		{Name: eventAbandon.String(), Src: []string{stateAwaiting}, Dst: stateEnded},
 	}, fsm.Callbacks{
-		"after_event": func(ctx context.Context, e *fsm.Event) { telemetry.Transition(ctx, "cast", e.Event, e.Src, e.Dst) },
+		"after_event": func(ctx context.Context, e *fsm.Event) { track(ctx, e.Event, e.Src, e.Dst) },
 	})
 }
 

@@ -95,6 +95,7 @@ func validate(in Intent) error {
 }
 
 func revising(ctx context.Context, f *fault, rev revision) {
+	telemetry.RecoveryRevised(ctx, string(rev.strategy.action))
 	slog.WarnContext(ctx, "revising the cast",
 		"verdict", f.kind.String(),
 		"error", f.err,

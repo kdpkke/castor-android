@@ -1,0 +1,56 @@
+package telemetry_test
+
+import (
+	"testing"
+
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
+	"github.com/stupside/castor/internal/telemetry"
+)
+
+func TestAMachineIsOneSpanPerStateExportedAsItIsLeft(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	old := otel.GetTracerProvider()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter)))
+	t.Cleanup(func() { otel.SetTracerProvider(old) })
+
+	track := telemetry.Track("attempt", "preparing", "finished")
+	track(t.Context(), "inspect", "preparing", "inspecting")
+	if got := len(exporter.GetSpans()); got != 1 {
+		t.Fatalf("after leaving the first state spans = %d, want 1 (the open one must not export yet)", got)
+	}
+	track(t.Context(), "poll", "inspecting", "inspecting")
+	track(t.Context(), "done", "inspecting", "finished")
+
+	var names []string
+	for _, s := range exporter.GetSpans() {
+		names = append(names, s.Name)
+	}
+	want := []string{"attempt.preparing", "attempt.inspecting", "attempt.finished"}
+	if len(names) != len(want) {
+		t.Fatalf("spans = %v, want %v", names, want)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("spans = %v, want %v", names, want)
+		}
+	}
+}
+
+func TestASelfTransitionStaysInItsStateAsAnEvent(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	old := otel.GetTracerProvider()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter)))
+	t.Cleanup(func() { otel.SetTracerProvider(old) })
+
+	track := telemetry.Track("cast", "measuring", "ended")
+	track(t.Context(), "rank", "measuring", "measuring")
+	track(t.Context(), "end", "measuring", "ended")
+
+	spans := exporter.GetSpans()
+	if len(spans) != 2 || spans[0].Name != "cast.measuring" || len(spans[0].Events) != 1 {
+		t.Fatalf("spans = %v, want one cast.measuring carrying the rank event, then cast.ended", spans)
+	}
+}

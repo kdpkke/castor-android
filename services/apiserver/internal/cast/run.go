@@ -67,7 +67,9 @@ func failedResult(code castorv1.FailureCode, err error) *castorv1.Ended {
 // run connects target, runs c on the media server and lends it the device until the media server's cast has ended.
 func (s *Service) run(ctx context.Context, c *cast, target device.Info, asked *mediav1.PlaybackSettings) (ended *castorv1.Ended, err error) {
 	// Connected first, so an unreachable device costs no media cast and a slow one never outlasts the media server's wait for it.
-	lent, err := s.devices.Connect(ctx, target)
+	connectCtx, finishConnect := telemetry.Start(ctx, telemetry.Connect)
+	lent, err := s.devices.Connect(connectCtx, target)
+	finishConnect(err)
 	if err != nil {
 		code := castorv1.FailureCode_FAILURE_CODE_DEVICE_UNREACHABLE
 		if _, busy := errors.AsType[*device.Busy](err); busy {

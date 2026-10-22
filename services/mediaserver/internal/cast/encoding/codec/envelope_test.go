@@ -57,3 +57,20 @@ func TestUnsetUserHeightCannotBypassEncoderEnvelope(t *testing.T) {
 		t.Fatalf("height=%d", got)
 	}
 }
+
+func TestTieKeepsVideoCopiedOverAudio(t *testing.T) {
+	main := media.VideoSupport{Codec: media.CodecH264, Profiles: []media.Profile{media.ProfileMain}, MaxLevel: 42}
+	any := media.VideoSupport{Codec: media.CodecH264, MaxLevel: 42}
+	caps := media.Capabilities{Formats: []media.FormatSupport{
+		{Transport: media.TransportMPEGTS, Video: main, Audio: media.AudioSupport{Codec: media.CodecAAC}},
+		{Transport: media.TransportMPEGTS, Video: any, Audio: media.AudioSupport{Codec: media.CodecAC3}},
+	}}
+	in := Inputs{Caps: caps, Probe: media.ProbeInfo{VideoCodec: media.CodecH264, VideoProfile: media.ProfileHigh, VideoLevel: 40, VideoBitDepth: 8, VideoHeight: 1080, AudioCodec: media.CodecAAC, AudioChannels: 2}, Measured: true, MaxHeight: 1080, Into: testFormat(t, media.MPEGTS), Encoders: hostEncoders}
+	plan, err := Served(t.Context(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encoded := plan.Encoded(); encoded.Video || !encoded.Audio {
+		t.Fatalf("picture re-encoded to spare the sound: %+v", plan)
+	}
+}

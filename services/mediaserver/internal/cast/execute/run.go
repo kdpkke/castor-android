@@ -109,6 +109,7 @@ func (c *coordinator) attemptMachine() *fsm.FSM {
 		{Name: attemptFailed.String(), Src: active, Dst: stopping},
 		{Name: cleanupFinished.String(), Src: []string{stopping}, Dst: attemptFinished},
 	}
+	track := telemetry.Track("attempt", preparing, attemptFinished)
 	return fsm.NewFSM(preparing, events, fsm.Callbacks{
 		"after_" + attemptCancelled.String(): func(context.Context, *fsm.Event) { c.interruption = context.Cause(c.ctx) },
 		"after_" + playbackEnded.String(): func(context.Context, *fsm.Event) {
@@ -120,7 +121,7 @@ func (c *coordinator) attemptMachine() *fsm.FSM {
 			}
 		},
 		"after_" + playbackStarted.String(): func(context.Context, *fsm.Event) { c.presentation.reached.reached = health.Playing },
-		"after_event":                       func(ctx context.Context, e *fsm.Event) { telemetry.Transition(ctx, "attempt", e.Event, e.Src, e.Dst) },
+		"after_event":                       func(ctx context.Context, e *fsm.Event) { track(ctx, e.Event, e.Src, e.Dst) },
 	})
 }
 
@@ -172,7 +173,7 @@ type coordinator struct {
 
 func newCoordinator(parent context.Context, c Cast, a recovery.Attempt) *coordinator {
 	ctx, cancel := context.WithCancelCause(parent)
-	rel := &releases{}
+	rel := &releases{ctx: ctx}
 	// Signal every owner before joining or releasing any resource.
 	rel.interrupt(func() { cancel(nil) })
 	s := &coordinator{
@@ -369,7 +370,9 @@ func (c *coordinator) observePlayback() {
 }
 
 // hand points the device at target; source says whether that is the source itself rather than what castor serves.
-func hand(ctx context.Context, dev Device, target *url.URL, contentType string, shown []media.Caption, source bool) error {
+func hand(ctx context.Context, dev Device, target *url.URL, contentType string, shown []media.Caption, source bool) (err error) {
+	ctx, finish := telemetry.Start(ctx, telemetry.Play)
+	defer func() { finish(err) }()
 	slog.InfoContext(ctx, "starting playback", "host", target.Host, "content_type", contentType, "handoff", source)
 	if err := dev.Play(ctx, target, contentType, shown); err != nil {
 		return &playRefused{err: err, source: source}

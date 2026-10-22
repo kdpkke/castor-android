@@ -48,7 +48,7 @@ func TestShutdownExportsRedactedLogsToCollector(t *testing.T) {
 				w.Header().Set("Content-Type", "application/x-protobuf")
 			}))
 			defer server.Close()
-			stop, err := Setup(t.Context(), Config{Endpoint: server.URL + prefix}, "castor-test")
+			stop, err := Setup(t.Context(), Config{Endpoint: server.URL + prefix}, "castor-test", "test")
 			if err != nil {
 				t.Fatal(err)
 			}

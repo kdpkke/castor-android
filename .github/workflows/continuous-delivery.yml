@@ -38,5 +38,6 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write
     with:
       version: ${{ needs.please.outputs.version }}

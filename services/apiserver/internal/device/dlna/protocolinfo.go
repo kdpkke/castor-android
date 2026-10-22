@@ -57,9 +57,18 @@ func negotiateCaps(ctx context.Context, loc *goupnp.RootDevice, u *url.URL) (*me
 		caps, sinks := fallbackCaps()
 		return caps, sinks, nil
 	}
-	slog.InfoContext(ctx, "negotiated device capabilities", "formats", len(caps.Formats))
+	slog.InfoContext(ctx, "negotiated device capabilities", "formats", len(caps.Formats), "containers", containers(caps))
 
 	return caps, sinks, nil
+}
+
+// containers names each container the device accepts progressively, in preference order.
+func containers(caps *mediav1.Capabilities) []string {
+	var out []string
+	for _, f := range caps.Formats {
+		out = append(out, f.GetProgressive().GetContainer().String())
+	}
+	return slices.Compact(out)
 }
 
 // fallbackCaps provides one valid stream for renderers whose sink cannot be

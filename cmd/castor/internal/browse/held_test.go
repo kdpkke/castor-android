@@ -70,7 +70,7 @@ func TestALoggerKeptByBackgroundWorkResumesWritingAfterTheScreen(t *testing.T) {
 func TestAHeldLineIsWrittenUnderTheCastItWasLoggedFor(t *testing.T) {
 	var got []string
 	prev := slog.Default()
-	slog.SetDefault(slog.New(castid.Tagged(written{lines: &got, attrs: true})))
+	slog.SetDefault(slog.New(castid.Tagged(written{lines: &got, attrs: true}, castid.LogKey)))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	_ = held(func() error {

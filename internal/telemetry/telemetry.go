@@ -19,7 +19,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.34.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
 
 	"github.com/stupside/castor/internal/castid"
 )
@@ -82,7 +82,7 @@ func (h forwarding) WithGroup(name string) slog.Handler {
 
 // Setup owns one process exporter until its returned shutdown function runs.
 // Embedded consumers install Handler in their logger explicitly.
-func Setup(ctx context.Context, c Config, service string) (func(context.Context) error, error) {
+func Setup(ctx context.Context, c Config, service, version string) (func(context.Context) error, error) {
 	if c.Endpoint == "" {
 		return func(context.Context) error { return nil }, nil
 	}
@@ -101,7 +101,7 @@ func Setup(ctx context.Context, c Config, service string) (func(context.Context)
 	if err != nil {
 		return nil, err
 	}
-	res := resource.NewSchemaless(semconv.ServiceName(service))
+	res := resource.NewSchemaless(semconv.ServiceName(service), semconv.ServiceVersion(version))
 	provider := sdklog.NewLoggerProvider(
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(exp)), sdklog.WithResource(res),
 	)
@@ -123,7 +123,7 @@ func Setup(ctx context.Context, c Config, service string) (func(context.Context)
 	previousTraces, previousMetrics := otel.GetTracerProvider(), otel.GetMeterProvider()
 	otel.SetTracerProvider(traces)
 	otel.SetMeterProvider(metrics)
-	d := &destination{handler: castid.Tagged(otelslog.NewHandler(service, otelslog.WithLoggerProvider(provider)))}
+	d := &destination{handler: castid.Tagged(otelslog.NewHandler(service, otelslog.WithLoggerProvider(provider)), keyCastID)}
 	active.Store(d)
 	var once sync.Once
 	var shutdownErr error

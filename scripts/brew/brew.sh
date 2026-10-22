@@ -12,7 +12,7 @@ tap=$(mktemp -d)
 git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/stupside/homebrew-tap.git" "$tap"
 # Keep $VARS literal for envsubst; Ruby's #{...} in the template must survive.
 # shellcheck disable=SC2016
-envsubst '$VERSION $SHA_ARM $SHA_INTEL' < .github/homebrew-castor.rb.tmpl > "$tap/Casks/castor.rb"
+envsubst '$VERSION $SHA_ARM $SHA_INTEL' < scripts/brew/castor.rb.tmpl > "$tap/Casks/castor.rb"
 git -C "$tap" add Casks/castor.rb
 # A re-run of the same version has nothing new to commit or push.
 git -C "$tap" diff --cached --quiet && exit 0

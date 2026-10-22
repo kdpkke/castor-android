@@ -52,7 +52,7 @@ func (e *Extractor) extract(ctx context.Context, targetURL string) ([]*castorv1.
 
 	streams, err := session.collector.Wait(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("waiting for streams on %s: %w", targetURL, err)
+		return nil, fmt.Errorf("waiting for streams: %w", err)
 	}
 	for _, stream := range streams {
 		stream.SourcePage = targetURL

@@ -56,6 +56,7 @@ const (
 // As in the attempt coordinator, the owner consumes events and the library
 // validates transitions. Network operations and joins run outside FSM callbacks.
 func newSessionMachine() *fsm.FSM {
+	track := telemetry.Track("session", sessionStarting, sessionFinished)
 	return fsm.NewFSM(sessionStarting, fsm.Events{
 		{Name: remoteStarted.String(), Src: []string{sessionStarting}, Dst: sessionActive},
 		{Name: remoteEnded.String(), Src: []string{sessionActive}, Dst: sessionJoining},
@@ -63,7 +64,7 @@ func newSessionMachine() *fsm.FSM {
 		{Name: sessionFailed.String(), Src: []string{sessionStarting, sessionActive}, Dst: sessionStopping},
 		{Name: stopSettled.String(), Src: []string{sessionStopping}, Dst: sessionJoining},
 		{Name: sessionJoined.String(), Src: []string{sessionJoining}, Dst: sessionFinished},
-	}, fsm.Callbacks{"after_event": func(ctx context.Context, e *fsm.Event) { telemetry.Transition(ctx, "session", e.Event, e.Src, e.Dst) }})
+	}, fsm.Callbacks{"after_event": func(ctx context.Context, e *fsm.Event) { track(ctx, e.Event, e.Src, e.Dst) }})
 }
 
 type watchResult struct {

@@ -194,7 +194,7 @@ func (c *collector) add(raw string, reqID network.RequestID, contentType string)
 		return
 	}
 
-	slog.InfoContext(c.ctx, "captured stream", "url", raw, "content_type", contentType)
+	slog.DebugContext(c.ctx, "captured stream", "url", raw, "content_type", contentType)
 	c.captures = append(c.captures, capture{raw: raw, reqID: reqID, contentType: contentType, hop: hop})
 	close(c.added)
 	c.added = make(chan struct{})
