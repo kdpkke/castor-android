@@ -20,8 +20,8 @@ android {
         minSdk = 28
         ndk { abiFilters += targetAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "x86_64") }
         targetSdk = 37
-        versionCode = 17
-        versionName = "1.2.0"
+        versionCode = 18
+        versionName = "1.2.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Manual diagnostics need real hardware or an explicitly supplied external URL.
         // Exclude them from Gradle/CI rather than reporting skipped tests as a successful run.

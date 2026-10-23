@@ -3,6 +3,30 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
+## 1.2.1 — 2026-10-23
+
+### Casting
+- A live stream whose access expires right after the cast starts is now
+  renewed reliably. Before, Castor could fail to reopen the page and stop the
+  cast for good.
+
+### Under the hood
+- Up to date with Castor 2.3.0; the casting engine is the same as in 1.2.0.
+
+---
+
+## 1.2.1 — 23/10/2026 (italiano)
+
+### Trasmissione
+- Una diretta il cui accesso scade subito dopo l'avvio della trasmissione ora
+  viene rinnovata in modo affidabile. Prima Castor poteva non riuscire a
+  riaprire la pagina e interrompere la trasmissione per sempre.
+
+### Dietro le quinte
+- Allineato a Castor 2.3.0; il motore di trasmissione è lo stesso della 1.2.0.
+
+---
+
 ## 1.2.0 — 2026-10-22
 
 ### Cast from Firefox
