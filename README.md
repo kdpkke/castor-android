@@ -28,7 +28,6 @@ Native Android emulator previews with sample input.
 - Paste a link or share it from another app; choose Automatic, Web page or Direct stream.
 - Discover Chromecast/DLNA receivers, reuse a saved TV or enter an address manually.
 - Keep casting in the background through an Android foreground service.
-- Cast the videos you watch in Firefox on the phone with the [Castor extension for Firefox](https://github.com/kdpkke/castor-extension), after allowing it once from a notification.
 - Native quality, optional height limits and subtitle preferences.
 - English and Italian; System, Light and Dark appearance, with Dark as the default.
 - Settings remain open while choices update immediately; diagnostic details are selectable and copyable.
