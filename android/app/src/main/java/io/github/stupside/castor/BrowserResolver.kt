@@ -53,6 +53,9 @@ class BrowserResolver(private val context: Context) {
 
   @Volatile private var loadFailure: String? = null
   private var loadingUrl: String? = null
+  // Gecko runs clearPage's about:blank asynchronously. A load issued before that blank page
+  // starts is replaced by it, so the next navigation waits for this to complete.
+  private var blankPage: CompletableDeferred<Unit>? = null
   private var mainPort: WebExtension.Port? = null
   // The extension's id for this session's tab, learned from its content script; -1 until then.
   private var tabId = -1
@@ -126,8 +129,8 @@ class BrowserResolver(private val context: Context) {
         }
 
         override fun onPageStop(session: GeckoSession, success: Boolean) {
-          if (loadingUrl != "about:blank" && loadingUrl == page.value?.url)
-            page.value = page.value?.copy(loading = false)
+          if (loadingUrl == "about:blank") blankPage?.complete(Unit)
+          else if (loadingUrl == page.value?.url) page.value = page.value?.copy(loading = false)
         }
       }
     session.contentDelegate =
@@ -334,6 +337,7 @@ class BrowserResolver(private val context: Context) {
             extracting = true
             if (!reuse) {
               page.value = if (interactive) BrowserPage(address, protectionReady = true) else null
+              blankPage?.let { withTimeoutOrNull(5_000) { it.await() } }
               navigationStarted = System.currentTimeMillis()
               session.loadUri(address)
             }
@@ -387,6 +391,7 @@ class BrowserResolver(private val context: Context) {
     finishEvaluations()
     if (opened) {
       session.stop()
+      blankPage = CompletableDeferred()
       session.loadUri("about:blank")
     }
     candidates.clear()
