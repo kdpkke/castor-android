@@ -200,6 +200,14 @@ class CastorRuntimeTest {
         val issued = java.util.concurrent.atomic.AtomicLong()
         val blocked = java.util.concurrent.atomic.AtomicBoolean()
         val began = android.os.SystemClock.elapsedRealtime()
+        // Like a real renderer, the fixture stops once it read the whole stream and played it out;
+        // a live stream that ended leaves it only the few seconds near the live edge.
+        val playing = java.util.concurrent.atomic.AtomicLong()
+        val exhausted = java.util.concurrent.atomic.AtomicBoolean()
+        fun playedOut() =
+          exhausted.get() &&
+            (renewing ||
+              android.os.SystemClock.elapsedRealtime() - playing.get() >= duration * 1000L)
         server.dispatcher =
           object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
@@ -280,6 +288,7 @@ class CastorRuntimeTest {
                     ""
                   }
                   "Play" -> {
+                    playing.set(android.os.SystemClock.elapsedRealtime())
                     fetches.launch {
                       val response = URL(uri).openConnection() as HttpURLConnection
                       response.connectTimeout = 15_000
@@ -289,7 +298,10 @@ class CastorRuntimeTest {
                           val buffer = ByteArray(4096)
                           while (true) {
                             val count = input.read(buffer)
-                            if (count < 0) break
+                            if (count < 0) {
+                              exhausted.set(true)
+                              break
+                            }
                             receivedBytes.addAndGet(count.toLong())
                             if (nativeQuality)
                               synchronized(nativeMedia) {
@@ -313,7 +325,7 @@ class CastorRuntimeTest {
                     ""
                   }
                   "GetTransportInfo" ->
-                    "<CurrentTransportState>PLAYING</CurrentTransportState><CurrentTransportStatus>OK</CurrentTransportStatus><CurrentSpeed>1</CurrentSpeed>"
+                    "<CurrentTransportState>${if (playedOut()) "STOPPED" else "PLAYING"}</CurrentTransportState><CurrentTransportStatus>OK</CurrentTransportStatus><CurrentSpeed>1</CurrentSpeed>"
                   "GetMediaInfo" -> {
                     confirmed.countDown()
                     "<CurrentURI>${uri.replace("&", "&amp;")}</CurrentURI>"
