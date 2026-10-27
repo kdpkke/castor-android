@@ -3,6 +3,55 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
+## 1.3.0 — 2026-10-27
+
+### Casting
+- While a video plays, Castor follows the speed of the TV's Wi-Fi: it sends a
+  lighter picture when the connection slows down and a better one again after
+  a good stretch.
+- If a cast had to fall back to a less suitable link, Castor tries the better
+  one again after a while of smooth playback and resumes where it was.
+- On DLNA TVs, seeking with the TV's remote now works when Castor sends the
+  video as a single stream with a known length and no generated subtitles.
+- A TV left paused for a long time no longer loses the connection and starts
+  the video over.
+- The end of a video is no longer cut short: Castor waits for the TV to play
+  what it has already received.
+- When a page offers several links, the one whose sound is in your language
+  is tried first.
+- Subtitles reach every DLNA TV, Samsung included, in the standard way.
+
+### Under the hood
+- Updated to the Castor 2.4.0 casting engine.
+
+---
+
+## 1.3.0 — 27/10/2026 (italiano)
+
+### Trasmissione
+- Mentre un video va avanti, Castor segue la velocità del Wi-Fi della TV:
+  manda un'immagine più leggera quando la connessione rallenta e di nuovo una
+  migliore dopo un tratto senza problemi.
+- Se una trasmissione ha dovuto ripiegare su un link meno adatto, dopo un po'
+  di riproduzione regolare Castor riprova quello migliore e riprende da dove
+  era.
+- Sulle TV DLNA ora ci si può spostare nel video con il telecomando della TV,
+  quando Castor invia il video come flusso unico di durata nota e senza
+  sottotitoli generati.
+- Una TV lasciata a lungo in pausa non perde più la connessione e non
+  ricomincia il video dall'inizio.
+- La fine di un video non viene più tagliata: Castor aspetta che la TV
+  riproduca quello che ha già ricevuto.
+- Quando una pagina offre più link, viene provato per primo quello con l'audio
+  nella tua lingua.
+- I sottotitoli arrivano a tutte le TV DLNA, Samsung comprese, nel modo
+  standard.
+
+### Dietro le quinte
+- Aggiornato al motore di trasmissione di Castor 2.4.0.
+
+---
+
 ## 1.2.1 — 2026-10-23
 
 ### Casting
