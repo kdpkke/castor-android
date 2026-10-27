@@ -62,6 +62,13 @@ var rules = []rule{{
 	kind:   Unfetched,
 	blames: theDevice,
 }, {
+	// Before the hold: holding a device whose link cannot carry the cast only moves the stall.
+	name:   "choked",
+	phases: []Phase{Playing},
+	when:   func(h Vitals) bool { return !h.paused && !h.viewerHeld && h.choking() },
+	kind:   Choked,
+	blames: theDevice,
+}, {
 	name:   "starved",
 	phases: []Phase{Playing},
 	when:   func(h Vitals) bool { return h.paused && (h.sincePause > pauseBudget || h.crawling()) },
@@ -76,9 +83,21 @@ var rules = []rule{{
 	name:   "lean",
 	phases: []Phase{Playing},
 	when: func(h Vitals) bool {
-		return h.holdable && !h.paused && !h.ended && h.handed > 0 && h.ahead() < lowWater
+		return h.holdable && !h.paused && !h.viewerHeld && !h.ended && h.handed > 0 && h.ahead() < lowWater
 	},
 	kind: Lean,
+}, {
+	// Before the cast lifts itself: a better link is worth more than a heavier rate of this one.
+	name:   "outranked",
+	phases: []Phase{Playing},
+	when:   func(h Vitals) bool { return h.outranked() },
+	kind:   Outranked,
+	blames: theDevice,
+}, {
+	name:   "roomy",
+	phases: []Phase{Playing},
+	when:   func(h Vitals) bool { return h.roomy() },
+	kind:   Roomy,
 }, {
 	name:   "burn-in-ready",
 	phases: []Phase{Reading},

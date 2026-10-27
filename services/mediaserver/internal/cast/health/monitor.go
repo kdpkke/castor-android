@@ -23,8 +23,22 @@ type Monitor struct {
 	// Audience is the device side (nil until device holds URL).
 	Audience Audience
 
+	// Served maps the bytes the device took to media (nil where unmeasured).
+	Served Telemetry
+
+	Playhead Playhead
+
 	// Holdable says whether the attempt can pause this playback.
 	Holdable bool
+
+	// Switchable is a delivery whose rate can change mid-play.
+	Switchable bool
+
+	// MaxBitrate bounds the rate asked of the device, zero for none.
+	MaxBitrate media.Bitrate
+
+	// Climb is how long the cast plays well before a better link is tried, zero for never.
+	Climb time.Duration
 
 	// Lead is the transcription frontier (nil if no burn-in).
 	Lead Lead
@@ -58,4 +72,6 @@ type Lead interface {
 type Audience interface {
 	// Handed is the bytes taken and when the last one moved.
 	Handed() (bytes int64, last time.Time)
+	// Began is where in the program the device's current fetch began; a seek moves it.
+	Began() time.Duration
 }

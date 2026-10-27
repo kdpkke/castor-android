@@ -12,7 +12,7 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/looplab/fsm"
+	"github.com/stupside/castor/internal/machine"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/compose"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
@@ -86,7 +86,7 @@ func TestPresentationWithoutReadinessNeverReachesTheDevice(t *testing.T) {
 	c.loop()
 	_, err := c.finish()
 	if err == nil || started.Load() || c.ready != nil || !c.machine.Is(attemptFinished) {
-		t.Fatalf("unproved presentation: started=%v ready=%v state=%s error=%v", started.Load(), c.ready, c.machine.Current(), err)
+		t.Fatalf("unproved presentation: started=%v ready=%v state=%s error=%v", started.Load(), c.ready, c.machine.State(), err)
 	}
 }
 
@@ -133,10 +133,10 @@ func TestABufferCopiedWholeIsServedAsItIs(t *testing.T) {
 	t.Cleanup(func() { _ = s.releases.release() })
 	p, err := s.preparePresentation()
 	if err == nil {
-		err = hand(s.ctx, dev, p.target, p.contentType, p.captions, p.source)
+		err = hand(s.ctx, dev, Playback{URL: p.target, Captions: p.captions, Stream: p.stream()})
 	}
 	if err == nil {
-		_, err = superviseFixture(s.ctx, dev, *p.delivery, p.feed)
+		err = superviseFixture(s.ctx, dev, *p.delivery, p.feed)
 	}
 	r := p.reached
 	if err != nil {
@@ -188,7 +188,7 @@ func TestEachAttemptSelectsItsOwnTranscription(t *testing.T) {
 	}
 }
 
-func reachAttemptState(t *testing.T, m *fsm.FSM, state string) {
+func reachAttemptState(t *testing.T, m *machine.Machine[attemptState, attemptEvent], state attemptState) {
 	t.Helper()
 	if state == preparing {
 		return
@@ -205,11 +205,14 @@ func reachAttemptState(t *testing.T, m *fsm.FSM, state string) {
 	} else if state != inspecting && state != planning && state != outputPlanned {
 		path = append(path, presentationReady)
 	}
-	if state == startingPlayback || state == playingBack {
+	if state == startingPlayback || state == playingBack || state == draining {
 		path = append(path, playbackRequested)
 	}
-	if state == playingBack {
+	if state == playingBack || state == draining {
 		path = append(path, playbackStarted)
+	}
+	if state == draining {
+		path = append(path, deliverySettled)
 	}
 	if state == stopping || state == attemptFinished {
 		path = append(path, attemptCancelled)
@@ -218,12 +221,12 @@ func reachAttemptState(t *testing.T, m *fsm.FSM, state string) {
 		path = append(path, cleanupFinished)
 	}
 	for _, event := range path {
-		if err := fireAttempt(t.Context(), m, event); err != nil {
+		if err := m.Fire(t.Context(), event); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if !m.Is(state) {
-		t.Fatalf("reached %s, want %s", m.Current(), state)
+		t.Fatalf("reached %s, want %s", m.State(), state)
 	}
 }
 
@@ -232,14 +235,14 @@ func TestReadyAttemptRequiresPlaybackRequest(t *testing.T) {
 	reachAttemptState(t, c.machine, outputPlanned)
 	c.move(presentationReady)
 	if !c.machine.Is(ready) {
-		t.Fatalf("preparation reached %s, want ready", c.machine.Current())
+		t.Fatalf("preparation reached %s, want ready", c.machine.State())
 	}
-	if err := fireAttempt(t.Context(), c.machine, playbackStarted); err == nil || !c.machine.Is(ready) {
-		t.Fatalf("playback started without a request: state=%s error=%v", c.machine.Current(), err)
+	if err := c.machine.Fire(t.Context(), playbackStarted); err == nil || !c.machine.Is(ready) {
+		t.Fatalf("playback started without a request: state=%s error=%v", c.machine.State(), err)
 	}
 	c.move(playbackRequested)
 	if !c.machine.Is(startingPlayback) {
-		t.Fatalf("playback request reached %s, want starting-playback", c.machine.Current())
+		t.Fatalf("playback request reached %s, want starting-playback", c.machine.State())
 	}
 }
 
@@ -269,7 +272,7 @@ func TestPreparationStopsAtTheFailedStage(t *testing.T) {
 			}
 			_, err := c.run()
 			if !errors.Is(err, failure) || stages[len(stages)-1] != failed || !c.machine.Is(attemptFinished) {
-				t.Fatalf("stages=%v state=%s error=%v", stages, c.machine.Current(), err)
+				t.Fatalf("stages=%v state=%s error=%v", stages, c.machine.State(), err)
 			}
 		})
 	}
@@ -300,7 +303,7 @@ func TestCancellationDuringPlanningJoinsLateAcquisitions(t *testing.T) {
 		c.stop(context.Canceled)
 		err := <-done
 		if !cleaned || produced || !errors.Is(err, context.Canceled) || !errors.Is(err, lateFailure) || !c.machine.Is(attemptFinished) {
-			t.Fatalf("cleaned=%v produced=%v state=%s error=%v", cleaned, produced, c.machine.Current(), err)
+			t.Fatalf("cleaned=%v produced=%v state=%s error=%v", cleaned, produced, c.machine.State(), err)
 		}
 	})
 }
@@ -326,7 +329,7 @@ func TestCancelledPreparationReleasesLateAcquisitions(t *testing.T) {
 		t.Fatalf("interruption lost its separate failure: %v", err)
 	}
 	if !cleaned || !c.machine.Is(attemptFinished) || !errors.Is(err, lateFailure) {
-		t.Fatalf("cleaned=%v state=%v error=%v", cleaned, c.machine.Current(), err)
+		t.Fatalf("cleaned=%v state=%v error=%v", cleaned, c.machine.State(), err)
 	}
 }
 
@@ -336,7 +339,7 @@ type coordinatorDevice struct {
 	wait  func(context.Context) error
 }
 
-func (d *coordinatorDevice) Play(ctx context.Context, _ *url.URL, _ string, _ []media.Caption) error {
+func (d *coordinatorDevice) Play(ctx context.Context, _ Playback) error {
 	return d.start(ctx)
 }
 func (d *coordinatorDevice) AwaitEnd(ctx context.Context) error { return d.wait(ctx) }
@@ -373,7 +376,7 @@ func TestCancellationDuringPlayJoinsCommandWithoutStartingPlayback(t *testing.T)
 			t.Fatal("late Play result started playback observation")
 		}
 		if !c.machine.Is(attemptFinished) {
-			t.Fatalf("state=%v", c.machine.Current())
+			t.Fatalf("state=%v", c.machine.State())
 		}
 	})
 }
@@ -389,7 +392,7 @@ func TestProductionCompletionDoesNotEndPlayingAttempt(t *testing.T) {
 		d := p.delivery()
 		reachAttemptState(t, c.machine, playingBack)
 		c.presentation = presentation{delivery: &d, feed: feed{buffered: p.buf}}
-		c.observeProduction()
+		c.watchProduction()
 		c.observePlayback()
 		done := make(chan error, 1)
 		go func() { c.loop(); _, err := c.finish(); done <- err }()
@@ -409,10 +412,10 @@ func TestProductionCompletionDoesNotEndPlayingAttempt(t *testing.T) {
 func TestLateWorkerFailureSurvivesSuccessfulDelivery(t *testing.T) {
 	c := newCoordinator(t.Context(), Cast{}, recovery.Attempt{})
 
-	reachAttemptState(t, c.machine, playingBack)
+	reachAttemptState(t, c.machine, draining)
 	failure := errors.New("device failed while stopping")
 	c.launch(playbackEnded, func() error { <-c.ctx.Done(); return failure })
-	c.launch(deliverySettled, func() error { return nil })
+	c.launch(drainElapsed, func() error { return nil })
 	c.loop()
 	_, err := c.finish()
 	if !errors.Is(err, failure) {
@@ -438,7 +441,7 @@ func TestStoppingSignalsAllPublicationsBeforeJoining(t *testing.T) {
 		c.releases.publication(func() error { close(second); return nil })
 		_, err := c.finish()
 		if !c.machine.Is(attemptFinished) || !errors.Is(err, cleanupFailure) {
-			t.Fatalf("state=%v err=%v", c.machine.Current(), err)
+			t.Fatalf("state=%v err=%v", c.machine.State(), err)
 		}
 	})
 }
@@ -485,7 +488,7 @@ func TestStorageFailureCancelsPreparationAndJoinsLateAcquisitions(t *testing.T) 
 	}
 	_, err := c.run()
 	if !errors.Is(err, failure) || !cleaned || !c.machine.Is(attemptFinished) {
-		t.Fatalf("failure=%v cleaned=%v state=%s", err, cleaned, c.machine.Current())
+		t.Fatalf("failure=%v cleaned=%v state=%s", err, cleaned, c.machine.State())
 	}
 }
 

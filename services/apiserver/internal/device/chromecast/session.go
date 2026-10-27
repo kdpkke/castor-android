@@ -5,13 +5,12 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"net/url"
 	"sync"
+	"time"
 
 	castmedia "github.com/vishen/go-chromecast/cast"
 
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
-	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"github.com/stupside/castor/services/apiserver/internal/device"
 )
 
@@ -31,7 +30,7 @@ var _ device.Device = (*session)(nil)
 
 // Play returns the receiver's own verdict on the LOAD, so a refused URL fails the hand-off; a dropped connection is gone.
 func (s *session) Play(ctx context.Context, playback device.Playback) error {
-	if err := s.play(ctx, playback.URL, device.MIME(playback.Container), playback.Captions, playback.Info); err != nil {
+	if err := s.play(ctx, playback); err != nil {
 		select {
 		case <-s.ch.gone:
 			return &device.Gone{Device: s.name, Observed: "the Cast connection closed before the media loaded", Err: err}
@@ -42,7 +41,8 @@ func (s *session) Play(ctx context.Context, playback device.Playback) error {
 	return nil
 }
 
-func (s *session) play(ctx context.Context, streamURL *url.URL, contentType string, captions []*mediav1.DeviceCommand_Caption, info *castorv1.MediaInfo) error {
+func (s *session) play(ctx context.Context, playback device.Playback) error {
+	stream, info := playback.URL.String(), playback.Info
 	transport, err := s.mediaReceiver(ctx)
 	if err != nil {
 		return fmt.Errorf("starting the chromecast's media receiver: %w", err)
@@ -53,22 +53,22 @@ func (s *session) play(ctx context.Context, streamURL *url.URL, contentType stri
 	// Each Play is awaited to its own end, so a retry after a refused one starts clean on the same connection.
 	mine := newEnding()
 	s.watchMu.Lock()
-	s.watch.begin(streamURL.String())
+	s.watch.begin(stream)
 	s.ending = mine
 	s.transport = transport
 	s.watchMu.Unlock()
 	load := &loadCommand{
 		Type: msgLoad, Autoplay: true,
-		Media: mediaItem{MediaItem: castmedia.MediaItem{ContentId: streamURL.String(), ContentType: contentType, StreamType: "BUFFERED"}},
+		Media: mediaItem{MediaItem: castmedia.MediaItem{ContentId: stream, ContentType: device.MIME(playback.Container()), StreamType: "BUFFERED", Duration: float32(playback.Duration().Seconds())}},
 	}
 	load.Media.Metadata = castmedia.MediaMetadata{Title: info.GetTitle(), Subtitle: info.GetSynopsis(), ReleaseDate: info.GetReleaseDate()}
 	if imageURL := info.GetImageUrl(); imageURL != "" {
 		load.Media.Metadata.Images = []castmedia.Image{{URL: imageURL}}
 	}
-	load.Media.Tracks, load.ActiveTrackIds = textTracks(captions)
+	load.Media.Tracks, load.ActiveTrackIds = textTracks(playback.Play.GetCaptions())
 	reply, err := s.ch.request(ctx, transport, nsMedia, load)
 	if err == nil {
-		err = loadVerdict(reply, streamURL.String())
+		err = loadVerdict(reply, stream)
 	}
 	if err != nil {
 		s.watchMu.Lock()
@@ -125,23 +125,59 @@ func (s *session) Resume(ctx context.Context) error { return s.transportCommand(
 // Stop ends the media session the last Play opened, if the receiver reported one.
 func (s *session) Stop(ctx context.Context) error { return s.transportCommand(ctx, msgStop) }
 
-// transportCommand sends PAUSE, PLAY or STOP to the media session the last Play opened.
 func (s *session) transportCommand(ctx context.Context, msg string) error {
+	if _, _, err := s.mediaRequest(ctx, msg); err != nil {
+		return fmt.Errorf("%s: %w", msg, err)
+	}
+	return nil
+}
+
+// Position asks, since a receiver pushes its status only when its state changes.
+func (s *session) Position(ctx context.Context) (device.Playhead, error) {
+	mediaSession, reply, err := s.mediaRequest(ctx, msgGetStatus)
+	if errors.Is(err, errNoMediaSession) {
+		return device.Playhead{}, device.ErrNoPosition
+	}
+	if err != nil {
+		return device.Playhead{}, fmt.Errorf("reading the playback position: %w", err)
+	}
+	var response struct {
+		Status []struct {
+			MediaSessionID int      `json:"mediaSessionId"`
+			CurrentTime    *float64 `json:"currentTime"`
+			PlayerState    string   `json:"playerState"`
+		} `json:"status"`
+	}
+	if json.Unmarshal(reply, &response) != nil {
+		return device.Playhead{}, device.ErrNoPosition
+	}
+	for _, status := range response.Status {
+		if status.MediaSessionID == mediaSession && status.CurrentTime != nil {
+			return device.Playhead{At: time.Duration(*status.CurrentTime * float64(time.Second)), Paused: status.PlayerState == "PAUSED"}, nil
+		}
+	}
+	return device.Playhead{}, device.ErrNoPosition
+}
+
+var errNoMediaSession = errors.New("the chromecast has reported no media session yet")
+
+// mediaRequest sends msg to the media session the last Play opened, returning that session and the receiver's MEDIA_STATUS.
+func (s *session) mediaRequest(ctx context.Context, msg string) (int, []byte, error) {
 	s.watchMu.Lock()
 	transport, mediaSession := s.transport, s.watch.mediaSession
 	s.watchMu.Unlock()
 	if mediaSession == 0 {
-		return fmt.Errorf("%s: the chromecast has reported no media session yet", msg)
+		return 0, nil, errNoMediaSession
 	}
 	reply, err := s.ch.request(ctx, transport, nsMedia, &castmedia.MediaHeader{Type: msg, MediaSessionId: mediaSession})
 	if err != nil {
-		return fmt.Errorf("%s: %w", msg, err)
+		return 0, nil, err
 	}
-	var response castmedia.MediaStatusResponse
-	if err := json.Unmarshal(reply, &response); err != nil || response.Type != msgMediaStatus {
-		return fmt.Errorf("%s: the chromecast answered %s", msg, response.Type)
+	var header castmedia.PayloadHeader
+	if err := json.Unmarshal(reply, &header); err != nil || header.Type != msgMediaStatus {
+		return 0, nil, fmt.Errorf("the chromecast answered %s", header.Type)
 	}
-	return nil
+	return mediaSession, reply, nil
 }
 
 // loadVerdict accepts the requested stream only when the receiver's answer does not identify a different one.

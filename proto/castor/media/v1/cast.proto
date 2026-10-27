@@ -3,8 +3,10 @@ syntax = "proto3";
 package castor.media.v1;
 
 import "buf/validate/validate.proto";
+import "castor/media/v1/bitrate.proto";
 import "castor/v1/cast.proto";
 import "castor/v1/stream.proto";
+import "google/protobuf/duration.proto";
 
 // CastService starts, stops and follows casts.
 service CastService {
@@ -23,6 +25,8 @@ message StartRequest {
   // source is a direct stream or resolved candidates, never unresolved pages.
   Source source = 2 [(buf.validate.field).required = true];
   PlaybackSettings settings = 3 [(buf.validate.field).required = true];
+  // start is the position in the media to begin at, the beginning when unset.
+  google.protobuf.Duration start = 4 [(buf.validate.field).duration.gt = {}];
 }
 
 // PlaybackSettings is the complete policy resolved by API before media is called.
@@ -34,6 +38,19 @@ message PlaybackSettings {
   uint32 max_height = 2 [(buf.validate.field).uint32.gte = 2];
   castor.v1.SubtitleSelection subtitles = 3 [(buf.validate.field).required = true];
   castor.v1.AudioSelection audio = 4;
+  // max_bitrate is the most the cast asks of the device's link, absent for no ceiling.
+  Bitrate max_bitrate = 5 [
+    (buf.validate.field).cel = {
+      id: "max_bitrate.floor"
+      message: "must be at least 1 Mbit/s, under which a picture is not worth sending"
+      expression: "this.bits_per_second >= 1000000"
+    },
+    (buf.validate.field).cel = {
+      id: "max_bitrate.ceiling"
+      message: "must be at most 1 Tbit/s"
+      expression: "this.bits_per_second <= 1000000000000"
+    }
+  ];
 }
 
 message StartResponse {}

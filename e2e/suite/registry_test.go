@@ -44,7 +44,7 @@ var (
 		Transfers: strategy.Registry[origin.Transfer]{colour.SDR{}, colour.PQ{}, colour.HLG{}},
 		Quirks: strategy.Registry[strategy.Factory[origin.Quirk]]{
 			quirk.Rotated{}, quirk.FrameRate{}, quirk.Interlaced{}, quirk.Chroma{},
-			quirk.AudioDelay{}, quirk.SampleRate{}, quirk.PTSWrapAfter{},
+			quirk.AudioDelay{}, quirk.SampleRate{}, quirk.PTSWrapAfter{}, quirk.Weighs{},
 		},
 	}
 	behaviours = strategy.Registry[strategy.Factory[origin.Behaviour]]{
@@ -100,15 +100,18 @@ var (
 	viewers = strategy.Registry[strategy.Factory[receiver.Viewer]]{
 		strategy.Fixed[receiver.Viewer]{Strategy: viewer.ToTheEnd{}},
 		viewer.StopsAfter{},
+		viewer.Takes{},
+		viewer.Seeks{},
 	}
 	outcomes     = strategy.Registry[judge.Outcome]{outcome.Plays{}, outcome.Refused{}, outcome.Aborted{}}
 	expectations = strategy.Registry[strategy.Factory[judge.Check]]{
 		strategy.OneOf[judge.Check]{Called: "delivery", Of: strategy.Registry[judge.Check]{expect.Served{}, expect.Passthrough{}}},
-		strategy.OneOf[judge.Check]{Called: "video", Of: strategy.Registry[judge.Check]{expect.Copied{}, expect.Encoded{}}},
+		strategy.OneOf[judge.Check]{Called: "video", Of: strategy.Registry[judge.Check]{expect.Copied{}, expect.Encoded{}, expect.Smallest{}}},
 		expect.Channels{},
 		expect.Captioned{},
 		expect.AudioIn{},
 		strategy.Fixed[judge.Check]{Strategy: expect.Uninterrupted{}},
+		strategy.Fixed[judge.Check]{Strategy: expect.Seeked{}},
 		strategy.OneOf[judge.Check]{Called: "frames", Of: strategy.Registry[judge.Check]{expect.Complete{}}},
 	}
 	invariants = []judge.Check{

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/stupside/castor/e2e/receiver"
 )
@@ -93,6 +94,9 @@ func (u *upnp) actions() map[string]func(envelope) (string, int) {
 			for _, track := range didlCaptions(meta) {
 				u.fetchCaption(track)
 			}
+			if timeSeeks(didlFeatures(meta)) {
+				u.session.TimeSeeks("TimeSeekRange.dlna.org", timeSeekRange)
+			}
 			u.fetch(u.session, uri, didlContentType(meta), didlFeatures(meta))
 			return "", 0
 		},
@@ -105,6 +109,10 @@ func (u *upnp) actions() map[string]func(envelope) (string, int) {
 			return "", 0
 		},
 		"Stop": func(envelope) (string, int) { u.session.Stop(); return "", 0 },
+		"GetPositionInfo": func(envelope) (string, int) {
+			played := u.session.Played().Round(time.Second)
+			return fmt.Sprintf("<Track>1</Track><RelTime>%d:%02d:%02d</RelTime>", int(played.Hours()), int(played.Minutes())%60, int(played.Seconds())%60), 0
+		},
 		"GetTransportInfo": func(envelope) (string, int) {
 			return "<CurrentTransportState>" + u.transportState() + "</CurrentTransportState><CurrentTransportStatus>OK</CurrentTransportStatus><CurrentSpeed>1</CurrentSpeed>", 0
 		},

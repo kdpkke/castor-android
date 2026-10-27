@@ -27,7 +27,12 @@ func (r *scriptedRunner) Run(_ context.Context, a Attempt) Outcome {
 	if len(r.seen) > len(r.outcomes) {
 		return Outcome{Err: errors.New("the loop ran an attempt nothing was scripted for")}
 	}
-	return r.outcomes[len(r.seen)-1]
+	// An attempt's playback begins where it was asked to, unless the script says otherwise.
+	out := r.outcomes[len(r.seen)-1]
+	if out.Evidence.Began == 0 {
+		out.Evidence.Began = a.Program.Start
+	}
+	return out
 }
 
 // fakeProgram publishes scripted answers per link and every other link unchanged.
@@ -42,7 +47,7 @@ type published struct {
 	err    error
 }
 
-func (p *fakeProgram) Resolve(_ context.Context, s *source.Stream, _ source.Rendition) (source.Resolution, error) {
+func (p *fakeProgram) Resolve(_ context.Context, s *source.Stream, _ source.Rendition, _ media.Bitrate) (source.Resolution, error) {
 	answer, ok := p.answers[s.URL.String()]
 	switch {
 	case !ok:
@@ -128,7 +133,7 @@ func mustFault(t *testing.T, err error) *fault {
 	return f
 }
 
-func TestOnlyADeviceHandedTheSourceIsServedInstead(t *testing.T) {
+func TestOnlyADeviceHandedWhatItFetchesItselfIsServedInstead(t *testing.T) {
 	refusal := errors.New("SOAP 714")
 	for _, tc := range []struct {
 		name    string
@@ -292,11 +297,67 @@ func TestCastDecodesTheAxisWhoseCopyBrokeUpstream(t *testing.T) {
 	}
 }
 
-func TestAPlayingCastIsNotRevisedEvenByAFaultThatClaimsItCanBe(t *testing.T) {
+// starvedAt is a cast that played for the given media and then outran its read.
+func starvedAt(played time.Duration) Outcome {
+	fault := health.DeviceStarved("the playing cast", media.Progress{Bytes: 1 << 20, Position: played}, 1<<20)
+	return Outcome{Err: fault, Evidence: Evidence{Reached: health.Playing, Verdict: health.Starved, Vitals: fault.Vitals}}
+}
+
+func TestAPlayingCastWhoseSourceGaveOutResumesOnTheNextLinkWhereItGotTo(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second}
+	run := &scriptedRunner{outcomes: []Outcome{starvedAt(816 * time.Second), delivered}}
+
+	if err := Cast(t.Context(), in, run, &fakeProgram{}); err != nil {
+		t.Fatalf("cast: %v", err)
+	}
+	if len(run.seen) != 2 {
+		t.Fatalf("ran %d attempts, want 2", len(run.seen))
+	}
+	second := run.seen[1]
+	if second.Program.Start != 816*time.Second {
+		t.Errorf("second attempt starts at %s, want where the viewer got to", second.Program.Start)
+	}
+	if second.Program.SelfFetchable() {
+		t.Error("second attempt could be handed to a device, which would start it over")
+	}
+	if run.seen[0].Program.Start != 0 {
+		t.Errorf("first attempt starts at %s, want the beginning", run.seen[0].Program.Start)
+	}
+}
+
+func TestResumesAccumulateAcrossAttempts(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second}
+	run := &scriptedRunner{outcomes: []Outcome{starvedAt(100 * time.Second), starvedAt(50 * time.Second), delivered}}
+
+	if err := Cast(t.Context(), in, run, &fakeProgram{}); err != nil {
+		t.Fatalf("cast: %v", err)
+	}
+	if got := run.seen[2].Program.Start; got != 150*time.Second {
+		t.Errorf("third attempt starts at %s, want the sum of what was played", got)
+	}
+}
+
+func TestALiveCastThatPlayedIsTakenUpAtItsEdge(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second}
+	live := &fakeProgram{answers: map[string]published{
+		in.Candidates[0].URL.String(): {origin: source.Origin{Segmented: true, Live: true}},
+		in.Candidates[1].URL.String(): {origin: source.Origin{Segmented: true, Live: true}},
+	}}
+	run := &scriptedRunner{outcomes: []Outcome{starvedAt(time.Minute), delivered}}
+
+	if err := Cast(t.Context(), in, run, live); err != nil {
+		t.Fatalf("a live cast that starved after playing was not taken up again: %v", err)
+	}
+	if got := run.seen[1].Program.Start; got != 0 {
+		t.Errorf("the live cast was taken up at %s, want its edge", got)
+	}
+}
+
+func TestAPlayingCastIsNotRevisedForAFaultOfTheDevice(t *testing.T) {
 	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second}
 	claimed := Outcome{
-		Err:      &health.Fault{Kind: health.Stalled, Revise: true, Vitals: observed},
-		Evidence: Evidence{Reached: health.Playing, Verdict: health.Stalled, Vitals: observed},
+		Err:      &health.Fault{Kind: health.Unfetched, Revise: true, Vitals: observed},
+		Evidence: Evidence{Reached: health.Playing, Verdict: health.Unfetched, Vitals: observed},
 	}
 	run := &scriptedRunner{outcomes: []Outcome{claimed, delivered}}
 
@@ -417,11 +478,11 @@ type cancellingResolver struct {
 	succeed bool
 }
 
-func (r *cancellingResolver) Resolve(ctx context.Context, s *source.Stream, chosen source.Rendition) (source.Resolution, error) {
+func (r *cancellingResolver) Resolve(ctx context.Context, s *source.Stream, chosen source.Rendition, ceiling media.Bitrate) (source.Resolution, error) {
 	r.calls++
 	r.cancel(r.cause)
 	if r.succeed {
-		return (&fakeProgram{}).Resolve(ctx, s, chosen)
+		return (&fakeProgram{}).Resolve(ctx, s, chosen, ceiling)
 	}
 	return source.Resolution{}, ctx.Err()
 }
@@ -456,5 +517,204 @@ func TestCancellationDoesNotEraseAnAttemptsCleanupFailure(t *testing.T) {
 	err := Cast(ctx, Intent{Candidates: candidates(t, "https://cdn.example/one.mp4"), Turns: unheard{}}, run, &fakeProgram{})
 	if calls != 1 || !errors.Is(err, cause) || !errors.Is(err, cleanup) {
 		t.Fatalf("attempts=%d result=%v", calls, err)
+	}
+}
+
+// outrankedAt is a cast that played well for the given media on a link another outranks.
+func outrankedAt(played time.Duration) Outcome {
+	vitals := health.DeviceStarved("the playing cast", media.Progress{Bytes: 1 << 20, Position: played}, 1<<20).Vitals
+	fault := &health.Fault{Kind: health.Outranked, Subject: "the playing cast", Revise: true, Vitals: vitals}
+	return Outcome{Err: fault, Evidence: Evidence{Reached: health.Playing, Verdict: health.Outranked, Vitals: vitals}}
+}
+
+func TestACastOnALowerRankedLinkIsAskedToClimbOnlyThere(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second}
+	run := &scriptedRunner{outcomes: []Outcome{judged(health.Dead, health.Opening, observed), delivered}}
+
+	if err := Cast(t.Context(), in, run, &fakeProgram{}); err != nil {
+		t.Fatalf("cast: %v", err)
+	}
+	if run.seen[0].Climb != 0 {
+		t.Errorf("the best ranked link plays with a climb of %s, want none", run.seen[0].Climb)
+	}
+	if run.seen[1].Climb != climbAfter {
+		t.Errorf("a lower ranked link plays with a climb of %s, want %s", run.seen[1].Climb, climbAfter)
+	}
+}
+
+func TestACastThatPlayedWellMovesBackToTheBetterLink(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second}
+	run := &scriptedRunner{outcomes: []Outcome{judged(health.Dead, health.Opening, observed), outrankedAt(700 * time.Second), delivered}}
+
+	if err := Cast(t.Context(), in, run, &fakeProgram{}); err != nil {
+		t.Fatalf("cast: %v", err)
+	}
+	if len(run.seen) != 3 {
+		t.Fatalf("ran %d attempts, want 3", len(run.seen))
+	}
+	back := run.seen[2]
+	if back.Stream.URL.String() != in.Candidates[0].URL.String() {
+		t.Errorf("third attempt plays %s, want the best ranked link", back.Stream.URL)
+	}
+	if back.Program.SelfFetchable() {
+		t.Error("third attempt could be handed to a device, which would start it over")
+	}
+	if back.Climb != 0 {
+		t.Errorf("the best ranked link plays with a climb of %s, want none", back.Climb)
+	}
+	if back.Program.Start != 700*time.Second {
+		t.Errorf("third attempt starts at %s, want where the viewer got to", back.Program.Start)
+	}
+}
+
+func TestAClimbThatFailsWalksDownToWhereTheCastWas(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second}
+	run := &scriptedRunner{outcomes: []Outcome{judged(health.Dead, health.Opening, observed), outrankedAt(700 * time.Second), judged(health.Dead, health.Opening, observed), delivered}}
+
+	if err := Cast(t.Context(), in, run, &fakeProgram{}); err != nil {
+		t.Fatalf("cast: %v", err)
+	}
+	if got := run.seen[3].Stream.URL.String(); got != in.Candidates[1].URL.String() {
+		t.Errorf("fourth attempt plays %s, want the link the cast climbed from", got)
+	}
+	if got := run.seen[3].Climb; got != 2*climbAfter {
+		t.Errorf("fourth attempt waits %s to climb again, want it doubled to %s", got, 2*climbAfter)
+	}
+	if got := run.seen[3].Program.Start; got != 700*time.Second {
+		t.Errorf("fourth attempt starts at %s, want where the viewer got to, not the beginning", got)
+	}
+}
+
+func TestAClimbWhoseBetterLinkFailsUnjudgedGoesBackToTheAttemptItLeft(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second}
+	unjudged := Outcome{Err: errors.New("the muxer exited"), Evidence: Evidence{Reached: health.Opening}}
+	run := &scriptedRunner{outcomes: []Outcome{
+		judged(health.Dead, health.Opening, observed),
+		broke(media.Axes{Video: true}),
+		outrankedAt(700 * time.Second),
+		unjudged,
+		delivered,
+	}}
+
+	if err := Cast(t.Context(), in, run, &fakeProgram{}); err != nil || len(run.seen) != 5 {
+		t.Fatalf("Cast error = %v after %d attempts, want the fifth attempt to deliver", err, len(run.seen))
+	}
+	back := run.seen[4]
+	if back.candidate != 1 || !back.Decode.Video {
+		t.Errorf("fifth attempt plays candidate %d decoding %s, want the link it climbed from on the terms it played on", back.candidate, back.Decode)
+	}
+	if back.Program.Start != 700*time.Second {
+		t.Errorf("fifth attempt starts at %s, want where the viewer got to", back.Program.Start)
+	}
+	if back.Climb != 2*climbAfter {
+		t.Errorf("fifth attempt waits %s to climb again, want it doubled to %s", back.Climb, 2*climbAfter)
+	}
+}
+
+func TestAClimbFromTheThirdLinkThatFailsGoesStraightBackToIt(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8", "https://third.example/three.m3u8"), Deadline: 30 * time.Second}
+	failed := judged(health.Dead, health.Opening, observed)
+	run := &scriptedRunner{outcomes: []Outcome{failed, failed, outrankedAt(700 * time.Second), failed, delivered}}
+
+	if err := Cast(t.Context(), in, run, &fakeProgram{}); err != nil || len(run.seen) != 5 {
+		t.Fatalf("Cast error = %v after %d attempts, want the fifth attempt to deliver", err, len(run.seen))
+	}
+	if got := run.seen[3].candidate; got != 0 {
+		t.Fatalf("the climb went to candidate %d, want the best ranked link", got)
+	}
+	if got := run.seen[4]; got.candidate != 2 || got.Program.Start != 700*time.Second {
+		t.Errorf("fifth attempt plays candidate %d from %s, want candidate 2 from where the viewer got to", got.candidate, got.Program.Start)
+	}
+}
+
+func TestAResumeThatFailsBeforePlayingStillResumesOnTheNextLink(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second}
+	run := &scriptedRunner{outcomes: []Outcome{starvedAt(100 * time.Second), judged(health.Dead, health.Opening, observed), delivered}}
+
+	if err := Cast(t.Context(), in, run, &fakeProgram{}); err != nil {
+		t.Fatalf("cast: %v", err)
+	}
+	if got := run.seen[2]; got.candidate != 1 || got.Program.Start != 100*time.Second {
+		t.Errorf("third attempt plays candidate %d from %s, want the next link from where the viewer got to", got.candidate, got.Program.Start)
+	}
+}
+
+func TestACastAskedToBeginLaterResumesFromThere(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second, Start: time.Minute}
+	run := &scriptedRunner{outcomes: []Outcome{starvedAt(100 * time.Second), delivered}}
+
+	if err := Cast(t.Context(), in, run, &fakeProgram{}); err != nil {
+		t.Fatalf("cast: %v", err)
+	}
+	if got := run.seen[0].Program.Start; got != time.Minute {
+		t.Errorf("first attempt starts at %s, want the 1m asked", got)
+	}
+	if got := run.seen[1].Program.Start; got != 160*time.Second {
+		t.Errorf("second attempt starts at %s, want the 1m asked and the 100s played", got)
+	}
+}
+
+func TestALiveCastIsNotAskedToClimb(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second}
+	live := &fakeProgram{answers: map[string]published{
+		in.Candidates[0].URL.String(): {origin: source.Origin{Segmented: true, Live: true}},
+		in.Candidates[1].URL.String(): {origin: source.Origin{Segmented: true, Live: true}},
+	}}
+	run := &scriptedRunner{outcomes: []Outcome{judged(health.Dead, health.Opening, observed), delivered}}
+
+	if err := Cast(t.Context(), in, run, live); err != nil {
+		t.Fatalf("cast: %v", err)
+	}
+	if got := run.seen[1].Climb; got != 0 {
+		t.Errorf("a live cast on a lower ranked link plays with a climb of %s, want none", got)
+	}
+}
+
+func TestACastWhoseBetterLinkCannotBeReadPlaysOn(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second}
+	broken := &fakeProgram{answers: map[string]published{in.Candidates[0].URL.String(): {err: errors.New("gone")}}}
+	run := &scriptedRunner{outcomes: []Outcome{outrankedAt(700 * time.Second), delivered}}
+
+	// The first link cannot be read, so the cast starts on the second and the climb has nowhere to go.
+	if err := Cast(t.Context(), in, run, broken); err != nil {
+		t.Fatalf("cast: %v", err)
+	}
+	if len(run.seen) != 2 || run.seen[1].Stream.URL.String() != in.Candidates[1].URL.String() {
+		t.Fatalf("ran %d attempts, want the cast to play on with the link it was on", len(run.seen))
+	}
+	if got := run.seen[1].Program.Start; got != 700*time.Second {
+		t.Errorf("second attempt starts at %s, want where the viewer got to", got)
+	}
+	if got := run.seen[1].Climb; got != 0 {
+		t.Errorf("the cast waits %s to climb again, want never: no better link could be read", got)
+	}
+}
+
+// neverFetched is a cast whose device took the URL and never came for a byte of it.
+func neverFetched() Outcome {
+	fault := &health.Fault{Kind: health.Unfetched, Subject: "the playing cast"}
+	return Outcome{Err: fault, Evidence: Evidence{Reached: health.Playing, Verdict: health.Unfetched}}
+}
+
+func TestAPlayingDeviceThatNeverFetchesTheSourceItselfEndsTheCast(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second}
+	run := &scriptedRunner{outcomes: []Outcome{neverFetched(), delivered}}
+	if err := Cast(t.Context(), in, run, &fakeProgram{}); err == nil || len(run.seen) != 1 {
+		t.Fatalf("Cast error = %v after %d attempts, want the cast to end with the first", err, len(run.seen))
+	}
+}
+
+func TestACastResumesFromWhereItsPlaybackReallyBegan(t *testing.T) {
+	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8", "https://other.example/two.m3u8"), Deadline: 30 * time.Second, Start: time.Minute}
+	segmented := starvedAt(100 * time.Second)
+	// A device handed whole segments began at the 56s one holding the minute asked for.
+	segmented.Evidence.Began = 56 * time.Second
+	run := &scriptedRunner{outcomes: []Outcome{segmented, delivered}}
+
+	if err := Cast(t.Context(), in, run, &fakeProgram{}); err != nil {
+		t.Fatalf("cast: %v", err)
+	}
+	if got := run.seen[1].Program.Start; got != 156*time.Second {
+		t.Errorf("second attempt starts at %s, want the 56s the playback began at and the 100s played", got)
 	}
 }

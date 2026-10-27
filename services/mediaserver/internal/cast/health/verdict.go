@@ -1,6 +1,6 @@
 package health
 
-// Phase is how far a cast's attempt has got; its order is the safety property, since nothing in castor seeks.
+// Phase is how far an attempt got; past Playing a cast restarts only by resuming where the viewer was.
 type Phase int
 
 const (
@@ -53,8 +53,14 @@ const (
 	Starved
 	// Dead is a producer that ended with nothing playable.
 	Dead
+	// Choked is a device whose link takes less than playback consumes.
+	Choked
+	// Roomy is a device that has run well at a rate lighter than the cast could weigh.
+	Roomy
 	// Unfetched is a device that accepted the URL and never fetched it.
 	Unfetched
+	// Outranked is a cast that played well on a link another outranks.
+	Outranked
 )
 
 func (k Kind) String() string {
@@ -75,8 +81,14 @@ func (k Kind) String() string {
 		return "starved"
 	case Dead:
 		return "dead"
+	case Choked:
+		return "choked"
+	case Roomy:
+		return "roomy"
 	case Unfetched:
 		return "unfetched"
+	case Outranked:
+		return "outranked"
 	default:
 		return "starting"
 	}
@@ -96,6 +108,9 @@ const (
 	// hold pauses the device; release lets it play again.
 	hold
 	release
+	// lighten asks the cast to weigh less, lift to weigh more, while the device plays on.
+	lighten
+	lift
 )
 
 // verdict is the pair the action table is keyed on: what was judged, and in which phase.
@@ -104,7 +119,7 @@ type verdict struct {
 	phase Phase
 }
 
-// actions is what each verdict asks for in each phase; no verdict while playing revises, which would restart the cast under a viewer, so a device is held instead.
+// actions is what each verdict asks for in each phase; while playing, only a source that gave out or a better link ends the attempt.
 var actions = map[verdict]action{
 	{kind: starting, phase: Reading}: keepWatching,
 	{kind: starting, phase: Opening}: keepWatching,
@@ -123,5 +138,8 @@ var actions = map[verdict]action{
 
 	{kind: Stalled, phase: Playing}:   abandon,
 	{kind: Starved, phase: Playing}:   abandon,
+	{kind: Choked, phase: Playing}:    lighten,
+	{kind: Roomy, phase: Playing}:     lift,
 	{kind: Unfetched, phase: Playing}: abandon,
+	{kind: Outranked, phase: Playing}: revise,
 }

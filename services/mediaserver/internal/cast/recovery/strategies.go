@@ -25,12 +25,13 @@ const (
 	DecodeAxis      Action = "decode-axis"
 	RelaxRead       Action = "relax-read"
 	ServeInstead    Action = "serve-instead"
+	Stay            Action = "stay"
 )
 
 // strategy is one recovery action, applying only where the facts allow it.
 type strategy struct {
 	action Action
-	// apply only ever moves an attempt down a finite order, so recovery ends.
+	// apply moves an attempt down a finite order, or up only after more play, so the ledger ends recovery.
 	apply func(context.Context, change) (Attempt, bool)
 }
 
@@ -38,30 +39,44 @@ type strategy struct {
 var switchCandidate = strategy{
 	action: SwitchCandidate,
 	apply: func(ctx context.Context, c change) (Attempt, bool) {
-		a, ok := nextReadable(ctx, c.intent, c.resolver, c.attempt)
-		if !ok {
-			return c.attempt, false
-		}
-		// Packets the last link broke on do not condemn this one's.
-		a.Decode = media.Axes{}
-		return a, true
+		return nextReadable(ctx, c.intent, c.resolver, c.attempt)
 	},
+}
+
+// climb moves the cast to the best ranked link that outranks the one it plays on.
+var climb = strategy{
+	action: SwitchCandidate,
+	apply: func(ctx context.Context, c change) (Attempt, bool) {
+		return readable(ctx, c.intent, c.resolver, c.attempt, 0, c.attempt.candidate)
+	},
+}
+
+// stay plays on the link that was to be left, when no better one could be read.
+var stay = strategy{
+	action: Stay,
+	apply:  func(_ context.Context, c change) (Attempt, bool) { return c.attempt, true },
 }
 
 // nextReadable resolves the links after a's in rank order, moving past any that cannot be resolved.
 func nextReadable(ctx context.Context, in Intent, resolver SourceResolver, a Attempt) (Attempt, bool) {
-	for next := a.candidate + 1; next < len(in.Candidates); next++ {
+	return readable(ctx, in, resolver, a, a.candidate+1, len(in.Candidates))
+}
+
+// readable is a on the first link from from up to to that resolves.
+func readable(ctx context.Context, in Intent, resolver SourceResolver, a Attempt, from, to int) (Attempt, bool) {
+	for i := from; i < to; i++ {
 		if ctx.Err() != nil {
 			return a, false
 		}
-		link := in.Candidates[next]
-		resolved, err := resolver.Resolve(ctx, link, source.Rendition{})
+		link := in.Candidates[i]
+		resolved, err := resolver.Resolve(ctx, link, source.Rendition{}, in.Ceiling)
 		if err != nil {
-			slog.WarnContext(ctx, "a link could not be resolved; moving past it",
-				"host", link.URL.Host, "error", err)
+			slog.WarnContext(ctx, "a link could not be resolved; moving past it", "host", link.URL.Host, "error", err)
 			continue
 		}
-		a.candidate = next
+		a.candidate, a.Stream = i, link
+		// Packets the last link broke on do not condemn this one's.
+		a.Decode = media.Axes{}
 		return a.reading(resolved, in.Deadline), true
 	}
 	return a, false

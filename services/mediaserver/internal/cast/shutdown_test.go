@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"connectrpc.com/connect"
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
@@ -65,7 +66,7 @@ type recoveringCaster struct {
 	attempts    int
 }
 
-func (r *recoveringCaster) Play(ctx context.Context, _ execute.Device, _ output.Publisher, streams []*source.Stream, turns recovery.Turns) error {
+func (r *recoveringCaster) Play(ctx context.Context, _ execute.Device, _ output.Publisher, streams []*source.Stream, _ time.Duration, turns recovery.Turns) error {
 	backup := *streams[0]
 	u := *backup.URL
 	u.Path = "/backup.mp4"
@@ -73,7 +74,7 @@ func (r *recoveringCaster) Play(ctx context.Context, _ execute.Device, _ output.
 	return recovery.Cast(ctx, recovery.Intent{Candidates: []*source.Stream{streams[0], &backup}, Turns: turns}, r, r)
 }
 
-func (r *recoveringCaster) Resolve(ctx context.Context, s *source.Stream, _ source.Rendition) (source.Resolution, error) {
+func (r *recoveringCaster) Resolve(ctx context.Context, s *source.Stream, _ source.Rendition, _ media.Bitrate) (source.Resolution, error) {
 	r.resolutions++
 	if r.resolutions == 2 {
 		close(r.resolving)

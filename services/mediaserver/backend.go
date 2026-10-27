@@ -55,11 +55,12 @@ func (c *Config) backend() func(*mediav1.PlaybackSettings) cast.Caster {
 		timelines := follow.New(client, formats, follow.Repackager(ffmpegBinary))
 		resolver := resolverWithProbe(client, media.HeightCap(asked.GetMaxHeight()), asked.GetAudio().GetLanguages(), machinery.Probes)
 		return caster{
-			Ranker: rank.New(resolverConfig, media.HeightCap(asked.GetMaxHeight()), func(ctx context.Context, s *source.Stream) (source.Inspection, error) {
+			Ranker: rank.New(resolverConfig, media.HeightCap(asked.GetMaxHeight()), asked.GetAudio().GetLanguages(), func(ctx context.Context, s *source.Stream) (source.Inspection, error) {
 				return (candidateProbe{stream: s, client: client, resolver: resolver, timelines: timelines, binary: machinery.Probes}).Inspect(ctx)
 			}),
 			machinery:     machinery,
 			client:        client,
+			resolver:      resolver,
 			timelines:     timelines,
 			transcription: transcription(whisperConfig, asked.GetSubtitles()),
 			asked:         asked,
@@ -120,6 +121,7 @@ type caster struct {
 	*rank.Ranker
 	machinery     execute.Machinery
 	client        source.Client
+	resolver      *source.Resolver
 	timelines     execute.Timelines
 	transcription func(context.Context, string) execute.Subtitles
 	asked         *mediav1.PlaybackSettings
@@ -146,7 +148,8 @@ func announce(s *source.Stream) *source.Stream {
 	return &announced
 }
 
-func (k caster) Play(ctx context.Context, device execute.Device, publisher output.Publisher, streams []*source.Stream, turns recovery.Turns) error {
+func (k caster) Play(ctx context.Context, device execute.Device, publisher output.Publisher, streams []*source.Stream, start time.Duration, turns recovery.Turns) error {
+	maxBitrate := media.Bitrate(k.asked.GetMaxBitrate().GetBitsPerSecond())
 	run := execute.Cast{
 		Machinery:     k.machinery,
 		Timelines:     k.timelines,
@@ -155,14 +158,18 @@ func (k caster) Play(ctx context.Context, device execute.Device, publisher outpu
 		Publisher:     publisher,
 		Captions:      k.captions(k.asked.GetSubtitles()),
 		MaxHeight:     media.HeightCap(k.asked.GetMaxHeight()),
+		MaxBitrate:    maxBitrate,
+		Resolver:      k.resolver,
 	}
 	// The ranked streams, head first; the rest are what recovery switches to.
 	return recovery.Cast(ctx, recovery.Intent{
 		Candidates: streams,
 		Deadline:   readDeadline,
 		Delivery:   wire.FromDelivery(k.asked.GetDelivery()),
+		Ceiling:    maxBitrate,
+		Start:      start,
 		Turns:      turns,
-	}, run, resolverWithProbe(k.client, run.MaxHeight, k.asked.GetAudio().GetLanguages(), k.machinery.Probes))
+	}, run, k.resolver)
 }
 
 func resolverWithProbe(client source.Client, height media.HeightCap, languages []string, binary probe.FFprobe) *source.Resolver {

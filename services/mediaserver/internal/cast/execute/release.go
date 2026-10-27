@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/teardown"
@@ -14,18 +15,26 @@ import (
 // Passive resources are then released in reverse acquisition order.
 type releases struct {
 	// ctx is what stopping the workers cancels; their joins drop what that provoked.
-	ctx     context.Context
+	ctx context.Context
+	// mu guards what follows: a delivery that changes while it plays registers what it starts after the preparation is done.
+	mu      sync.Mutex
 	stack   []func() error
 	joins   []func() error
 	signals []func()
 }
 
 func (r *releases) push(release func() error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.stack = append(r.stack, release)
 }
 
 // interrupt registers a nonblocking stop request, sent before any joins.
-func (r *releases) interrupt(stop func()) { r.signals = append(r.signals, stop) }
+func (r *releases) interrupt(stop func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.signals = append(r.signals, stop)
+}
 
 // worker registers a stop request and its matching join as one acquisition.
 // A nil stop means the worker observes the attempt context directly.
@@ -33,6 +42,8 @@ func (r *releases) worker(stop func(), join func() error) {
 	if stop != nil {
 		r.interrupt(stop)
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.joins = append(r.joins, join)
 }
 
@@ -44,8 +55,10 @@ func (r *releases) publication(close func() error) {
 }
 
 func (r *releases) signal() {
+	r.mu.Lock()
 	signals := r.signals
 	r.signals = nil
+	r.mu.Unlock()
 	for _, stop := range signals {
 		stop()
 	}
@@ -53,8 +66,10 @@ func (r *releases) signal() {
 
 func (r *releases) release() error {
 	r.signal()
+	r.mu.Lock()
 	joins, stack := r.joins, r.stack
 	r.joins, r.stack = nil, nil
+	r.mu.Unlock()
 	var errs []error
 	for _, join := range slices.Backward(joins) {
 		errs = append(errs, teardown.Failures(r.ctx, join()))
@@ -83,7 +98,8 @@ func (c *coordinator) join() error {
 		} else {
 			err = errors.Join(err, teardown.Failures(c.ctx, op.err))
 		}
-		if op.event == deliverySettled && op.err == nil {
+		// Only the delivery as made last counts, however the device's end raced it.
+		if op.event == deliverySettled && op.err == nil && op.off == c.made {
 			c.delivered = true
 		}
 	}
@@ -103,7 +119,7 @@ func (c *coordinator) finish() (ran, error) {
 	err = errors.Join(err, c.releases.release())
 	// This is the final transition: its error must join the returned outcome,
 	// not be stored in c.cause after join has already collected it.
-	err = errors.Join(err, fireAttempt(c.ctx, c.machine, cleanupFinished))
+	err = errors.Join(err, c.machine.Fire(c.ctx, cleanupFinished))
 	if c.interruption != nil {
 		err = &recovery.Interrupted{Cause: c.interruption, Failure: err}
 	}

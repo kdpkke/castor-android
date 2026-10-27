@@ -4,13 +4,12 @@ package health
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
-	"github.com/looplab/fsm"
-	"github.com/stupside/castor/internal/telemetry"
+	"github.com/stupside/castor/internal/machine"
 
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
@@ -22,6 +21,8 @@ const (
 	Complete Decision = iota
 	Pause
 	Resume
+	// ChangeRate asks the cast to weigh what Target says while the device plays on.
+	ChangeRate
 )
 
 // controlEvent keeps this machine's events distinct at Go call sites.
@@ -44,21 +45,37 @@ func (e controlEvent) String() string {
 }
 
 // Observer retains health measurements and policy state. It never controls a device.
-// One attempt calls Next, applies its decision, and reports the result with Applied.
+// One attempt calls Next, applies its decision, and reports the result with Applied or Rated.
 type Observer struct {
 	tracker
 	polled bool
 	rule   rule
+	// pending is the change of rate the last ChangeRate asked for.
+	pending change
+	// floored is a link too poor to send a cast over at any rate worth sending, said once.
+	floored bool
+	// said is why a cast was last found not lifted, so it is said once for as long as it holds.
+	said string
 }
 
 func Observe(m Monitor) *Observer {
 	now := time.Now()
 	o := &Observer{m: m, start: now, grew: now, kept: now}
+	o.trail = media.Trail{Span: rateSpan}
+	o.reading = newReading(m.Playhead)
+	o.asked = newPacing(m.MaxBitrate)
 	o.playback = o.playbackMachine()
 	return o
 }
 
-func (o *Observer) Next(ctx context.Context) (Decision, error) {
+func (o *Observer) Next(ctx context.Context) (d Decision, err error) {
+	defer func() {
+		if d == Complete {
+			// The watch is over, and its machines with it.
+			o.playback.End(ctx)
+			o.asked.machine.End(ctx)
+		}
+	}()
 	t := &o.tracker
 	for {
 		if err := context.Cause(ctx); err != nil {
@@ -72,7 +89,7 @@ func (o *Observer) Next(ctx context.Context) (Decision, error) {
 			}
 		}
 		o.polled = true
-		h, err := t.read()
+		h, err := t.read(ctx)
 		if err != nil {
 			return Complete, err
 		}
@@ -91,13 +108,54 @@ func (o *Observer) Next(ctx context.Context) (Decision, error) {
 			return Pause, nil
 		case release:
 			return Resume, nil
+		case lighten:
+			if c, ok := o.asked.lighten(h); ok {
+				o.pending, o.floored = c, false
+				return ChangeRate, nil
+			}
+			if !o.floored {
+				o.floored = true
+				slog.WarnContext(ctx, "the device's link cannot carry a cast at a rate worth sending; it is left to play it", "gate", t.m.Subject, "took", h.Intake().String())
+			}
+		case lift:
+			if c, ok, _ := o.asked.lift(time.Now()); ok {
+				o.pending = c
+				return ChangeRate, nil
+			}
 		default:
+			if err := o.asked.settled(ctx, time.Now()); err != nil {
+				return Complete, err
+			}
+			o.explain(ctx, h)
 			t.report(ctx, r, h)
 		}
 	}
 }
 
-// Applied records what actually happened, so a refused pause never counts as held.
+// explain logs, once per reason, why a cast lighter than it could be is not asked for more.
+func (o *Observer) explain(ctx context.Context, h Vitals) {
+	if o.asked.at == 0 || o.asked.onTrial() || h.sinceChange < o.asked.wait() || o.asked.policy != 0 && o.asked.at >= o.asked.policy {
+		return
+	}
+	why, detail := h.unlifted()
+	if _, _, refused := o.asked.lift(time.Now()); why == noRoom && refused != "" {
+		why = refused
+	}
+	if why == "" || why == o.said {
+		return
+	}
+	o.said = why
+	attrs := []any{"gate", o.m.Subject, "why", why, "at", o.asked.at.String()}
+	if detail != "" {
+		attrs = append(attrs, "detail", detail)
+	}
+	slog.InfoContext(ctx, "the cast is not asked for more", attrs...)
+}
+
+// Target is the rate a ChangeRate asks the cast to weigh, zero for as the source does.
+func (o *Observer) Target() media.Bitrate { return o.pending.to }
+
+// Applied records how a Pause or Resume went, so a refused pause never counts as held.
 func (o *Observer) Applied(ctx context.Context, decision Decision, commandErr error) error {
 	var event controlEvent
 	switch decision {
@@ -114,13 +172,8 @@ func (o *Observer) Applied(ctx context.Context, decision Decision, commandErr er
 	default:
 		return fmt.Errorf("health: unexpected control result %d", decision)
 	}
-	// Command cancellation must not erase the outcome of a command already sent.
-	previous := o.playback.Current()
-	err := o.playback.Event(context.WithoutCancel(ctx), event.String())
-	if stayed, ok := errors.AsType[fsm.NoTransitionError](err); ok {
-		err = stayed.Err
-	}
-	if err != nil {
+	previous := o.playback.State()
+	if err := o.playback.Fire(ctx, event); err != nil {
 		return err
 	}
 	if commandErr != nil {
@@ -136,10 +189,32 @@ func (o *Observer) Applied(ctx context.Context, decision Decision, commandErr er
 	return nil
 }
 
+// Rated records how the ChangeRate went: a refused change leaves the rate as it was, a made one begins after byte cut.
+func (o *Observer) Rated(ctx context.Context, cut int64, switchErr error) error {
+	c, now := o.pending, time.Now()
+	if switchErr != nil {
+		o.asked.refused(now)
+		slog.WarnContext(ctx, "the cast's rate could not be changed", "gate", o.m.Subject, "move", c.move.String(), "to", c.to.String(), "error", switchErr)
+		return nil
+	}
+	was := o.asked.at
+	if err := o.asked.commit(ctx, c, now); err != nil {
+		return err
+	}
+	// What was measured and said of the device was of the rate it left.
+	o.reading.restart()
+	o.said = ""
+	if cut > 0 {
+		o.curve = slices.DeleteFunc(o.curve, func(m made) bool { return m.bytes > cut })
+	}
+	slog.InfoContext(ctx, "the cast's rate changed for the device's link", "gate", o.m.Subject, "move", c.move.String(), "from", was.String(), "to", c.to.String())
+	return nil
+}
+
 // Fault is a verdict that ended a watch; recovery keys on its Kind.
 type Fault struct {
 	Kind Kind
-	// Revise is a verdict reached before the device held the URL, so the attempt may change.
+	// Revise is a verdict the attempt may change for: one reached before the device held the URL, or a better link.
 	Revise bool
 
 	// Subject is what was watched (gate, output, or cast).
@@ -160,7 +235,8 @@ func DeviceStarved(subject string, made media.Progress, handed int64) *Fault {
 	return &Fault{
 		Kind:    Starved,
 		Subject: subject,
-		Vitals:  Vitals{Landed: made.Bytes, Position: made.Position, handed: handed},
+		// It took everything made, so it played everything made.
+		Vitals: Vitals{Landed: made.Bytes, Position: made.Position, played: made.Position, handed: handed},
 	}
 }
 
@@ -173,34 +249,43 @@ func (f *Fault) Error() string {
 
 func (f *Fault) Unwrap() error { return f.Err }
 
-// Playback control has its own state machine. It records command outcomes only;
+// playbackState is castor's control of the device's playback. It records command outcomes only;
 // it owns no goroutines, device connection, cancellation or resource cleanup.
+type playbackState uint8
+
 const (
-	playbackRunning  = "playing"
-	playbackPaused   = "paused"
-	resumeRefused    = "resume-refused"
-	pauseUnavailable = "pause-unavailable"
+	playbackRunning playbackState = iota
+	playbackPaused
+	resumeRefused
+	pauseUnavailable
 )
 
-func (o *Observer) playbackMachine() *fsm.FSM {
-	track := telemetry.Track("health", playbackRunning)
-	return fsm.NewFSM(playbackRunning, fsm.Events{
-		{Name: pauseAccepted.String(), Src: []string{playbackRunning}, Dst: playbackPaused},
-		{Name: pauseRejected.String(), Src: []string{playbackRunning}, Dst: pauseUnavailable},
-		{Name: resumeAccepted.String(), Src: []string{playbackPaused, resumeRefused}, Dst: playbackRunning},
-		{Name: resumeRejected.String(), Src: []string{playbackPaused, resumeRefused}, Dst: resumeRefused},
-	}, fsm.Callbacks{
-		"after_" + pauseAccepted.String(): func(ctx context.Context, _ *fsm.Event) {
+func (s playbackState) String() string {
+	return [...]string{
+		playbackRunning:  "playing",
+		playbackPaused:   "paused",
+		resumeRefused:    "resume-refused",
+		pauseUnavailable: "pause-unavailable",
+	}[s]
+}
+
+func (o *Observer) playbackMachine() *machine.Machine[playbackState, controlEvent] {
+	return machine.New("playback", playbackRunning, nil, []machine.Edge[playbackState, controlEvent]{
+		{On: pauseAccepted, From: []playbackState{playbackRunning}, To: playbackPaused},
+		{On: pauseRejected, From: []playbackState{playbackRunning}, To: pauseUnavailable},
+		{On: resumeAccepted, From: []playbackState{playbackPaused, resumeRefused}, To: playbackRunning},
+		{On: resumeRejected, From: []playbackState{playbackPaused, resumeRefused}, To: resumeRefused},
+	}, map[controlEvent]func(context.Context){
+		pauseAccepted: func(ctx context.Context) {
 			o.pausedAt = time.Now()
 			slog.InfoContext(ctx, "device held", "gate", o.m.Subject, "rule", o.rule.name)
 		},
-		"after_" + resumeAccepted.String(): func(ctx context.Context, _ *fsm.Event) {
+		resumeAccepted: func(ctx context.Context) {
 			held := time.Since(o.pausedAt)
 			o.held += held
 			o.pausedAt = time.Time{}
 			slog.InfoContext(ctx, "device released", "gate", o.m.Subject, "rule", o.rule.name, "held", held.Round(time.Millisecond))
 		},
-		"after_event": func(ctx context.Context, e *fsm.Event) { track(ctx, e.Event, e.Src, e.Dst) },
 	})
 }
 
@@ -213,8 +298,8 @@ type tracker struct {
 	landed int64
 	grew   time.Time
 
-	// trail is the media position over the last rateSpan, oldest first.
-	trail []mark
+	// trail is the media position over the last rateSpan.
+	trail media.Trail
 
 	// kept is when the rate last kept up with playback.
 	kept time.Time
@@ -223,16 +308,50 @@ type tracker struct {
 	sample  media.Progress
 	samples int
 
-	// pausedAt is when the device was last held, zero while it plays; held is every hold before it.
-	pausedAt time.Time
-	held     time.Duration
-	playback *fsm.FSM
+	// fetchedAt is when the device first took a byte of its current fetch, which began at began.
+	fetchedAt time.Time
+	began     time.Duration
+	handed    int64
+
+	reading reading
+
+	// curve maps bytes the delivery made to the media they hold.
+	curve []made
+
+	asked pacing
+
+	// pausedAt and held are castor's holds, viewerAt and viewerHolds its viewer's, which count against played but never as castor's.
+	pausedAt    time.Time
+	held        time.Duration
+	viewerAt    time.Time
+	viewerHolds time.Duration
+	playback    *machine.Machine[playbackState, controlEvent]
 
 	reported time.Time
 }
 
+// reading is what the device takes, plays and is sent at the rate it is asked for, which a change of rate starts over.
+type reading struct {
+	// intake is the bytes taken over intakeSpan and its later half; the lower outlasts the burst that fills a device's buffer.
+	intake, laterIntake media.Trail
+	// weights is what the delivery made over the last intakeSpan.
+	weights  []made
+	playhead playTrail
+}
+
+func newReading(p Playhead) reading {
+	return reading{intake: media.Trail{Span: intakeSpan}, laterIntake: media.Trail{Span: intakeSpan / 2}, playhead: newPlayTrail(p)}
+}
+
+func (r *reading) restart() {
+	r.intake.Reset()
+	r.laterIntake.Reset()
+	r.weights = nil
+	r.playhead.restart()
+}
+
 // read takes one reading of every port.
-func (t *tracker) read() (Vitals, error) {
+func (t *tracker) read(ctx context.Context) (Vitals, error) {
 	now := time.Now()
 	h := Vitals{subtitles: t.m.Lead != nil, holdable: t.m.Holdable && !t.playback.Is(pauseUnavailable)}
 
@@ -289,19 +408,64 @@ func (t *tracker) read() (Vitals, error) {
 
 	if a := t.m.Audience; a != nil {
 		handed, last := a.Handed()
+		// A device that asked for the stream again was handed it afresh, even from where it was.
+		if began := a.Began(); began != t.began || handed < t.handed {
+			t.restarted(ctx, now, began)
+		}
+		t.handed = handed
 		h.handed = handed
+		if handed > 0 {
+			if t.fetchedAt.IsZero() {
+				t.fetchedAt = now
+			}
+			h.intake, h.intakeKnown = t.intakeRate(now, handed)
+		}
 		// A device that fetched nothing yet is measured from the watch's start, not from the epoch.
 		h.sinceFetch = now.Sub(cmp.Or(last, t.start))
 	}
-	// Only a device plays; the watch starts as Play returns, which understates the media on hand.
+	if sv := t.m.Served; sv != nil {
+		h.weight = t.weigh(now, sv.Progress())
+		h.took = t.mediaAt(h.handed)
+		// Samples behind what the device passed are of no further use.
+		for len(t.curve) > 1 && t.curve[1].bytes <= h.handed {
+			t.curve = t.curve[1:]
+		}
+	}
+	h.switchable = t.m.Switchable
+	h.sinceChange = t.asked.sinceChange(now)
+	_, h.room, _ = t.asked.lift(now)
+	h.liftWait, h.trying = t.asked.wait(), t.asked.onTrial()
+	h.climbAfter = t.m.Climb
+	// Only a device plays, and not before it first fetches: the watch starts as Play returns, which understates the media on hand.
 	if t.m.Phase == Playing {
 		h.paused = t.playback.Is(playbackPaused) || t.playback.Is(resumeRefused)
-		held := t.held
+		head := &t.reading.playhead
+		h.pace, h.paceKnown = head.measure(ctx, now, h.paused)
+		h.head, h.headKnown, h.viewerHeld = head.last, head.lastKnown, head.held
+		switch {
+		case h.viewerHeld && t.viewerAt.IsZero():
+			t.viewerAt = now
+		case !h.viewerHeld && !t.viewerAt.IsZero():
+			t.viewerHolds += now.Sub(t.viewerAt)
+			t.viewerAt = time.Time{}
+		}
+		h.held = t.held
 		if h.paused {
 			h.sincePause = now.Sub(t.pausedAt)
-			held += h.sincePause
+			h.held += h.sincePause
 		}
-		h.played, h.held = now.Sub(t.start)-held, held
+		stopped := h.held + t.viewerHolds
+		if !t.viewerAt.IsZero() {
+			stopped += now.Sub(t.viewerAt)
+		}
+		// With no audience to say when it began, the device is taken to play from the start.
+		if t.m.Audience == nil {
+			t.fetchedAt = t.start
+		}
+		if !t.fetchedAt.IsZero() {
+			h.played = now.Sub(t.fetchedAt) - stopped
+		}
+		h.began = t.began
 	}
 
 	if t.m.Grace > 0 {
@@ -311,23 +475,88 @@ func (t *tracker) read() (Vitals, error) {
 	return h, nil
 }
 
-// mark is the media position read at one instant.
-type mark struct {
-	at       time.Time
-	position time.Duration
+// restarted starts the measures over: what the device took and played before began says nothing of it now.
+func (t *tracker) restarted(ctx context.Context, now time.Time, began time.Duration) {
+	slog.InfoContext(ctx, "the device asked for the stream from elsewhere", "gate", t.m.Subject, "from", t.began, "to", began)
+	t.began, t.fetchedAt, t.held, t.grew, t.kept = began, time.Time{}, 0, now, now
+	if !t.pausedAt.IsZero() {
+		t.pausedAt = now
+	}
+	t.viewerAt, t.viewerHolds = time.Time{}, 0
+	t.trail.Reset()
+	t.curve = nil
+	t.reading.restart()
+	t.reading.playhead.forget()
 }
 
 // pace records position and reports the media made per second over the trail, zero until it spans two readings.
 func (t *tracker) pace(now time.Time, position time.Duration) float64 {
-	t.trail = append(t.trail, mark{at: now, position: position})
-	for len(t.trail) > 1 && now.Sub(t.trail[1].at) >= rateSpan {
-		t.trail = t.trail[1:]
+	t.trail.Add(now, position.Seconds())
+	rate, _ := t.trail.Rate(0)
+	return rate
+}
+
+// made is the media a delivery had made, and its bytes, at one instant.
+type made struct {
+	at       time.Time
+	bytes    int64
+	position time.Duration
+}
+
+// weigh records what the delivery has made and reports the bytes a second of it weighs over the last intakeSpan.
+func (t *tracker) weigh(now time.Time, progress media.Progress) float64 {
+	if progress.Bytes <= 0 || progress.Position <= 0 {
+		return 0
 	}
-	oldest := t.trail[0]
-	if span := now.Sub(oldest.at); span > 0 {
-		return float64(position-oldest.position) / float64(span)
+	sample := made{at: now, bytes: progress.Bytes, position: progress.Position}
+	if n := len(t.curve); n == 0 || t.curve[n-1].bytes < sample.bytes {
+		t.curve = append(t.curve, sample)
 	}
-	return 0
+	r := &t.reading
+	r.weights = append(r.weights, sample)
+	for len(r.weights) > 1 && now.Sub(r.weights[1].at) >= intakeSpan {
+		r.weights = r.weights[1:]
+	}
+	oldest := r.weights[0]
+	if span := sample.position - oldest.position; span >= 2*time.Second {
+		return float64(sample.bytes-oldest.bytes) / span.Seconds()
+	}
+	return float64(sample.bytes) / sample.position.Seconds()
+}
+
+// mediaAt is the media a delivery had made by the time it had made bytes, as far as it has been seen to.
+func (t *tracker) mediaAt(bytes int64) time.Duration {
+	if bytes <= 0 || len(t.curve) == 0 {
+		return 0
+	}
+	i, found := slices.BinarySearchFunc(t.curve, bytes, func(m made, b int64) int { return cmp.Compare(m.bytes, b) })
+	if found {
+		return t.curve[i].position
+	}
+	if i == len(t.curve) {
+		return t.curve[i-1].position
+	}
+	if i == 0 {
+		return 0
+	}
+	lo, hi := t.curve[i-1], t.curve[i]
+	share := float64(bytes-lo.bytes) / float64(hi.bytes-lo.bytes)
+	return lo.position + time.Duration(share*float64(hi.position-lo.position))
+}
+
+// intakeRate records what the device has taken and reports bytes per second, once most of intakeSpan is covered.
+func (t *tracker) intakeRate(now time.Time, handed int64) (float64, bool) {
+	r := &t.reading
+	r.intake.Add(now, float64(handed))
+	r.laterIntake.Add(now, float64(handed))
+	rate, known := r.intake.Rate(0.75)
+	if !known {
+		return 0, false
+	}
+	if later, known := r.laterIntake.Rate(0); known {
+		rate = min(rate, later)
+	}
+	return rate, true
 }
 
 // fault ends the watch with the producer's own error and evidence; only an abandon is logged, a revise is the recovery's to say.

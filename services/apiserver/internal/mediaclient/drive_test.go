@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
+	"buf.build/go/protovalidate"
 	"connectrpc.com/connect"
 	"connectrpc.com/validate"
 	"google.golang.org/protobuf/proto"
@@ -18,6 +20,7 @@ import (
 	"github.com/stupside/castor/gen/castor/media/v1/mediav1connect"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"github.com/stupside/castor/services/apiserver/internal/device"
+	"github.com/stupside/castor/services/apiserver/internal/device/devicetest"
 	"github.com/stupside/castor/services/apiserver/internal/mediaclient"
 )
 
@@ -78,7 +81,30 @@ func (m *media) Answer(_ context.Context, req *mediav1.AnswerRequest) (*mediav1.
 }
 
 func play(raw string, container mediav1.Container) *mediav1.DeviceCommand {
-	return &mediav1.DeviceCommand{Command: &mediav1.DeviceCommand_Call_{Call: &mediav1.DeviceCommand_Call{Id: "play", Operation: &mediav1.DeviceCommand_Call_Play{Play: &mediav1.DeviceCommand_Play{Url: raw, Container: container}}}}}
+	p := devicetest.Source(container)
+	p.Url = raw
+	return &mediav1.DeviceCommand{Command: &mediav1.DeviceCommand_Call_{Call: &mediav1.DeviceCommand_Call{Id: "play", Operation: &mediav1.DeviceCommand_Call_Play{Play: p}}}}
+}
+
+func TestAPlayIsRefusedAStreamItsKindCannotHold(t *testing.T) {
+	timed := mediav1.DeviceCommand_Play_Runtime_SEEK_TIME
+	for name, play := range map[string]*mediav1.DeviceCommand_Play{
+		"no stream":            {},
+		"a served playlist":    devicetest.Served(mediav1.Container_CONTAINER_HLS, 0, 0),
+		"a runtime unstated":   devicetest.Served(mediav1.Container_CONTAINER_MPEGTS, time.Hour, 0),
+		"a runtime of nothing": {Stream: &mediav1.DeviceCommand_Play_Progressive_{Progressive: &mediav1.DeviceCommand_Play_Progressive{Container: mediav1.Container_CONTAINER_MPEGTS, Runtime: &mediav1.DeviceCommand_Play_Runtime{Seek: timed}}}},
+	} {
+		play.Url = "http://192.0.2.1/stream"
+		if err := protovalidate.Validate(play); err == nil {
+			t.Errorf("a play of %s was accepted", name)
+		}
+	}
+	for _, play := range []*mediav1.DeviceCommand_Play{devicetest.Source(mediav1.Container_CONTAINER_HLS), devicetest.Served(mediav1.Container_CONTAINER_MPEGTS, time.Hour, timed), devicetest.Playlist()} {
+		play.Url = "http://192.0.2.1/stream"
+		if err := protovalidate.Validate(play); err != nil {
+			t.Errorf("a play of %v was refused: %v", play, err)
+		}
+	}
 }
 
 func serve(t *testing.T, commands ...*mediav1.DeviceCommand) (*mediaclient.Client, *media) {
@@ -93,16 +119,17 @@ func serve(t *testing.T, commands ...*mediav1.DeviceCommand) (*mediaclient.Clien
 	return mediaclient.New(api.Client(), api.URL), m
 }
 
-// lentDevice plays what it is handed, or refuses it with refusal.
+// lentDevice plays what it is handed, or refuses it with refusal, and says it stands at playhead when it has one.
 type lentDevice struct {
-	played  chan *url.URL
-	as      chan mediav1.Container
-	info    chan *castorv1.MediaInfo
-	refusal error
+	played   chan *url.URL
+	play     chan *mediav1.DeviceCommand_Play
+	info     chan *castorv1.MediaInfo
+	refusal  error
+	playhead *device.Playhead
 }
 
 func newLentDevice() *lentDevice {
-	return &lentDevice{played: make(chan *url.URL, 1), as: make(chan mediav1.Container, 1), info: make(chan *castorv1.MediaInfo, 1)}
+	return &lentDevice{played: make(chan *url.URL, 1), play: make(chan *mediav1.DeviceCommand_Play, 1), info: make(chan *castorv1.MediaInfo, 1)}
 }
 
 func (s *lentDevice) Play(_ context.Context, playback device.Playback) error {
@@ -110,9 +137,16 @@ func (s *lentDevice) Play(_ context.Context, playback device.Playback) error {
 		return s.refusal
 	}
 	s.played <- playback.URL
-	s.as <- playback.Container
+	s.play <- playback.Play
 	s.info <- playback.Info
 	return nil
+}
+
+func (s *lentDevice) Position(context.Context) (device.Playhead, error) {
+	if s.playhead == nil {
+		return device.Playhead{}, device.ErrNoPosition
+	}
+	return *s.playhead, nil
 }
 
 func (*lentDevice) AwaitEnd(ctx context.Context) error {
@@ -139,7 +173,7 @@ func cast(t *testing.T, c *mediaclient.Client, lent device.Device) (watching, er
 
 func castWithInfo(t *testing.T, c *mediaclient.Client, lent device.Device, info *castorv1.MediaInfo) (watching, error) {
 	t.Helper()
-	err := c.Start(t.Context(), castID, &mediav1.Source{Source: &mediav1.Source_Stream{Stream: &castorv1.Stream{Url: "https://cdn.example/direct"}}}, asked)
+	err := c.Start(t.Context(), castID, &mediav1.Source{Source: &mediav1.Source_Stream{Stream: &castorv1.Stream{Url: "https://cdn.example/direct"}}}, asked, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +213,8 @@ func taken[T any](t *testing.T, ch <-chan T) T {
 }
 
 func TestADriveLendsItsDeviceForTheCastToPlayOn(t *testing.T) {
-	c, m := serve(t, play("https://cdn.example/direct", mediav1.Container_CONTAINER_HLS))
+	cmd := play("https://cdn.example/direct", mediav1.Container_CONTAINER_HLS)
+	c, m := serve(t, cmd)
 	lent := newLentDevice()
 
 	w, driven := cast(t, c, lent)
@@ -189,8 +224,11 @@ func TestADriveLendsItsDeviceForTheCastToPlayOn(t *testing.T) {
 	if w.ended.GetCompleted() == nil || len(w.shown) != 1 || w.shown[0].GetCasting().GetAttempt() != 1 {
 		t.Errorf("the watch was shown %v then %v, want the cast's status then its end", w.shown, w.ended)
 	}
-	if got, as := taken(t, lent.played), taken(t, lent.as); got.String() != "https://cdn.example/direct" || as != mediav1.Container_CONTAINER_HLS {
-		t.Errorf("the device played %s as %v, want the stream as HLS", got, as)
+	if got := taken(t, lent.played); got.String() != "https://cdn.example/direct" {
+		t.Errorf("the device played %s, want the stream", got)
+	}
+	if got := taken(t, lent.play); !proto.Equal(got, cmd.GetCall().GetPlay()) {
+		t.Errorf("the device was handed %v, want the play as the cast stated it", got)
 	}
 	if got := taken(t, m.answered); got.GetDone() == nil || got.GetCommandId() != "play" || got.GetCastId() != castID {
 		t.Errorf("the play was answered %v, want it done", got)
@@ -224,6 +262,20 @@ func TestADeviceGoneIsAnsweredGoneSoTheCastsRecoveryReadsIt(t *testing.T) {
 	want := &mediav1.DeviceError_Gone{Device: "Bedroom", Observed: "stopped answering", Cause: "connection refused"}
 	if got := taken(t, m.answered).GetError().GetGone(); !proto.Equal(got, want) {
 		t.Errorf("the play was answered gone as %v, want %v", got, want)
+	}
+}
+
+func TestAPositionIsAnsweredWithWhetherTheViewerHoldsTheDevice(t *testing.T) {
+	position := &mediav1.DeviceCommand{Command: &mediav1.DeviceCommand_Call_{Call: &mediav1.DeviceCommand_Call{Id: "position", Operation: &mediav1.DeviceCommand_Call_Position{Position: &mediav1.DeviceCommand_Position{}}}}}
+	c, m := serve(t, position)
+	lent := newLentDevice()
+	lent.playhead = &device.Playhead{At: 42 * time.Second, Paused: true}
+
+	if _, driven := cast(t, c, lent); driven != nil {
+		t.Errorf("the drive ended with %v", driven)
+	}
+	if got := taken(t, m.answered).GetPosition(); got.GetAt().AsDuration() != 42*time.Second || !got.GetPaused() {
+		t.Errorf("the position was answered %v, want 42s held by the viewer", got)
 	}
 }
 

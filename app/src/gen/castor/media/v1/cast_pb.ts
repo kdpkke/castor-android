@@ -5,17 +5,21 @@
 import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb";
+import type { Bitrate } from "./bitrate_pb";
+import { file_castor_media_v1_bitrate } from "./bitrate_pb";
 import type { AudioSelection, SubtitleSelection, WatchRequestSchema, WatchResponseSchema } from "../../v1/cast_pb";
 import { file_castor_v1_cast } from "../../v1/cast_pb";
 import type { Delivery, Stream, StreamCandidate } from "../../v1/stream_pb";
 import { file_castor_v1_stream } from "../../v1/stream_pb";
+import type { Duration } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_duration } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file castor/media/v1/cast.proto.
  */
 export const file_castor_media_v1_cast: GenFile = /*@__PURE__*/
-  fileDesc("ChpjYXN0b3IvbWVkaWEvdjEvY2FzdC5wcm90bxIPY2FzdG9yLm1lZGlhLnYxIqQBCgxTdGFydFJlcXVlc3QSJgoHY2FzdF9pZBgBIAEoCUIVukgSchAyDl5bQS1aMi03XXsyNn0kEi8KBnNvdXJjZRgCIAEoCzIXLmNhc3Rvci5tZWRpYS52MS5Tb3VyY2VCBrpIA8gBARI7CghzZXR0aW5ncxgDIAEoCzIhLmNhc3Rvci5tZWRpYS52MS5QbGF5YmFja1NldHRpbmdzQga6SAPIAQEixQEKEFBsYXliYWNrU2V0dGluZ3MSMQoIZGVsaXZlcnkYASABKA4yEy5jYXN0b3IudjEuRGVsaXZlcnlCCrpIB4IBBBABIAASGwoKbWF4X2hlaWdodBgCIAEoDUIHukgEKgIoAhI3CglzdWJ0aXRsZXMYAyABKAsyHC5jYXN0b3IudjEuU3VidGl0bGVTZWxlY3Rpb25CBrpIA8gBARIoCgVhdWRpbxgEIAEoCzIZLmNhc3Rvci52MS5BdWRpb1NlbGVjdGlvbiIPCg1TdGFydFJlc3BvbnNlIicKC1N0b3BSZXF1ZXN0EhgKB2Nhc3RfaWQYASABKAlCB7pIBHICEAEiDgoMU3RvcFJlc3BvbnNlIrcBCgZTb3VyY2USIwoGc3RyZWFtGAEgASgLMhEuY2FzdG9yLnYxLlN0cmVhbUgAEjIKB3N0cmVhbXMYAiABKAsyHy5jYXN0b3IubWVkaWEudjEuU291cmNlLlN0cmVhbXNIABpDCgdTdHJlYW1zEjgKB3N0cmVhbXMYASADKAsyGi5jYXN0b3IudjEuU3RyZWFtQ2FuZGlkYXRlQgu6SAiSAQUIARDADEIPCgZzb3VyY2USBbpIAggBMtgBCgtDYXN0U2VydmljZRJGCgVTdGFydBIdLmNhc3Rvci5tZWRpYS52MS5TdGFydFJlcXVlc3QaHi5jYXN0b3IubWVkaWEudjEuU3RhcnRSZXNwb25zZRJDCgRTdG9wEhwuY2FzdG9yLm1lZGlhLnYxLlN0b3BSZXF1ZXN0Gh0uY2FzdG9yLm1lZGlhLnYxLlN0b3BSZXNwb25zZRI8CgVXYXRjaBIXLmNhc3Rvci52MS5XYXRjaFJlcXVlc3QaGC5jYXN0b3IudjEuV2F0Y2hSZXNwb25zZTABYgZwcm90bzM", [file_buf_validate_validate, file_castor_v1_cast, file_castor_v1_stream]);
+  fileDesc("ChpjYXN0b3IvbWVkaWEvdjEvY2FzdC5wcm90bxIPY2FzdG9yLm1lZGlhLnYxItgBCgxTdGFydFJlcXVlc3QSJgoHY2FzdF9pZBgBIAEoCUIVukgSchAyDl5bQS1aMi03XXsyNn0kEi8KBnNvdXJjZRgCIAEoCzIXLmNhc3Rvci5tZWRpYS52MS5Tb3VyY2VCBrpIA8gBARI7CghzZXR0aW5ncxgDIAEoCzIhLmNhc3Rvci5tZWRpYS52MS5QbGF5YmFja1NldHRpbmdzQga6SAPIAQESMgoFc3RhcnQYBCABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25CCLpIBaoBAioAItMDChBQbGF5YmFja1NldHRpbmdzEjEKCGRlbGl2ZXJ5GAEgASgOMhMuY2FzdG9yLnYxLkRlbGl2ZXJ5Qgq6SAeCAQQQASAAEhsKCm1heF9oZWlnaHQYAiABKA1CB7pIBCoCKAISNwoJc3VidGl0bGVzGAMgASgLMhwuY2FzdG9yLnYxLlN1YnRpdGxlU2VsZWN0aW9uQga6SAPIAQESKAoFYXVkaW8YBCABKAsyGS5jYXN0b3IudjEuQXVkaW9TZWxlY3Rpb24SiwIKC21heF9iaXRyYXRlGAUgASgLMhguY2FzdG9yLm1lZGlhLnYxLkJpdHJhdGVC2wG6SNcBugF7ChFtYXhfYml0cmF0ZS5mbG9vchJFbXVzdCBiZSBhdCBsZWFzdCAxIE1iaXQvcywgdW5kZXIgd2hpY2ggYSBwaWN0dXJlIGlzIG5vdCB3b3J0aCBzZW5kaW5nGh90aGlzLmJpdHNfcGVyX3NlY29uZCA+PSAxMDAwMDAwugFWChNtYXhfYml0cmF0ZS5jZWlsaW5nEhhtdXN0IGJlIGF0IG1vc3QgMSBUYml0L3MaJXRoaXMuYml0c19wZXJfc2Vjb25kIDw9IDEwMDAwMDAwMDAwMDAiDwoNU3RhcnRSZXNwb25zZSInCgtTdG9wUmVxdWVzdBIYCgdjYXN0X2lkGAEgASgJQge6SARyAhABIg4KDFN0b3BSZXNwb25zZSK3AQoGU291cmNlEiMKBnN0cmVhbRgBIAEoCzIRLmNhc3Rvci52MS5TdHJlYW1IABIyCgdzdHJlYW1zGAIgASgLMh8uY2FzdG9yLm1lZGlhLnYxLlNvdXJjZS5TdHJlYW1zSAAaQwoHU3RyZWFtcxI4CgdzdHJlYW1zGAEgAygLMhouY2FzdG9yLnYxLlN0cmVhbUNhbmRpZGF0ZUILukgIkgEFCAEQwAxCDwoGc291cmNlEgW6SAIIATLYAQoLQ2FzdFNlcnZpY2USRgoFU3RhcnQSHS5jYXN0b3IubWVkaWEudjEuU3RhcnRSZXF1ZXN0Gh4uY2FzdG9yLm1lZGlhLnYxLlN0YXJ0UmVzcG9uc2USQwoEU3RvcBIcLmNhc3Rvci5tZWRpYS52MS5TdG9wUmVxdWVzdBodLmNhc3Rvci5tZWRpYS52MS5TdG9wUmVzcG9uc2USPAoFV2F0Y2gSFy5jYXN0b3IudjEuV2F0Y2hSZXF1ZXN0GhguY2FzdG9yLnYxLldhdGNoUmVzcG9uc2UwAWIGcHJvdG8z", [file_buf_validate_validate, file_castor_media_v1_bitrate, file_castor_v1_cast, file_castor_v1_stream, file_google_protobuf_duration]);
 
 /**
  * @generated from message castor.media.v1.StartRequest
@@ -39,6 +43,13 @@ export type StartRequest = Message<"castor.media.v1.StartRequest"> & {
    * @generated from field: castor.media.v1.PlaybackSettings settings = 3;
    */
   settings?: PlaybackSettings | undefined;
+
+  /**
+   * start is the position in the media to begin at, the beginning when unset.
+   *
+   * @generated from field: google.protobuf.Duration start = 4;
+   */
+  start?: Duration | undefined;
 };
 
 /**
@@ -73,6 +84,13 @@ export type PlaybackSettings = Message<"castor.media.v1.PlaybackSettings"> & {
    * @generated from field: castor.v1.AudioSelection audio = 4;
    */
   audio?: AudioSelection | undefined;
+
+  /**
+   * max_bitrate is the most the cast asks of the device's link, absent for no ceiling.
+   *
+   * @generated from field: castor.media.v1.Bitrate max_bitrate = 5;
+   */
+  maxBitrate?: Bitrate | undefined;
 };
 
 /**

@@ -21,8 +21,14 @@ type Intent struct {
 	// Deadline is the mid-read stall bound every fetch plan is derived with.
 	Deadline time.Duration
 
+	// Start is where the viewer asked the cast to begin.
+	Start time.Duration
+
 	// Delivery seeds the first attempt; recovery may change it.
 	Delivery compose.DeliveryPreference
+
+	// Ceiling is the most the device may be asked to take, zero for none; it bounds the rung a link is read at.
+	Ceiling media.Bitrate
 
 	// Turns hears each attempt and revision.
 	Turns Turns
@@ -39,8 +45,9 @@ type Attempt struct {
 	// Try counts from 1, so two tries of the same terms still read apart.
 	Try int
 
-	// candidate indexes Intent.Candidates; Program is what was resolved for it.
+	// candidate indexes Intent.Candidates, Stream is that link, and Program is what was resolved for it.
 	candidate int
+	Stream    *source.Stream
 	Program   media.Program
 
 	// Origin travels with candidate, since one link's facts do not hold for another.
@@ -57,12 +64,16 @@ type Attempt struct {
 
 	// Delivery is carried per attempt because recovery may change it.
 	Delivery compose.DeliveryPreference
+
+	// Climb is how long the attempt plays well before a better link is tried, zero for never.
+	Climb time.Duration
 }
 
 // identity is exactly the fields a strategy can change, which is the ledger's key; Try is left out.
 type identity struct {
 	candidate int
 	program   string
+	start     time.Duration
 	bitrate   media.Bitrate
 	height    int
 	fetch     string
@@ -75,6 +86,7 @@ func (a Attempt) identify() identity {
 	return identity{
 		candidate: a.candidate,
 		program:   programIdentity(a.Program),
+		start:     a.Program.Start,
 		bitrate:   a.Rendition.Bitrate,
 		height:    a.Rendition.Height,
 		fetch:     fmt.Sprint(a.Fetch),
@@ -104,6 +116,19 @@ func programIdentity(program media.Program) string {
 	return strings.Join(parts, "|")
 }
 
+// at begins a at pos; a live source, or a position past its end, has no such place.
+func (a Attempt) at(pos time.Duration) (Attempt, bool) {
+	a.Program.Start = pos
+	return a, pos <= 0 || !a.live() && (a.Origin.Duration == 0 || pos < a.Origin.Duration)
+}
+
+func (a Attempt) live() bool {
+	return slices.ContainsFunc(a.Program.Inputs, func(input media.Input) bool { return input.Fetching().Live })
+}
+
+// Runtime is what is left to play of the program from where the attempt begins, zero where the source declared none.
+func (a Attempt) Runtime() time.Duration { return max(0, a.Origin.Duration-a.Program.Start) }
+
 // reading binds a resolution to the attempt with a fetch plan derived for its program.
 func (a Attempt) reading(r source.Resolution, deadline time.Duration) Attempt {
 	a.Program, a.Origin, a.Rendition = r.Program, r.Origin, r.Rendition
@@ -111,15 +136,24 @@ func (a Attempt) reading(r source.Resolution, deadline time.Duration) Attempt {
 	return a
 }
 
+// SelfFetchRate is the heaviest stream a device fetching a's URL for itself could choose, as the source declared it; zero where it declared none.
+func (a Attempt) SelfFetchRate() media.Bitrate {
+	return selfFetched(a, func(r source.Rendition) media.Bitrate { return r.Bitrate })
+}
+
 // SelfFetchHeight is the tallest picture a device fetching a's URL for itself could choose.
 func (a Attempt) SelfFetchHeight() int {
-	// A rung with a URL of its own was narrowed at the URL, so the device is pinned to it.
+	return cmp.Or(selfFetched(a, func(r source.Rendition) int { return r.Height }), a.Program.MeasuredHeight())
+}
+
+// selfFetched is the most of a rung's measure a device fetching a's URL could choose; a rung with a URL of its own pins the device to it.
+func selfFetched[T cmp.Ordered](a Attempt, measure func(source.Rendition) T) T {
 	if a.Rendition.URL != nil {
-		return cmp.Or(a.Rendition.Height, a.Program.MeasuredHeight())
+		return measure(a.Rendition)
 	}
-	tallest := 0
+	var most T
 	for _, rung := range a.Origin.Renditions {
-		tallest = max(tallest, rung.Height)
+		most = max(most, measure(rung))
 	}
-	return cmp.Or(tallest, a.Rendition.Height, a.Program.MeasuredHeight())
+	return cmp.Or(most, measure(a.Rendition))
 }

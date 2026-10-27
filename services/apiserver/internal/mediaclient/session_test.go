@@ -62,7 +62,7 @@ func TestRemoteCompletionDuringJoinSurvivesStopTimeout(t *testing.T) {
 		})
 		got, err := s.finish()
 		if err != nil || got != ended || !s.machine.Is(sessionFinished) {
-			t.Fatalf("lost remote completion during join: ended=%v err=%v state=%s", got, err, s.machine.Current())
+			t.Fatalf("lost remote completion during join: ended=%v err=%v state=%s", got, err, s.machine.State())
 		}
 	})
 }
@@ -72,7 +72,7 @@ func TestCancelledSessionDoesNotStartRemoteWork(t *testing.T) {
 	cause := errors.New("caller stopped before start")
 	cancel(cause)
 	// No ports are installed: an already cancelled call must not use them.
-	ended, err := (&Client{}).Run(ctx, "cast", nil, nil, nil, nil, nil)
+	ended, err := (&Client{}).Run(ctx, "cast", nil, nil, nil, nil, 0, nil)
 	if ended != nil || !errors.Is(err, cause) {
 		t.Fatalf("ended=%v err=%v", ended, err)
 	}

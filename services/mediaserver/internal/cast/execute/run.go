@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
+	"time"
 
-	"github.com/looplab/fsm"
+	"github.com/stupside/castor/internal/machine"
 	"github.com/stupside/castor/internal/telemetry"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/compose"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
@@ -30,9 +30,10 @@ func (c Cast) Run(parent context.Context, a recovery.Attempt) (result recovery.O
 	return recovery.Outcome{Err: err, Evidence: evidence(r, err, parent.Err() != nil)}
 }
 
-// ran is how far an attempt got, and the read it started on the way (nil where it read nothing).
+// ran is how far an attempt got, where its playback began, and the read it started on the way (nil where it read nothing).
 type ran struct {
 	reached health.Phase
+	began   time.Duration
 	reader  *pull
 }
 
@@ -51,6 +52,8 @@ const (
 	playbackEnded
 	deliverySettled
 	healthEnded
+	drainElapsed
+	deliverySought
 	attemptCancelled
 	attemptFailed
 	cleanupFinished
@@ -69,50 +72,73 @@ func (e attemptEvent) String() string {
 		playbackEnded:      "playback-ended",
 		deliverySettled:    "delivery-settled",
 		healthEnded:        "health-ended",
+		drainElapsed:       "drain-elapsed",
+		deliverySought:     "delivery-sought",
 		attemptCancelled:   "cancelled",
 		attemptFailed:      "failed",
 		cleanupFinished:    "cleanup-finished",
 	}[e]
 }
 
+type attemptState uint8
+
 const (
-	preparing        = "preparing"
-	inspecting       = "inspecting"
-	planning         = "planning"
-	outputPlanned    = "planned"
-	producing        = "producing"
-	ready            = "ready"
-	startingPlayback = "starting-playback"
-	playingBack      = "playing"
-	stopping         = "stopping"
-	attemptFinished  = "finished"
+	preparing attemptState = iota
+	inspecting
+	planning
+	outputPlanned
+	producing
+	ready
+	startingPlayback
+	playingBack
+	// draining is a device that took the whole stream and plays out what it holds.
+	draining
+	stopping
+	attemptFinished
 )
+
+func (s attemptState) String() string {
+	return [...]string{
+		preparing:        "preparing",
+		inspecting:       "inspecting",
+		planning:         "planning",
+		outputPlanned:    "planned",
+		producing:        "producing",
+		ready:            "ready",
+		startingPlayback: "starting-playback",
+		playingBack:      "playing",
+		draining:         "draining",
+		stopping:         "stopping",
+		attemptFinished:  "finished",
+	}[s]
+}
 
 // Callbacks update state-local evidence. Operations and cleanup remain owned
 // by the coordinator outside FSM callbacks.
-func (c *coordinator) attemptMachine() *fsm.FSM {
-	active := []string{preparing, inspecting, planning, outputPlanned, producing, ready, startingPlayback, playingBack}
-	events := fsm.Events{
-		{Name: inspectionStarted.String(), Src: []string{preparing}, Dst: inspecting},
-		{Name: inspectionFinished.String(), Src: []string{inspecting}, Dst: planning},
-		{Name: planFinished.String(), Src: []string{planning}, Dst: outputPlanned},
-		{Name: productionStarted.String(), Src: []string{outputPlanned}, Dst: producing},
-		{Name: presentationReady.String(), Src: []string{outputPlanned, producing}, Dst: ready},
-		{Name: playbackRequested.String(), Src: []string{ready}, Dst: startingPlayback},
-		{Name: playbackStarted.String(), Src: []string{startingPlayback}, Dst: playingBack},
-		{Name: productionFinished.String(), Src: []string{startingPlayback}, Dst: startingPlayback},
-		{Name: productionFinished.String(), Src: []string{playingBack}, Dst: playingBack},
-		{Name: playbackEnded.String(), Src: []string{playingBack}, Dst: stopping},
-		{Name: deliverySettled.String(), Src: []string{playingBack}, Dst: stopping},
-		{Name: healthEnded.String(), Src: []string{playingBack}, Dst: stopping},
-		{Name: attemptCancelled.String(), Src: active, Dst: stopping},
-		{Name: attemptFailed.String(), Src: active, Dst: stopping},
-		{Name: cleanupFinished.String(), Src: []string{stopping}, Dst: attemptFinished},
-	}
-	track := telemetry.Track("attempt", preparing, attemptFinished)
-	return fsm.NewFSM(preparing, events, fsm.Callbacks{
-		"after_" + attemptCancelled.String(): func(context.Context, *fsm.Event) { c.interruption = context.Cause(c.ctx) },
-		"after_" + playbackEnded.String(): func(context.Context, *fsm.Event) {
+func (c *coordinator) attemptMachine() *machine.Machine[attemptState, attemptEvent] {
+	active := []attemptState{preparing, inspecting, planning, outputPlanned, producing, ready, startingPlayback, playingBack, draining}
+	return machine.New("attempt", preparing, []attemptState{attemptFinished}, []machine.Edge[attemptState, attemptEvent]{
+		{On: inspectionStarted, From: []attemptState{preparing}, To: inspecting},
+		{On: inspectionFinished, From: []attemptState{inspecting}, To: planning},
+		{On: planFinished, From: []attemptState{planning}, To: outputPlanned},
+		{On: productionStarted, From: []attemptState{outputPlanned}, To: producing},
+		{On: presentationReady, From: []attemptState{outputPlanned, producing}, To: ready},
+		{On: playbackRequested, From: []attemptState{ready}, To: startingPlayback},
+		{On: playbackStarted, From: []attemptState{startingPlayback}, To: playingBack},
+		{On: productionFinished, From: []attemptState{startingPlayback}, To: startingPlayback},
+		{On: productionFinished, From: []attemptState{playingBack}, To: playingBack},
+		{On: productionFinished, From: []attemptState{draining}, To: draining},
+		{On: playbackEnded, From: []attemptState{playingBack, draining}, To: stopping},
+		{On: deliverySettled, From: []attemptState{playingBack}, To: draining},
+		{On: healthEnded, From: []attemptState{playingBack}, To: stopping},
+		{On: drainElapsed, From: []attemptState{draining}, To: stopping},
+		{On: deliverySought, From: []attemptState{playingBack, draining}, To: playingBack},
+		{On: attemptCancelled, From: active, To: stopping},
+		{On: attemptFailed, From: active, To: stopping},
+		{On: cleanupFinished, From: []attemptState{stopping}, To: attemptFinished},
+	}, map[attemptEvent]func(context.Context){
+		attemptCancelled: func(context.Context) { c.interruption = context.Cause(c.ctx) },
+		playbackEnded: func(context.Context) {
 			// Capture starvation before cleanup changes the producer's completion.
 			if c.presentation.delivery != nil {
 				if made, sent, ok := starved(c.presentation.feed, *c.presentation.delivery); ok {
@@ -120,42 +146,35 @@ func (c *coordinator) attemptMachine() *fsm.FSM {
 				}
 			}
 		},
-		"after_" + playbackStarted.String(): func(context.Context, *fsm.Event) { c.presentation.reached.reached = health.Playing },
-		"after_event":                       func(ctx context.Context, e *fsm.Event) { track(ctx, e.Event, e.Src, e.Dst) },
+		playbackStarted: func(context.Context) { c.presentation.reached.reached = health.Playing },
 	})
-}
-
-func fireAttempt(ctx context.Context, machine *fsm.FSM, event attemptEvent) error {
-	// Cancellation is an input to the machine. It must not abort the transition
-	// that records stopping or completed cleanup.
-	err := machine.Event(context.WithoutCancel(ctx), event.String())
-	if stayed, ok := errors.AsType[fsm.NoTransitionError](err); ok {
-		return stayed.Err
-	}
-	return err
 }
 
 type operation struct {
 	event attemptEvent
 	err   error
 	done  chan struct{}
+	// off calls the operation off: once it ends, what the operation reports is not heard.
+	off context.Context
 }
 
 // coordinator owns one attempt: preparation, state transitions, playback, and
 // cleanup. Only its event loop changes state; preparation registers resources
 // before handing them back. Operations retain results through cancellation.
 type coordinator struct {
-	device  Device
-	inspect func() (inspectedPresentation, error)
-	plan    func(inspectedPresentation) (plannedPresentation, error)
-	produce func(plannedPresentation) (presentation, error)
+	device     Device
+	maxBitrate media.Bitrate
+	climb      time.Duration
+	inspect    func() (inspectedPresentation, error)
+	plan       func(inspectedPresentation) (plannedPresentation, error)
+	produce    func(plannedPresentation) (presentation, error)
 
 	ctx  context.Context
 	stop context.CancelCauseFunc
 	// releases undoes everything the attempt acquired, once it ends.
 	releases *releases
 
-	machine      *fsm.FSM
+	machine      *machine.Machine[attemptState, attemptEvent]
 	presentation presentation
 	inspected    inspectedPresentation
 	planned      plannedPresentation
@@ -169,6 +188,11 @@ type coordinator struct {
 	interruption error
 	delivered    bool
 	starvation   *health.Fault
+	// made is the delivery as made since playback began or the device last sought; what watches it is called off with it.
+	made       context.Context
+	unmade     context.CancelFunc
+	stopHealth context.CancelFunc
+	stopDrain  context.CancelFunc
 }
 
 func newCoordinator(parent context.Context, c Cast, a recovery.Attempt) *coordinator {
@@ -177,7 +201,7 @@ func newCoordinator(parent context.Context, c Cast, a recovery.Attempt) *coordin
 	// Signal every owner before joining or releasing any resource.
 	rel.interrupt(func() { cancel(nil) })
 	s := &coordinator{
-		device: c.Device, ctx: ctx, stop: cancel, releases: rel,
+		device: c.Device, maxBitrate: c.MaxBitrate, climb: a.Climb, ctx: ctx, stop: cancel, releases: rel,
 		events: make(chan *operation), failures: make(chan error),
 	}
 
@@ -194,7 +218,21 @@ func newCoordinator(parent context.Context, c Cast, a recovery.Attempt) *coordin
 }
 
 func (c *coordinator) launch(event attemptEvent, work func() error) *operation {
-	op := &operation{event: event, done: make(chan struct{})}
+	return c.start(&operation{event: event}, work)
+}
+
+// launchUntil is launch for work off calls off, which then has nothing to say however it ended.
+func (c *coordinator) launchUntil(off context.Context, event attemptEvent, work func() error) *operation {
+	return c.start(&operation{event: event, off: off}, func() error {
+		if err := work(); off.Err() == nil || c.ctx.Err() != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func (c *coordinator) start(op *operation, work func() error) *operation {
+	op.done = make(chan struct{})
 	c.operations = append(c.operations, op)
 	go func() {
 		defer close(op.done)
@@ -225,12 +263,12 @@ func (c *coordinator) run() (ran, error) {
 }
 
 func (c *coordinator) move(event attemptEvent) {
-	if err := fireAttempt(c.ctx, c.machine, event); err != nil {
+	if err := c.machine.Fire(c.ctx, event); err != nil {
 		c.cause = errors.Join(c.cause, err)
 		// A rejected transition is an orchestration failure; it still uses the
 		// machine's normal stopping path, never SetState.
-		if c.machine.Can(attemptFailed.String()) {
-			c.cause = errors.Join(c.cause, fireAttempt(c.ctx, c.machine, attemptFailed))
+		if c.machine.Can(attemptFailed) {
+			c.cause = errors.Join(c.cause, c.machine.Fire(c.ctx, attemptFailed))
 		}
 	}
 }
@@ -247,11 +285,14 @@ func (c *coordinator) loop() {
 		case <-c.ctx.Done():
 			c.move(attemptCancelled)
 		case err := <-c.failures:
-			c.cause = err
+			c.cause = errors.Join(c.cause, err)
 			c.move(attemptFailed)
 		case op := <-c.events:
 			if c.ctx.Err() != nil {
 				c.move(attemptCancelled)
+				continue
+			}
+			if op.off != nil && op.off.Err() != nil {
 				continue
 			}
 			if op.err != nil {
@@ -291,6 +332,10 @@ func (c *coordinator) loop() {
 				c.startPlayback()
 			case playbackStarted:
 				c.observePlayback()
+			case deliverySettled:
+				c.drain()
+			case deliverySought:
+				c.sought()
 			}
 		}
 	}
@@ -311,7 +356,7 @@ func (c *coordinator) startPlayback() {
 	if !c.machine.Is(ready) {
 		return
 	}
-	c.observeProduction()
+	c.watchProduction()
 	c.move(playbackRequested)
 	if !c.machine.Is(startingPlayback) {
 		return
@@ -335,25 +380,38 @@ func (c *coordinator) startPlayback() {
 	})
 }
 
-func (c *coordinator) observeProduction() {
-	if d := c.presentation.delivery; d != nil {
-		c.launch(productionFinished, func() error {
-			select {
-			case <-d.output.Done():
-				return d.output.Err()
-			case <-c.ctx.Done():
-				return nil
+// watchProduction watches what makes the delivery anew, until it ends or the device seeks.
+func (c *coordinator) watchProduction() {
+	d := c.presentation.delivery
+	if d == nil {
+		return
+	}
+	c.made, c.unmade = context.WithCancel(c.ctx)
+	made := c.made
+	c.launchUntil(made, productionFinished, func() error { return ended(made, d.output) })
+	if f := c.presentation.feed; f.buffered != nil && d.output != f.buffered.reader {
+		c.launchUntil(made, productionFinished, func() error { return ended(made, f.buffered.reader) })
+	}
+}
+
+// ended says how what makes p ended, nothing where made ended first.
+func ended(made context.Context, p producer) error {
+	if madeDone(made, p) == nil {
+		return nil
+	}
+	return p.Err()
+}
+
+// madeDone is p's Done once what makes p ended, followed through changes of rate or rung; nil once made ends first.
+func madeDone(made context.Context, p producer) <-chan struct{} {
+	for done := p.Done(); ; done = p.Done() {
+		select {
+		case <-done:
+			if p.Done() == done {
+				return done
 			}
-		})
-		if f := c.presentation.feed; f.buffered != nil && d.output != f.buffered.reader {
-			c.launch(productionFinished, func() error {
-				select {
-				case <-f.buffered.reader.Done():
-					return f.buffered.reader.Err()
-				case <-c.ctx.Done():
-					return nil
-				}
-			})
+		case <-made.Done():
+			return nil
 		}
 	}
 }
@@ -361,20 +419,105 @@ func (c *coordinator) observeProduction() {
 func (c *coordinator) observePlayback() {
 	c.launch(playbackEnded, func() error { return c.device.AwaitEnd(c.ctx) })
 	if d := c.presentation.delivery; d != nil {
-		c.launch(deliverySettled, func() error { return d.sink.Wait(c.ctx, d.output.Done()) })
-		if aud := d.sink.Audience(); aud != nil {
-			monitor := playingMonitor(c.presentation.feed, *d, aud)
-			c.launch(healthEnded, func() error { return observeHealth(c.ctx, monitor, c.device) })
-		}
+		c.settle(d)
+		c.watchHealth(d)
+		c.watchSeeks(d)
 	}
 }
 
-// hand points the device at target; source says whether that is the source itself rather than what castor serves.
-func hand(ctx context.Context, dev Device, target *url.URL, contentType string, shown []media.Caption, source bool) (err error) {
+// settle waits for the device to take the whole of what is made, once it is made.
+func (c *coordinator) settle(d *delivery) {
+	made := c.made
+	produced := make(chan struct{})
+	go func() {
+		if madeDone(made, d.output) != nil {
+			close(produced)
+		}
+	}()
+	c.launchUntil(made, deliverySettled, func() error { return d.sink.Wait(made, produced) })
+}
+
+// watchHealth judges the playing cast until nothing is left to judge.
+func (c *coordinator) watchHealth(d *delivery) {
+	aud := d.sink.Audience()
+	if aud == nil {
+		return
+	}
+	monitor := playingMonitor(c.presentation.feed, *d, aud, c.maxBitrate, c.climb, c.device)
+	watching, stop := context.WithCancel(c.ctx)
+	c.stopHealth = stop
+	c.launchUntil(watching, healthEnded, func() error { return observeHealth(watching, monitor, c.device, d.rate) })
+}
+
+func (c *coordinator) watchSeeks(d *delivery) {
+	if d.sought == nil {
+		return
+	}
+	c.launch(deliverySought, func() error {
+		select {
+		case <-d.sought:
+		case <-c.ctx.Done():
+		}
+		return nil
+	})
+}
+
+// sought watches the delivery made anew from where the device asked, the device being no longer let play out what it held.
+func (c *coordinator) sought() {
+	d := c.presentation.delivery
+	c.unmade()
+	c.watchProduction()
+	c.settle(d)
+	if c.stopDrain != nil {
+		c.stopDrain()
+		c.stopDrain = nil
+		c.watchHealth(d)
+	}
+	c.watchSeeks(d)
+}
+
+const (
+	// drainGrace is how long past the media it holds a device that took the whole stream is given to say it ended.
+	drainGrace = 30 * time.Second
+	// drainMost bounds that wait for a device that cannot say where it is.
+	drainMost = 5 * time.Minute
+	askFor    = 5 * time.Second
+)
+
+// drain waits for a device that took the whole stream to say it played it out; one that never says is let go once that media has had time to play.
+func (c *coordinator) drain() {
+	if c.stopHealth != nil {
+		c.stopHealth()
+	}
+	d := c.presentation.delivery
+	waiting, stop := context.WithCancel(c.ctx)
+	c.stopDrain = stop
+	c.launchUntil(waiting, drainElapsed, func() error {
+		left := drainMost
+		if head, ok := c.device.(health.Playhead); ok {
+			asking, cancel := context.WithTimeout(waiting, askFor)
+			if at, _, known := head.Position(asking); known {
+				left = min(left, max(0, d.output.Progress().Position-at))
+			}
+			cancel()
+		}
+		slog.InfoContext(waiting, "the device took the whole stream and plays out what it holds", "left", left.Round(time.Second))
+		select {
+		case <-time.After(left + drainGrace):
+			slog.WarnContext(waiting, "the device never said it ended; the cast ends with the media it held", "waited", (left + drainGrace).Round(time.Second))
+		case <-waiting.Done():
+		}
+		return nil
+	})
+}
+
+// hand points the device at p.
+func hand(ctx context.Context, dev Device, p Playback) (err error) {
 	ctx, finish := telemetry.Start(ctx, telemetry.Play)
 	defer func() { finish(err) }()
-	slog.InfoContext(ctx, "starting playback", "host", target.Host, "content_type", contentType, "handoff", source)
-	if err := dev.Play(ctx, target, contentType, shown); err != nil {
+	_, source := p.Stream.(Source)
+	slog.InfoContext(ctx, "starting playback", "host", p.URL.Host, "stream", p.Stream)
+	if err := dev.Play(ctx, p); err != nil {
 		return &playRefused{err: err, source: source}
 	}
 	return nil

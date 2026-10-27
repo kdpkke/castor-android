@@ -2,10 +2,13 @@
 package device
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"net"
 	"net/url"
 	"strings"
+	"time"
 
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
@@ -14,12 +17,24 @@ import (
 // Type names a device family in configuration and inside the registry.
 type Type string
 
-// Playback describes the media to hand to a receiver.
+// Playback is the play a cast asked for, its URL as the device reaches it, and what the viewer is told of it.
 type Playback struct {
-	URL       *url.URL
-	Container mediav1.Container
-	Captions  []*mediav1.DeviceCommand_Caption
-	Info      *castorv1.MediaInfo
+	URL  *url.URL
+	Play *mediav1.DeviceCommand_Play
+	Info *castorv1.MediaInfo
+}
+
+// Container is how the stream is packaged, whichever way it reaches the device.
+func (p Playback) Container() mediav1.Container {
+	if p.Play.GetPlaylist() != nil {
+		return mediav1.Container_CONTAINER_HLS
+	}
+	return cmp.Or(p.Play.GetSource().GetContainer(), p.Play.GetProgressive().GetContainer())
+}
+
+// Duration is the stream's runtime, zero where the source declared none.
+func (p Playback) Duration() time.Duration {
+	return cmp.Or(p.Play.GetSource().GetDuration(), p.Play.GetProgressive().GetRuntime().GetDuration(), p.Play.GetPlaylist().GetDuration()).AsDuration()
 }
 
 // Device is a connected device, ready to play; whoever connected it closes it.
@@ -36,9 +51,19 @@ type Device interface {
 	// Stop ends what the device plays, so a cast that ends while the device still fetches from elsewhere does not leave it playing.
 	Stop(ctx context.Context) error
 
+	// Position is where the device says it has played to, ErrNoPosition where it cannot say.
+	Position(ctx context.Context) (Playhead, error)
+
 	Capabilities() *mediav1.Capabilities
 
 	Close() error
+}
+
+var ErrNoPosition = errors.New("the device does not report its position")
+
+type Playhead struct {
+	At     time.Duration
+	Paused bool
 }
 
 // Info names one device, where it answers.
