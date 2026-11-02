@@ -2,7 +2,7 @@
 
 Android bugs, receiver compatibility, extraction and playback reports belong in [this repository](https://github.com/kdpkke/castor-android/issues). Include the app version, Android version, receiver/protocol, reproducible steps and the copyable diagnostic. Remove access tokens, cookies and private URLs before posting logs.
 
-Core-only changes can also be proposed to [upstream Castor](https://github.com/stupside/castor). This project maintains Android integration independently; the Go module and internal ownership rules remain upstream's. See [ARCHITECTURE.md](ARCHITECTURE.md).
+Core-only changes can also be proposed to [upstream Castor](https://github.com/stupside/castor). This project maintains Android integration independently; the Go module and internal ownership rules remain upstream's. See [ARCHITECTURE.md](ARCHITECTURE.md) and the [upstream contribution guide](https://github.com/stupside/castor/blob/main/CONTRIBUTING.md).
 
 ## Build and test
 
@@ -22,6 +22,8 @@ Kotlin follows ktfmt's two-space Google style. Go follows the upstream architect
 ## Upstream updates and releases
 
 [Core synchronization](android/docs/UPSTREAM.md) is handled by the Upstream releases workflow. Resolve conflicts and failed tests on its update PR, rerun validation, then integrate the reviewed commit. Do not force-push the published main branch or choose entire conflicting core files as ours/theirs.
+
+The four root documents (`README.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md` and `SECURITY.md`) describe this Android project. The updater keeps their Android copy for ordinary upstream content conflicts; all other conflict types still require manual review. Update core documentation upstream rather than duplicating it here.
 
 Android validation produces short-lived debug APK artifacts and corresponding native sources. Those APKs use an ephemeral CI signer. Maintainer-published APKs need the established local signer; core synchronization never uploads private keys or publishes installable updates automatically.
 

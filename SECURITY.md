@@ -1,43 +1,48 @@
-# Security
+# Castor Android security
 
-This is the independently maintained Castor Android project. Report Android issues in [kdpkke/castor-android](https://github.com/kdpkke/castor-android/issues). For a sensitive disclosure, contact this repository’s maintainer privately through their GitHub profile; do not publish credentials or private stream URLs. Shared-core issues can also be reported to upstream Castor. The core security guidance below remains applicable.
+This is the independently maintained Android project. Report sensitive Android
+issues privately through the maintainer's GitHub profile; do not publish tokens,
+cookies or private stream URLs in issues or logs. Non-sensitive bugs belong in
+[kdpkke/castor-android](https://github.com/kdpkke/castor-android/issues).
+For the shared engine, follow the
+[upstream security policy](https://github.com/stupside/castor/blob/main/SECURITY.md).
+The integrated core version is recorded in [android/upstream.json](android/upstream.json).
 
-Castor collects no telemetry.
+## Android services and media
 
-## Keeping secrets out of git
+- API, media and scraping RPCs use independent ephemeral bearer tokens and
+  loopback bindings. Other apps can reach loopback, so authentication is required.
+- Device-facing media is reachable on the LAN through unguessable capability
+  URLs. Anyone given such a URL can fetch that cast's media. Use a trusted network.
+- Playback and RPC traffic may use plain HTTP. Replay headers can contain source
+  credentials; keep diagnostics and URLs private. Default Android trust anchors
+  are exported for native HTTPS requests, preserving certificate and hostname checks.
+- Native processes, certificates and temporary files run under the app's private
+  directories. FFmpeg side outputs use private Unix sockets.
+- Android does not configure an external telemetry collector. The core exports
+  logs, traces and metrics only when `telemetry.endpoint` is explicitly configured.
+  GeckoView and its extensions have separate network activity described in the
+  [browser guide](android/docs/ADBLOCK.md).
 
-Use git-ignored `config.local.yaml` (overlays `config.yaml`):
+## Web pages and browser extensions
 
-```yaml
-tmdb:
-  api_key: "<key>"
-```
+The embedded GeckoView browser runs uBlock Origin and AdGuard before loading a
+page. It refuses new-window popups, file/content URLs and protected-media
+permission requests. Websites have no native bridge. This does not guarantee
+that every website or stream is safe or supported.
 
-Environment variables such as `CASTOR_TMDB__API_KEY` override both files. Revoke accidentally committed keys. The TMDB key is used only by the interactive browser and sent only to [TMDB](https://www.themoviedb.org/settings/api).
+The optional browser-extension gateway listens on `127.0.0.1:8411`. It accepts
+only that exact Host and refuses web-page Origins. A browser must pair through an
+explicit owner approval in the app or a notification; only the token's SHA-256 is
+stored. The gateway exposes limited device and cast RPCs, accepts browser-found
+streams rather than webpage resolution, and never reveals engine credentials.
+Any app on the phone can request pairing: approve only a request you initiated.
+Use **Browser extension** in the menu to revoke all grants.
 
-## API, media, and scraping services
+## Distribution and secrets
 
-- **Authenticate RPCs:** set independent `servers.api.token`, `servers.media.token`, and `servers.scraping.token`; use `Authorization: Bearer <token>`. Health checks are exempt. Default ports `:8411`, `:8410`, and `:8412` bind all interfaces and warn if exposed without tokens.
-- **Restrict network access:** unauthenticated callers can start casts or make scraping visit URLs, including its local network. Media accepts streams, not webpage inputs.
-- **Device playback is open:** `/media` cannot require authentication. Anyone who can reach media and knows a cast URL can fetch it; `servers.media.advertise` defines the device-reachable address.
-- **Protect credentials in transit:** RPCs use plain HTTP by default and carry tokens, stream URLs, and replay headers. Castor serves plain HTTP only: beyond trusted networks, terminate TLS in a reverse proxy and point clients at its `https://` URL. IP-bound streams may require scraping and media to share an outbound IP.
-- **Keep replay headers private:** they reach media but are stripped from public cast listings.
-
-## Headless Chrome
-
-Only scraping runs Chrome and reads `browser`/`capture` settings. It uses an isolated profile and fresh randomized fingerprint, not your browser's cookies or passwords. It visits supplied pages and their loaded resources, following only HTTP(S) frames.
-
-## Image provenance
-
-Release images include an SPDX SBOM and SLSA provenance from the [delivery workflow](.github/workflows/_delivery.yml):
-
-```sh
-docker buildx imagetools inspect ghcr.io/stupside/castor:latest --format '{{ json .SBOM }}'
-docker buildx imagetools inspect ghcr.io/stupside/castor:latest --format '{{ json .Provenance }}'
-```
-
-## Reporting a vulnerability
-
-**Browser extension gateway (Android):** the app listens on `127.0.0.1:8411` for the Castor extension in a browser on the same phone. Requests must name that exact host and must not come from a web page's Origin. Casting needs a token granted by the phone's owner through a notification; only its SHA-256 is stored, and **Browser extension** in the menu removes every granted token. The gateway forwards only device listing and cast control, never page resolution, and never reveals the engine's own token. Any app on the phone can ask for pairing, so allow only requests you started from Firefox.
-
-For the upstream core, use [stupside/castor](https://github.com/stupside/castor/issues) or the upstream maintainer’s private contact. For Android-specific vulnerabilities, use this project’s private contact described above.
+Never commit signing keys, passwords, access tokens or `local.properties`. Revoke
+credentials accidentally published. Stable APKs use the maintainer's release
+signer; CI debug APKs have a different identity. Verify downloads as described in
+[release signing](android/docs/SIGNING.md). Upstream core synchronization has no
+access to the private release key and does not publish APK releases.

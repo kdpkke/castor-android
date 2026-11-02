@@ -1,6 +1,6 @@
 module github.com/stupside/castor
 
-go 1.27.1
+go 1.27.3
 
 require (
 	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.12-20260825204119-511051f7f437.2
@@ -30,9 +30,9 @@ require (
 	github.com/huin/goupnp v1.3.0
 	github.com/icholy/digest v1.2.0
 	github.com/knadh/koanf/parsers/yaml v1.1.1
-	github.com/knadh/koanf/providers/env v1.1.0
+	github.com/knadh/koanf/providers/env/v2 v2.0.2
 	github.com/knadh/koanf/providers/file v1.2.1
-	github.com/knadh/koanf/v2 v2.3.8
+	github.com/knadh/koanf/v2 v2.4.1
 	github.com/looplab/fsm v1.0.4
 	github.com/urfave/cli/v3 v3.14.0
 	github.com/vishen/go-chromecast v0.3.4

@@ -72,13 +72,13 @@ Every six hours, **Upstream releases** checks published stable releases in `stup
 
 Normal Android builds generate the official Connect-Kotlin client with Buf from the same Protobuf contracts used by the engine. New core contracts regenerate the communication code automatically; new interface controls and incompatible API changes still need Android development.
 
-Conflicts open an issue and leave main unchanged. Failed checks leave the update PR open. Workflow/automation changes require manual review. Prereleases, drafts and unrelated tags are ignored. This is source integration; it does not install desktop release binaries or silently publish an APK. GitHub's scheduler can be delayed and can disable schedules after 60 days without repository activity; **Run workflow** also checks immediately.
+Content conflicts limited to this project's four Android-owned root documents keep the Android copy. Code conflicts, renames and deletions open an issue and leave main unchanged. Failed checks leave the update PR open. Workflow/automation changes require manual review. Prereleases, drafts and unrelated tags are ignored. This is source integration; it does not install desktop release binaries or silently publish an APK. GitHub's scheduler can be delayed and can disable schedules after 60 days without repository activity; **Run workflow** also checks immediately.
 
 The starting snapshot includes core adaptations based on upstream `af8c784` and live-stream fixes beyond the stable v1.9.0 baseline. The updater does not downgrade it. The full source and history are retained because the native entry point uses Go internal packages; changing the Go module path would break those boundaries. Android's application ID is also retained; updating an installed app requires the same signing identity.
 
 ## Validation
 
-The generated-client integration passed 18 JVM tests, all 28 instrumentation tests on a local Android 17 / 16 KB emulator, release lint and debug/release assembly. A build without existing generated clients recreated them automatically. This integration has not yet been retested on the physical OPPO/LG pair. The unchanged Go source previously passed the short suite (1,149 passing test/subtest results; three desktop/E2E tests excluded), and repository synchronization has additional local Git integration tests. The GitHub-hosted emulator is still being diagnosed; new core releases must pass all CI gates before automatic integration.
+Android validation runs Go tests, race checks and vet, native ARM64/x86-64 builds, JVM tests, lint, APK assembly and the full fixture suite on a GitHub-hosted Android 17 / 16 KB emulator. Repository synchronization has local Git integration tests, including conflict handling and concurrent changes. See [Actions](https://github.com/kdpkke/castor-android/actions) for the results of each commit. Physical OPPO/LG testing covers earlier casting builds; it is not a claim that every later revision has been tested on that hardware. New core releases must pass all CI gates before automatic integration.
 
 ## Credits and licensing
 
