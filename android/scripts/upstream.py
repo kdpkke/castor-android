@@ -12,6 +12,7 @@ import sys
 
 UPSTREAM = "stupside/castor"
 LOCK = Path("android/upstream.json")
+ANDROID_DOCS = frozenset(("README.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "SECURITY.md"))
 
 
 def run(*args, check=True):
@@ -60,10 +61,28 @@ def automatic(paths):
     return not any(p.startswith(protected) for p in paths)
 
 
-def merge_release(commit):
+def merge_release(commit, *, preserve_android_docs=False):
     result = run("git", "merge", "--no-edit", "--no-ff", commit, check=False)
     if result.returncode:
         conflicts = git("diff", "--name-only", "--diff-filter=U")
+        paths = conflicts.splitlines()
+        if preserve_android_docs and paths and set(paths) <= ANDROID_DOCS:
+            # Only ordinary content conflicts in the community-owned documents are safe.
+            entries = git("ls-files", "--unmerged").splitlines()
+            stages = {path: set() for path in paths}
+            for entry in entries:
+                metadata, path = entry.split("\t", 1)
+                mode, _, stage = metadata.split()
+                if mode != "100644" or path not in stages:
+                    break
+                stages[path].add(stage)
+            else:
+                if all(value == {"1", "2", "3"} for value in stages.values()):
+                    git("checkout", "--ours", "--", *paths)
+                    git("add", "--", *paths)
+                    git("commit", "--no-edit")
+                    print("Kept Android-owned documentation: " + ", ".join(paths))
+                    return
         raise RuntimeError("Upstream integration stopped. Conflicting files:\n" + conflicts
                            if conflicts else result.stderr + result.stdout)
 
@@ -110,13 +129,15 @@ def prepare(repo):
         git("switch", "-c", branch)
     try:
         merge_release(base)
-        merge_release(upstream)
+        merge_release(upstream, preserve_android_docs=True)
     except RuntimeError as error:
         issue(repo, f"Castor {tag}: integration needs conflict resolution",
               f"Release: https://github.com/{UPSTREAM}/releases/tag/{tag}\n\n"
               f"Android base: `{base}`\nUpstream commit: `{upstream}`\n\n"
               f"```text\n{error}\n```\n\nMain was not changed. Resolve the conflicts manually; "
-              "the updater never uses ours/theirs or force-pushes.")
+              "only ordinary content conflicts in the four Android-owned root documents "
+              "are resolved automatically. Code, rename and deletion conflicts require review; "
+              "the updater never force-pushes.")
         raise
     lock.update(tag=tag, commit=upstream, integrationBase=upstream)
     LOCK.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8", newline="\n")

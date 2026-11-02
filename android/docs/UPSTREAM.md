@@ -4,7 +4,7 @@ Upstream: https://github.com/stupside/castor. Android: https://github.com/kdpkke
 
 ## Ownership and baseline
 
-`android/`, `cmd/castor-android` and the two Android workflow files belong to this community project. Existing Go packages, generated contracts and the Whisper pin retain their upstream layout and history. The module remains `github.com/stupside/castor` so Go's internal-import rules work without copying or exposing private service implementations.
+`android/`, `cmd/castor-android`, the two Android workflow files and the root `README.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md` and `SECURITY.md` belong to this community project. These documents describe Android and link to upstream for core documentation. Existing Go packages, generated contracts and the Whisper pin retain their upstream layout and history. The module remains `github.com/stupside/castor` so Go's internal-import rules work without copying or exposing private service implementations.
 
 `android/upstream.json` records the integrated stable tag and its immutable commit. Its `integrationBase` is the upstream commit actually merged: the tag's commit, unless upstream main was merged ahead of a release, as stupside/castor#74 was before 2.2.0. The initial Android snapshot tracked v1.9.0 and also contained unreleased changes through `af8c784`. The 2.0.0 integration replaced Android's earlier discovery, FFmpeg-path, capability-URL, live-range, PNG/HLS and DLNA patches with the released upstream implementations. Android's platform-specific media adaptation selects its system font for subtitle burn-in; `cmd/castor-android` composes the native host. Apart from these, the core matches the integrated upstream commit. Android versions are independent, starting at 1.0.0 with tags such as `android-v1.0.0`.
 
@@ -14,13 +14,13 @@ The `upstream-releases.yml` workflow runs at minute 23 every six hours (UTC) and
 
 1. Verify that the recorded upstream tag has not moved.
 2. Fetch the selected upstream tag and resolve it to a commit; create or reuse `upstream-release/<tag>` and merge main and that release, preserving history.
-3. On a conflict, open one issue identifying the release and paths. Do not change main or choose ours/theirs automatically. The runner's incomplete merge is disposable.
+3. Ordinary content conflicts confined to the four Android-owned root documents keep the Android version. This rule applies only when merging the upstream release, never when merging Android main into an existing update branch. Code conflicts, other documents, renames, deletions, additions and file-mode changes still stop integration and open one issue identifying the release and paths. Main remains unchanged. The runner's incomplete merge is disposable.
 4. Record the release SHA in `android/upstream.json`, push the update branch without force and open/reuse its PR.
 5. Call the reusable Android validation workflow explicitly. A PR/push created with `GITHUB_TOKEN` does not reliably start unattended downstream CI; no personal access token is needed for this design.
 6. Require synchronization tests, Go tests/vet/race checks, both Android native ABI builds, 10+ JVM tests, lint and the complete 28+ device-test suite on Android 17 with 16 KB pages. Tests run with read-only repository permissions and no signing secrets.
 7. Reject automatic integration of `.github/`, updater or device-validation script changes. Otherwise, recheck the PR/head and original main SHA, then fast-forward main only to the exact tested commit. A concurrent main/branch change stops integration. No reset, rebase, force-push or deletion is used.
 
-Checks failing leave the PR open. Conflicts produce an issue. A manually closed update PR pauses that release until reopened. The workflow does not close user issues or send messages to the upstream maintainer. Source integration does not publish an Android release.
+Checks failing leave the PR open. Conflicts outside the documentation rule produce an issue. A manually closed update PR pauses that release until reopened. The workflow does not close user issues or send messages to the upstream maintainer. Source integration does not publish an Android release.
 
 The six-hour check is not a release-event subscription to another repository. Once a release is detected, the workflow commits its integration automatically and validates it before advancing main. Incompatible changes and changes to automation still require repair/review; an arbitrary future major release cannot be promised to work without Android changes.
 

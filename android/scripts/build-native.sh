@@ -19,8 +19,9 @@ fetch() {
         touch "$destination/.castor-source-$checksum"
     fi
 }
-fetch https://go.dev/dl/go1.27.2.linux-amd64.tar.gz go.tar.gz "$cache/go" ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5
-export PATH="$cache/go/bin:$PATH"
+go_root="$cache/go1.27.3"
+fetch https://go.dev/dl/go1.27.3.linux-amd64.tar.gz go1.27.3.tar.gz "$go_root" 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+export PATH="$go_root/bin:$PATH"
 if [ ! -f "$cache/ndk.zip" ]; then
     curl --fail --location --retry 3 https://dl.google.com/android/repository/android-ndk-r30-linux.zip -o "$cache/ndk.zip"
 fi
@@ -127,7 +128,7 @@ cp "$cache/freetype/docs/FTL.TXT" "$licenses/FreeType-FTL.txt"
 cp "$cache/harfbuzz/COPYING" "$licenses/HarfBuzz.txt"
 cp "$cache/zimg/COPYING" "$licenses/zimg.txt"
 cp "$root/third_party/whisper.cpp/LICENSE" "$licenses/Whisper.txt"
-cp "$cache/go/LICENSE" "$licenses/Go.txt"
+cp "$go_root/LICENSE" "$licenses/Go.txt"
 cp "$ndk/NOTICE.toolchain" "$licenses/Android-NDK-toolchain.txt"
 cp "$root/LICENSE" "$licenses/Castor.txt"
 

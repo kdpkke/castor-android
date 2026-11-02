@@ -53,6 +53,9 @@ class IntegrationTest(unittest.TestCase):
         upstream.git("init", "-b", "main")
         upstream.git("config", "user.name", "Test Author")
         upstream.git("config", "user.email", "test@example.invalid")
+        for name in ("README.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "SECURITY.md"):
+            Path(name).write_text("Shared documentation\n", encoding="utf-8")
+            upstream.git("add", "--", name)
         self.write_commit("core.txt", "core v1\n", "core v1")
         self.base = upstream.git("rev-parse", "HEAD")
         upstream.git("switch", "-c", "upstream")
@@ -82,6 +85,68 @@ class IntegrationTest(unittest.TestCase):
             upstream.merge_release(self.release)
         self.assertEqual(upstream.git("rev-parse", "HEAD"), before)
         self.assertIn("core.txt", upstream.git("diff", "--name-only", "--diff-filter=U"))
+
+    def conflicting_documentation(self):
+        upstream.git("switch", "upstream")
+        for name in ("README.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "SECURITY.md"):
+            self.write_commit(name, "New upstream documentation\n", "upstream docs")
+        release = upstream.git("rev-parse", "HEAD")
+        upstream.git("switch", "main")
+        for name in ("README.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "SECURITY.md"):
+            self.write_commit(name, "Android documentation\n", "Android docs")
+        return release
+
+    def test_upstream_doc_conflicts_keep_android_docs_and_merge_core(self):
+        release = self.conflicting_documentation()
+        before = upstream.git("rev-parse", "HEAD")
+        upstream.merge_release(release, preserve_android_docs=True)
+        for name in ("README.md", "ARCHITECTURE.md", "CONTRIBUTING.md", "SECURITY.md"):
+            self.assertEqual(Path(name).read_text(), "Android documentation\n")
+        self.assertEqual(Path("core.txt").read_text(), "core v2\n")
+        self.assertEqual(upstream.git("rev-parse", "HEAD^1"), before)
+        self.assertEqual(upstream.git("rev-parse", "HEAD^2"), release)
+        self.assertEqual(upstream.git("status", "--porcelain"), "")
+
+    def test_android_branch_doc_conflicts_still_need_review(self):
+        release = self.conflicting_documentation()
+        before = upstream.git("rev-parse", "HEAD")
+        with self.assertRaisesRegex(RuntimeError, "README.md"):
+            upstream.merge_release(release)
+        self.assertEqual(upstream.git("rev-parse", "HEAD"), before)
+
+    def test_mixed_doc_and_code_conflicts_are_not_resolved(self):
+        release = self.conflicting_documentation()
+        self.write_commit("core.txt", "Android adaptation\n", "adapt core")
+        before = upstream.git("rev-parse", "HEAD")
+        with self.assertRaisesRegex(RuntimeError, "core.txt"):
+            upstream.merge_release(release, preserve_android_docs=True)
+        self.assertEqual(upstream.git("rev-parse", "HEAD"), before)
+        self.assertIn("README.md", upstream.git("diff", "--name-only", "--diff-filter=U"))
+
+    def test_deleted_android_doc_is_not_silently_recreated(self):
+        self.write_commit("README.md", "Android documentation\n", "Android docs")
+        upstream.git("switch", "upstream")
+        upstream.git("rm", "README.md")
+        upstream.git("commit", "-m", "remove upstream README")
+        release = upstream.git("rev-parse", "HEAD")
+        upstream.git("switch", "main")
+        before = upstream.git("rev-parse", "HEAD")
+        with self.assertRaisesRegex(RuntimeError, "README.md"):
+            upstream.merge_release(release, preserve_android_docs=True)
+        self.assertEqual(upstream.git("rev-parse", "HEAD"), before)
+
+    def test_other_documentation_conflicts_still_need_review(self):
+        self.write_commit("docs/README.md", "Shared guide\n", "shared guide")
+        shared = upstream.git("rev-parse", "HEAD")
+        upstream.git("switch", "-c", "other-docs", shared)
+        self.write_commit("docs/README.md", "Upstream guide\n", "upstream guide")
+        release = upstream.git("rev-parse", "HEAD")
+        upstream.git("switch", "main")
+        self.write_commit("docs/README.md", "Android guide\n", "Android guide")
+        before = upstream.git("rev-parse", "HEAD")
+        with self.assertRaisesRegex(RuntimeError, "docs/README.md"):
+            upstream.merge_release(release, preserve_android_docs=True)
+        self.assertEqual(upstream.git("rev-parse", "HEAD"), before)
 
     def candidate(self):
         remote = self.root / "remote.git"
@@ -150,6 +215,7 @@ class IntegrationTest(unittest.TestCase):
         return local_run, base, unpublished
 
     def test_prepare_commits_only_the_published_release_and_keeps_main_unchanged(self):
+        self.release = self.conflicting_documentation()
         local_run, base, unpublished = self.prepare_fixture()
         with patch.object(upstream, "run", side_effect=local_run), \
                 patch.object(upstream, "api", return_value=[{"state": "open", "number": 7}]), \
@@ -163,6 +229,7 @@ class IntegrationTest(unittest.TestCase):
         self.assertEqual(lock["integrationBase"], self.release)
         self.assertEqual(Path("core.txt").read_text(), "core v2\n")
         self.assertEqual(Path("android.txt").read_text(), "phone client\n")
+        self.assertEqual(Path("README.md").read_text(), "Android documentation\n")
         self.assertFalse(Path("unreleased.txt").exists())
         self.assertNotEqual(upstream.run("git", "merge-base", "--is-ancestor", unpublished, head, check=False).returncode, 0)
         self.assertTrue(upstream.git("ls-remote", "origin", "refs/heads/main").startswith(base))
