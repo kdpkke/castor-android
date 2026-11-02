@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.platform.app.InstrumentationRegistry
 import castor.v1.CastOuterClass.*
 import castor.v1.DeviceOuterClass.*
@@ -227,7 +228,9 @@ class MainScreenTest {
     compose.onNodeWithText("Language", useUnmergedTree = true).performClick()
     compose.onNodeWithText("Save").performScrollTo().assertIsNotEnabled()
     compose.onNodeWithText("Language code, e.g. it or en").performScrollTo().performTextInput("it")
-    compose.onNodeWithText("Save").performScrollTo().performClick()
+    // The system IME can still resize the sheet after Compose becomes idle.
+    closeSoftKeyboard()
+    compose.onNodeWithText("Save").performScrollTo().assertIsEnabled().performClick()
     compose.onNodeWithText("720p · Subtitles: IT").assertExists()
     compose.runOnIdle {
       assertEquals("720", CastOptions(context).height())

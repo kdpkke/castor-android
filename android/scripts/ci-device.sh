@@ -26,6 +26,9 @@ cleanup() {
     local result=$?
     if [ -n "$logcat_pid" ]; then kill "$logcat_pid" 2>/dev/null || true; fi
     if [ "$result" -ne 0 ]; then
+        if [ -d android/app/build/outputs/androidTest-results/connected/debug ]; then
+            python3 android/scripts/check-device-results.py || true
+        fi
         "$ANDROID_HOME/platform-tools/adb" shell cat /proc/meminfo || true
         free -h
         tail -n 200 android/build/device-logcat.txt 2>/dev/null || true

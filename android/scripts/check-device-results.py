@@ -11,7 +11,13 @@ for path in Path("android/app/build/outputs/androidTest-results/connected/debug"
     root = ET.parse(path).getroot()
     suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
     for suite in suites:
-        assert all(int(suite.get(key, "0")) == 0 for key in ("failures", "errors", "skipped")), path
+        if any(int(suite.get(key, "0")) != 0 for key in ("failures", "errors", "skipped")):
+            for case in suite.findall("testcase"):
+                for result in case:
+                    if result.tag in ("failure", "error", "skipped"):
+                        print(f"{case.get('classname')}#{case.get('name')}: "
+                              f"{result.text or result.get('message', result.tag)}")
+            sys.exit(f"Device tests failed or were skipped: {path}")
         tests += int(suite.get("tests", "0"))
 if tests < 28:
     sys.exit(f"Only {tests} device tests ran; expected at least 28")
