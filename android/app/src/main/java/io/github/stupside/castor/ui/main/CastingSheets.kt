@@ -14,7 +14,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -22,7 +21,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import castor.v1.DeviceOuterClass.DeviceType
-import io.github.stupside.castor.ExtensionAccess
 import io.github.stupside.castor.R
 import io.github.stupside.castor.theme.*
 import java.util.Locale
@@ -61,7 +59,8 @@ internal fun AppLanguagePicker(
           AppChoiceRow(
             selected == language,
             language.nativeName,
-            if (language == AppLanguage.English) stringResource(R.string.language_default) else null,
+            if (language == AppLanguage.English) stringResource(R.string.language_default)
+            else null,
           ) {
             select(language)
           }
@@ -119,80 +118,6 @@ internal fun AppThemePicker(selected: AppTheme, dismiss: () -> Unit, select: (Ap
 }
 
 @Composable
-internal fun browsersAllowed(count: Int): String =
-  if (count == 0) stringResource(R.string.browsers_none)
-  else pluralStringResource(R.plurals.browsers_allowed, count, count)
-
-// The browsers allowed to cast through this phone's Castor, and the way to take that back.
-@Composable
-internal fun BrowserAccess(access: ExtensionAccess, dismiss: () -> Unit) {
-  var count by remember { mutableIntStateOf(access.count()) }
-  GlassSheet(dismiss) {
-    Column(
-      Modifier.fillMaxWidth()
-        .verticalScroll(rememberScrollState())
-        .padding(horizontal = 24.dp)
-        .padding(bottom = 28.dp),
-      verticalArrangement = Arrangement.spacedBy(18.dp),
-    ) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-          stringResource(R.string.browser_extension),
-          style = MaterialTheme.typography.headlineMedium,
-          modifier = Modifier.weight(1f).semantics { heading() },
-        )
-        IconButton(onClick = dismiss, modifier = Modifier.glassMaterial(RoundedCornerShape(50))) {
-          CastIcon(R.drawable.ic_close, stringResource(R.string.close))
-        }
-      }
-      Text(
-        stringResource(R.string.browser_extension_help),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-      )
-      Text(browsersAllowed(count), style = MaterialTheme.typography.titleMedium)
-      GlassButton(
-        onClick = {
-          access.revokeAll()
-          count = access.count()
-        },
-        enabled = count > 0,
-        modifier = Modifier.fillMaxWidth().testTag("remove-browsers"),
-      ) {
-        Text(stringResource(R.string.remove_browsers))
-      }
-    }
-  }
-}
-
-// The question Castor's notification asks, for an owner who opened the app instead.
-@Composable
-internal fun BrowserRequestDialog(answer: (Boolean) -> Unit) {
-  GlassDialog({ answer(false) }) {
-    Text(
-      stringResource(R.string.browser_allow_title),
-      style = MaterialTheme.typography.headlineSmall,
-      modifier = Modifier.semantics { heading() },
-    )
-    Text(
-      stringResource(R.string.browser_allow_text),
-      style = MaterialTheme.typography.bodyMedium,
-      color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    GlassButton(
-      prominent = true,
-      onClick = { answer(true) },
-      modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("allow-browser"),
-    ) {
-      Text(stringResource(R.string.browser_allow))
-    }
-    GlassButton(onClick = { answer(false) }, modifier = Modifier.fillMaxWidth()) {
-      Text(stringResource(R.string.browser_refuse))
-    }
-  }
-}
-
-@Composable
 private fun AppChoiceRow(chosen: Boolean, label: String, detail: String?, select: () -> Unit) {
   Row(
     Modifier.fillMaxWidth()
@@ -234,14 +159,13 @@ internal fun TvPicker(
   select: (SavedTv) -> Unit,
 ) {
   var manual by rememberSaveable { mutableStateOf(false) }
+  var selectedHost by rememberSaveable { mutableStateOf<String?>(null) }
   var address by rememberSaveable { mutableStateOf("") }
   var type by rememberSaveable { mutableStateOf(DeviceType.DEVICE_TYPE_DLNA) }
-  val lastUsed =
-    saved?.available(state.devices)?.takeIf { state.discoveryComplete && !state.discovering }
-  val otherTvs =
-    state.devices.filter {
-      it.address.isNotBlank() && it.type in receiverTypes && SavedTv(it) != lastUsed
-    }
+  val televisions =
+    if (state.discoveryComplete && !state.discovering) discoveredTvs(state.devices, saved)
+    else emptyList()
+  val selected = televisions.firstOrNull { it.host == selectedHost }
   GlassSheet(dismiss) {
     Column(
       Modifier.fillMaxWidth()
@@ -252,12 +176,14 @@ internal fun TvPicker(
       verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
       Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        if (manual)
+        if (manual) {
           IconButton(onClick = { manual = false }) {
             CastIcon(R.drawable.ic_back, stringResource(R.string.back))
           }
+        }
         Text(
-          stringResource(if (manual) R.string.manual_title else R.string.choose_tv),
+          if (manual) stringResource(R.string.manual_title)
+          else selected?.name ?: stringResource(R.string.choose_tv),
           style = MaterialTheme.typography.headlineMedium,
           modifier = Modifier.weight(1f),
         )
@@ -265,107 +191,117 @@ internal fun TvPicker(
           CastIcon(R.drawable.ic_close, stringResource(R.string.close))
         }
       }
-      if (manual) {
-        OutlinedTextField(
-          address,
-          { address = it },
-          label = { Text(stringResource(R.string.tv_address)) },
-          supportingText = { Text(stringResource(R.string.address_help)) },
-          modifier = Modifier.fillMaxWidth().glassMaterial(MaterialTheme.shapes.medium),
-          shape = MaterialTheme.shapes.medium,
-          colors = glassFieldColors(),
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-          singleLine = true,
-        )
-        Text(stringResource(R.string.device_protocol), style = MaterialTheme.typography.titleMedium)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          receiverTypes.forEach { family ->
-            GlassChoice(type == family, { type = family }, label = { Text(protocolName(family)) })
-          }
-        }
-        GlassButton(
-          prominent = true,
-          onClick = { select(SavedTv(address.trim(), address.trim(), type, manual = true)) },
-          enabled = address.isNotBlank(),
-          modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-        ) {
-          Text(stringResource(R.string.use_tv))
-        }
-      } else {
-        Text(
-          stringResource(R.string.search_help),
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        lastUsed?.let { tv ->
-          GlassPanel(Modifier.fillMaxWidth(), onClick = { select(tv) }) {
-            ListItem(
-              headlineContent = { Text(tv.name) },
-              supportingContent = {
-                Text("${stringResource(R.string.last_tv)} · ${protocolName(tv.type)}")
-              },
-              leadingContent = { CastIcon(R.drawable.ic_tv) },
-              trailingContent = { CastIcon(R.drawable.ic_next, stringResource(R.string.use_tv)) },
-              colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            )
-          }
-        }
-        if (lastUsed != null) {
-          HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-          Text(
-            stringResource(R.string.other_tvs),
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.semantics { heading() },
+      when {
+        manual -> {
+          OutlinedTextField(
+            address,
+            { address = it },
+            label = { Text(stringResource(R.string.tv_address)) },
+            supportingText = { Text(stringResource(R.string.address_help)) },
+            modifier = Modifier.fillMaxWidth().glassMaterial(MaterialTheme.shapes.medium),
+            shape = MaterialTheme.shapes.medium,
+            colors = glassFieldColors(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            singleLine = true,
           )
-          if (otherTvs.isEmpty()) {
+          Text(
+            stringResource(R.string.device_protocol),
+            style = MaterialTheme.typography.titleMedium,
+          )
+          FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            receiverTypes.forEach { family ->
+              GlassChoice(type == family, { type = family }, label = { Text(protocolName(family)) })
+            }
+          }
+          GlassButton(
+            prominent = true,
+            onClick = { select(SavedTv(address.trim(), address.trim(), type, manual = true)) },
+            enabled = address.isNotBlank(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+          ) {
+            Text(stringResource(R.string.use_tv))
+          }
+        }
+        selected != null -> {
+          Text(
+            stringResource(R.string.available_protocols),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+          selected.protocols.forEach { tv ->
+            GlassPanel(
+              Modifier.fillMaxWidth().testTag("receiver-protocol-${tv.type.number}"),
+              onClick = { select(tv) },
+            ) {
+              ListItem(
+                headlineContent = { Text(protocolName(tv.type)) },
+                supportingContent = {
+                  Column {
+                    Text(receiverEndpoint(tv))
+                    if (state.occupying(tv) != null) Text(stringResource(R.string.tv_in_use))
+                  }
+                },
+                leadingContent = { CastIcon(R.drawable.ic_cast) },
+                trailingContent = { CastIcon(R.drawable.ic_next) },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+              )
+            }
+          }
+          GlassButton(
+            onClick = { selectedHost = null },
+            modifier = Modifier.fillMaxWidth().testTag("receiver-back"),
+          ) {
+            CastIcon(R.drawable.ic_back)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.back))
+          }
+        }
+        else -> {
+          if (state.discovering) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text(stringResource(R.string.searching), style = MaterialTheme.typography.bodyMedium)
+          }
+          televisions.forEach { tv ->
+            GlassPanel(
+              Modifier.fillMaxWidth().testTag("receiver-tv-${tv.host}"),
+              onClick = { selectedHost = tv.host },
+            ) {
+              ListItem(
+                headlineContent = { Text(tv.name) },
+                supportingContent = { Text(tv.addresses) },
+                leadingContent = { CastIcon(R.drawable.ic_tv) },
+                trailingContent = { CastIcon(R.drawable.ic_next) },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+              )
+            }
+          }
+          if (!state.discovering && televisions.isEmpty()) {
+            Text(stringResource(R.string.no_tvs), style = MaterialTheme.typography.titleMedium)
             Text(
-              stringResource(R.string.no_other_tvs),
+              stringResource(R.string.no_tvs_help),
               style = MaterialTheme.typography.bodyMedium,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
           }
-        }
-        if (state.discovering) {
-          LinearProgressIndicator(Modifier.fillMaxWidth())
-          Text(stringResource(R.string.searching), style = MaterialTheme.typography.bodyMedium)
-        }
-        otherTvs.forEach { device ->
-          GlassPanel(onClick = { select(SavedTv(device)) }) {
-            ListItem(
-              headlineContent = { Text(device.name.ifBlank { device.address }) },
-              supportingContent = { Text(protocolName(device.type)) },
-              leadingContent = { CastIcon(R.drawable.ic_tv) },
-              trailingContent = { CastIcon(R.drawable.ic_next) },
-              colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+          state.discoveryError?.let {
+            Text(
+              it,
+              color = MaterialTheme.colorScheme.error,
+              style = MaterialTheme.typography.bodyMedium,
             )
           }
-        }
-        if (!state.discovering && state.devices.isEmpty()) {
-          Text(stringResource(R.string.no_tvs), style = MaterialTheme.typography.titleMedium)
-          Text(
-            stringResource(R.string.no_tvs_help),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-          )
-        }
-        state.discoveryError?.let {
-          Text(
-            it,
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodyMedium,
-          )
-        }
-        GlassButton(
-          onClick = refresh,
-          enabled = state.ready && !state.discovering,
-          modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-        ) {
-          CastIcon(R.drawable.ic_refresh)
-          Spacer(Modifier.width(8.dp))
-          Text(stringResource(R.string.search_again))
-        }
-        TextButton(onClick = { manual = true }, modifier = Modifier.fillMaxWidth()) {
-          Text(stringResource(R.string.add_manually))
+          GlassButton(
+            onClick = refresh,
+            enabled = state.ready && !state.discovering,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+          ) {
+            CastIcon(R.drawable.ic_refresh)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.search_again))
+          }
+          TextButton(onClick = { manual = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.add_manually))
+          }
         }
       }
     }
@@ -380,24 +316,19 @@ internal fun PlaybackSettings(
   dismiss: () -> Unit,
   save: (String, String) -> Unit,
 ) {
-  val presets = listOf("720", "1080", "2160")
-  var height by rememberSaveable { mutableStateOf(initialHeight) }
-  var custom by rememberSaveable {
-    mutableStateOf(initialHeight !in presets && initialHeight != NATIVE_QUALITY)
-  }
+  var height by rememberSaveable { mutableStateOf(playbackQuality(initialHeight)) }
   var subtitleMode by rememberSaveable {
     mutableStateOf(if (initialSubtitles in listOf("off", "auto")) initialSubtitles else "language")
   }
   var language by rememberSaveable {
     mutableStateOf(if (subtitleMode == "language") initialSubtitles else "")
   }
-  val validHeight = (!custom && height == NATIVE_QUALITY) || (height.toIntOrNull() ?: 0) >= 2
   val validLanguage =
     subtitleMode != "language" ||
       Regex("^[a-z]{2,3}$").matches(language.trim().lowercase(Locale.ROOT))
   val subtitles =
     if (subtitleMode == "language") language.trim().lowercase(Locale.ROOT) else subtitleMode
-  val changed = height != initialHeight || subtitles != initialSubtitles
+  val changed = height != playbackQuality(initialHeight) || subtitles != initialSubtitles
   // Closing with unsaved changes asks first, whether through X, a tap outside, a swipe or Back.
   var confirmClose by rememberSaveable { mutableStateOf(false) }
   fun close() {
@@ -412,7 +343,7 @@ internal fun PlaybackSettings(
   ) {
     if (confirmClose)
       UnsavedChangesDialog(
-        canSave = validHeight && validLanguage,
+        canSave = validLanguage,
         keepEditing = { confirmClose = false },
         discard = dismiss,
         save = { save(height, subtitles) },
@@ -436,51 +367,26 @@ internal fun PlaybackSettings(
         }
       }
       Text(stringResource(R.string.quality), style = MaterialTheme.typography.titleMedium)
-      GlassChoice(
-        !custom && height == NATIVE_QUALITY,
-        {
-          custom = false
-          height = NATIVE_QUALITY
-        },
-        label = { Text(stringResource(R.string.quality_native)) },
-      )
-      FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        presets.forEach { preset ->
-          GlassChoice(
-            !custom && height == preset,
-            {
-              custom = false
-              height = preset
-            },
-            label = { Text("${preset}p") },
+      FlowRow(
+        modifier = Modifier.selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        listOf(
+            NATIVE_QUALITY to R.string.quality_native,
+            OPTIMIZED_QUALITY to R.string.quality_optimized,
           )
-        }
-        GlassChoice(
-          custom,
-          {
-            custom = true
-            if (height == NATIVE_QUALITY) height = ""
-          },
-          label = { Text(stringResource(R.string.custom)) },
-        )
+          .forEach { (value, label) ->
+            GlassChoice(
+              height == value,
+              { height = value },
+              label = { Text(stringResource(label)) },
+            )
+          }
       }
-      if (custom)
-        OutlinedTextField(
-          height,
-          { height = it },
-          label = { Text(stringResource(R.string.height_pixels)) },
-          isError = !validHeight,
-          supportingText = { if (!validHeight) Text(stringResource(R.string.height_invalid)) },
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-          singleLine = true,
-          modifier = Modifier.fillMaxWidth().glassMaterial(MaterialTheme.shapes.medium),
-          shape = MaterialTheme.shapes.medium,
-          colors = glassFieldColors(),
-        )
       Text(
         stringResource(
-          if (!custom && height == NATIVE_QUALITY) R.string.quality_native_help
-          else R.string.quality_help
+          if (height == NATIVE_QUALITY) R.string.quality_native_help
+          else R.string.quality_optimized_help
         ),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -515,14 +421,17 @@ internal fun PlaybackSettings(
         )
       if (subtitleMode != "off")
         Text(
-          stringResource(R.string.subtitles_help),
+          stringResource(
+            if (height == NATIVE_QUALITY) R.string.subtitles_native_help
+            else R.string.subtitles_help
+          ),
           style = MaterialTheme.typography.bodyMedium,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
       GlassButton(
         prominent = true,
         onClick = { save(height, subtitles) },
-        enabled = validHeight && validLanguage,
+        enabled = validLanguage,
         modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
       ) {
         Text(stringResource(R.string.save))

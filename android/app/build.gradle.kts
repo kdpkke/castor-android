@@ -20,9 +20,10 @@ android {
         minSdk = 28
         ndk { abiFilters += targetAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "x86_64") }
         targetSdk = 37
-        versionCode = 19
-        versionName = "1.3.0"
+        versionCode = 35
+        versionName = "1.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["appLabel"] = "@string/app_name"
         // Manual diagnostics need real hardware or an explicitly supplied external URL.
         // Exclude them from Gradle/CI rather than reporting skipped tests as a successful run.
         // One annotation, not a comma-separated notClass list: Gradle excluded only its first class.
@@ -30,6 +31,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-test.16"
+            manifestPlaceholders["appLabel"] = "Castor (test)"
+        }
         release {
             isMinifyEnabled = false
         }

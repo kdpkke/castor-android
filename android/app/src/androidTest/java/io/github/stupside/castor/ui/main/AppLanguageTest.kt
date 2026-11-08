@@ -168,7 +168,7 @@ class AppLanguageTest {
         model = ViewModelProvider(it)[MainScreenViewModel::class.java]
         // Explicit synthetic active state: theme selection must leave the live model untouched.
         model.uiState.value =
-          model.uiState.value.copy(castId = "theme-fixture", phase = CastPhase.Casting)
+          castingScreenState(castId = "theme-fixture", phase = CastPhase.Casting)
       }
       compose.onNodeWithText("Light").performClick()
       compose.onNodeWithText("Light").assertIsSelected()
@@ -255,7 +255,7 @@ class AppLanguageTest {
       }
       compose.onNodeWithText("Italiano").assertIsSelected()
       compose.onNodeWithContentDescription("Chiudi").performClick()
-      compose.onNodeWithText("Qualità nativa · Sottotitoli: Disattivati").assertExists()
+      compose.onNodeWithText("Nativa · Sottotitoli: Disattivati").assertExists()
       capture("home-it")
       compose.onNodeWithText("https://example.org/shared-video").assertExists()
       compose.onNodeWithContentDescription("Altre opzioni").performClick()
@@ -279,7 +279,7 @@ class AppLanguageTest {
       compose.activityRule.scenario.recreate()
       compose.onNodeWithText("App language").assertDoesNotExist()
       compose.onNodeWithText("Paste link").assertExists()
-      compose.onNodeWithText("Native quality · Subtitles: Off").assertExists()
+      compose.onNodeWithText("Native · Subtitles: Off").assertExists()
     } finally {
       context.unbindService(connection)
     }

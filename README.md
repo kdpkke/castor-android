@@ -25,10 +25,12 @@ Native Android emulator previews with sample input.
 
 ## Features
 
-- Paste a link or share it from another app; choose Automatic, Web page or Direct stream.
+- Paste a link, share a video from another app or tap **Choose video** for a file on your phone.
+- Automatic mode recognizes download links from server headers, including links without a video extension. Supported videos start playing while the phone reads them; a full download is not required first.
 - Discover Chromecast/DLNA receivers, reuse a saved TV or enter an address manually.
 - Keep casting in the background through an Android foreground service.
-- Native quality, optional height limits and subtitle preferences.
+- Pause, resume and seek from the app when supported by the TV. Tap a circular **10** arrow for a ten-second step, or hold it to keep seeking.
+- Native playback without re-encoding, or Optimized playback for receiver compatibility; separate subtitle preferences.
 - English and Italian; System, Light and Dark appearance, with Dark as the default.
 - Settings remain open while choices update immediately; diagnostic details are selectable and copyable.
 - Live-stream delivery follows future bytes; captured HLS access can renew through the original page when tokens expire.
@@ -37,11 +39,11 @@ Android 9+; arm64-v8a phones and x86_64 emulators. Previous casting builds were 
 
 ## Install and use
 
-Download an APK from this repository's Releases, connect the phone and TV to the same Wi-Fi, then paste/share a URL, choose the TV and tap **Cast video**. Use Web page for an HTML player, Direct stream for an actual media URL. Android 17 requires local-network permission. See the [usage and compatibility guide](android/README.md) for details.
+Download an APK from this repository's Releases, connect the phone and TV to the same Wi-Fi, then paste/share a URL or tap **Choose video**, choose the TV and tap **Cast video**. Automatic detects pages and media downloads; the source menu lets you override it. Android 17 requires local-network permission. See the [usage and compatibility guide](android/README.md) for details.
 
 Release notes include SHA-256 checksums and the signing certificate fingerprint so you can verify your download. CI debug APKs are temporary validation builds and use a different signer. No signing keys are committed or uploaded by the updater.
 
-Stable releases use a dedicated signing key; see [signature verification](android/docs/SIGNING.md) and its public certificate. Moving from a development build requires uninstalling it once before installing the stable APK, which removes saved app preferences. Later stable releases update normally.
+Stable releases use a dedicated signing key; see [signature verification](android/docs/SIGNING.md) and its public certificate. Current development builds appear as **Castor (test)** and install alongside the stable app. Legacy development builds using the stable package ID require a one-time uninstall before installing a stable APK, which removes their saved preferences. Later stable releases update normally.
 
 Android versions follow their own sequence, starting at **1.0.0**, with tags such as `android-v1.0.0`. Changes are listed in [android/CHANGELOG.md](android/CHANGELOG.md). The upstream core version is tracked separately in [android/upstream.json](android/upstream.json).
 

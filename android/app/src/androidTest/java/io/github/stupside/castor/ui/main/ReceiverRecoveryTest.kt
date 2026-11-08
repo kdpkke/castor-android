@@ -9,7 +9,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.test.platform.app.InstrumentationRegistry
 import castor.v1.CastOuterClass.*
 import castor.v1.DeviceOuterClass.*
-import io.github.stupside.castor.R
 import io.github.stupside.castor.data.Rpc
 import io.github.stupside.castor.theme.CastorTheme
 import java.util.concurrent.CountDownLatch
@@ -39,11 +38,8 @@ class ReceiverRecoveryTest {
   @Test
   fun lastUsedIsHiddenUntilDiscoveryConfirmsItAndDisappearsWhenOffline() {
     val state = mutableStateOf(MainScreenUiState(ready = true))
-    val lastUsed =
-      InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.last_tv) +
-        " · DLNA"
     compose.setContent { CastorTheme { TvPicker(state.value, SavedTv(device), {}, {}, {}) } }
-    compose.onNodeWithText(lastUsed).assertDoesNotExist()
+    compose.onNodeWithText(device.name).assertDoesNotExist()
     compose.runOnIdle {
       state.value =
         state.value.copy(
@@ -60,13 +56,9 @@ class ReceiverRecoveryTest {
           discoveryComplete = true,
         )
     }
-    compose.onNodeWithText(lastUsed).assertExists()
+    compose.onNodeWithText("192.0.2.10:1938").assertExists()
     compose.onAllNodesWithText(device.name).assertCountEquals(1)
-    compose
-      .onNodeWithText(
-        InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.other_tvs)
-      )
-      .assertExists()
+    compose.onNodeWithText("DLNA").assertDoesNotExist()
     compose.onNodeWithText("Bedroom").assertExists()
     val evidence =
       java.io.File(
@@ -80,9 +72,9 @@ class ReceiverRecoveryTest {
         .compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
     }
     compose.runOnIdle { state.value = state.value.copy(discovering = true) }
-    compose.onNodeWithText(lastUsed).assertDoesNotExist()
+    compose.onNodeWithText(device.name).assertDoesNotExist()
     compose.runOnIdle { state.value = state.value.copy(devices = emptyList(), discovering = false) }
-    compose.onNodeWithText(lastUsed).assertDoesNotExist()
+    compose.onNodeWithText(device.name).assertDoesNotExist()
   }
 
   @Test
@@ -278,7 +270,9 @@ class ReceiverRecoveryTest {
         model.uiState.value.castId == active.id && model.uiState.value.ready
       }
       compose.runOnIdle {
-        assertEquals(active, model.uiState.value.activeCast)
+        assertEquals(active.id, model.uiState.value.activeCast?.id)
+        assertEquals(active.device, model.uiState.value.activeCast?.device)
+        assertEquals(active.source, model.uiState.value.activeCast?.source)
         assertNotNull("Keep the original diagnostic visible", model.uiState.value.error)
         model.stop()
       }

@@ -37,7 +37,15 @@ AdGuard awaits `tabs.create` for its internal first-install page before enabling
 its default filters. A restricted `TabDelegate` serves only a trusted blocker's
 own `moz-extension:` pages in temporary, undisplayed sessions. It refuses external
 promotional pages, releases completed setup sessions, and cannot replace the
-source player. Site-created new windows and non-HTTP(S) navigation are refused.
+source player. Site-created new windows and top-level non-HTTP(S) navigation are
+refused. Subframes can use HTTP(S), `about:blank` and `about:srcdoc`: inline widget
+documents inherit the embedding page's origin and remain subject to the blockers.
+This includes the inline documents required by Cloudflare Turnstile. The site
+still decides whether its verification succeeds.
+Embedded `about:blank` and `about:srcdoc` frames are allowed for inline widgets,
+including Cloudflare Turnstile. Top-level navigation cannot open `about:srcdoc`;
+file/content URLs remain refused. A site's challenge can still reject an embedded
+browser; this compatibility setting does not guarantee challenge completion.
 
 Filter lists update through the extensions' normal mechanisms. Extension code
 updates with the app: change the pinned package, checksum and version in

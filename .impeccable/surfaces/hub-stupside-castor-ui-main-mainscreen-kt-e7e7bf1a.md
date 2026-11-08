@@ -2,7 +2,7 @@
 version: 1
 slug: "hub-stupside-castor-ui-main-mainscreen-kt-e7e7bf1a"
 primary_target: "android/app/src/main/java/io/github/stupside/castor/ui/main/MainScreen.kt"
-related_targets: ["android/app/src/main/java/io/github/stupside/castor/theme/Theme.kt","android/app/src/main/java/io/github/stupside/castor/MainActivity.kt"]
+related_targets: ["android/app/src/main/java/io/github/stupside/castor/theme/Theme.kt","android/app/src/main/java/io/github/stupside/castor/MainActivity.kt","android/app/src/main/java/io/github/stupside/castor/ui/main/PlaybackControls.kt"]
 ---
 
 # Android casting
@@ -76,3 +76,15 @@ Saved sheet state survives language-triggered Activity recreation, so another
 language can be selected without reopening the chooser. Close, Android Back and
 native dismissal remain user actions. The playback summary names subtitles
 explicitly in English and Italian instead of presenting an unexplained Off value.
+
+
+## Playback controls — 2026-11-02
+
+THESIS: Control the current TV video directly from its existing active pairing panel, with real receiver state and one reachable stop action.
+OWN-WORLD: Inherit Liquid Glass, Material type roles, petrol emphasis, the scenic-only blur and both existing color schemes. No new visual system or dependency.
+STORY: See the actual playhead and duration; pause or resume, drag the timeline, or move ten seconds in either direction. Hold a seek button to keep moving, release to stop repeating. Unavailable receiver controls stay disabled; no invented playback clock.
+FIRST VIEWPORT: Keep the television and source together. Below their divider, a native timeline and time labels sit above a centered three-control row: a circular reverse arrow with 10 inside, a larger pause/play circle, then the matching forward-10 arrow. One short localized hold hint follows; Stop casting remains fixed below.
+FORM: Operate, code-led local extension, precisely specified by the user's supplied circular-arrow reference. Native combined click/long-click semantics, press ripple, cancellation and font scaling; new generated Playback/Control RPCs bind to the current leased receiver. Volume is outside this request.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+
+This explicit request extends the earlier constraint on unsupported controls: pause, position and seeking now require real backend support, not decorative buttons. Preserve the existing cast when a control fails. Poll only while the interface is visible. Coalesce repeated seek requests instead of queuing stale targets. Native quality, active source/receiver ownership and language/theme continuity remain intact.

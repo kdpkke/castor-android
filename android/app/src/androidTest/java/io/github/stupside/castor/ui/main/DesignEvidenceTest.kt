@@ -29,7 +29,7 @@ class DesignEvidenceTest {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     context.getSharedPreferences("casting-options", 0).edit().clear().commit()
     val model = MainScreenViewModel()
-    model.uiState.value = MainScreenUiState(ready = true, phase = CastPhase.Ready)
+    model.uiState.value = MainScreenUiState(ready = true, idlePhase = CastPhase.Ready)
     var dark by mutableStateOf(false)
     var fontScale by mutableFloatStateOf(1f)
     var italian by mutableStateOf(false)
@@ -95,9 +95,9 @@ class DesignEvidenceTest {
     compose.onNodeWithContentDescription("Close").performClick()
     compose.onNodeWithText("Playback settings").performScrollTo().performClick()
     capture("settings")
-    compose.onNodeWithText("Native quality").performClick().assertIsSelected()
+    compose.onNodeWithText("Native").performClick().assertIsSelected()
     capture("settings-native")
-    compose.onNodeWithText("720p").performClick()
+    compose.onNodeWithText("Optimized").performClick()
     compose.onNodeWithContentDescription("Close").performClick()
     compose.onNodeWithText("Save your changes?").assertIsDisplayed()
     capture("settings-unsaved")
@@ -123,7 +123,7 @@ class DesignEvidenceTest {
     compose.runOnIdle {
       italian = false
       model.uiState.value =
-        model.uiState.value.copy(
+        castingScreenState(
           castId = "synthetic-cast",
           phase = CastPhase.Casting,
           activeCast =
@@ -147,9 +147,10 @@ class DesignEvidenceTest {
     compose.runOnIdle {
       model.uiState.value =
         model.uiState.value.copy(
-          castId = null,
-          phase = CastPhase.Failed,
-          error =
+          sessions = emptyList(),
+          selectedCastId = null,
+          idlePhase = CastPhase.Failed,
+          failure =
             "device-refused: fixture receiver did not acknowledge playback\nDiagnostic details for visual review.",
         )
     }

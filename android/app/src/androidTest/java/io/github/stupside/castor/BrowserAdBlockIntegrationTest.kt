@@ -27,6 +27,49 @@ class BrowserAdBlockIntegrationTest {
     }
 
   @Test
+  fun inlineFramesCanRunWhileAdsAndPopupsStayBlocked() =
+    runBlocking<Unit> {
+      val requests = CopyOnWriteArrayList<String>()
+      MockWebServer().use { origin ->
+        origin.dispatcher =
+          object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+              val path = request.requestUrl!!.encodedPath
+              requests += path
+              return when (path) {
+                "/page" ->
+                  MockResponse()
+                    .setHeader("Content-Type", "text/html")
+                    .setBody(
+                      """<h1>Inline widget</h1>
+                      <iframe srcdoc="<script src='/ads/custom_ads.js'></script><script>window.open('/popup');fetch('/inline.m3u8');</script>"></iframe>"""
+                    )
+                else ->
+                  MockResponse()
+                    .setHeader("Content-Type", "application/x-mpegURL")
+                    .setBody("#EXTM3U\n#EXT-X-ENDLIST\n")
+              }
+            }
+          }
+        origin.start()
+        val browser = withContext(Dispatchers.Main) { BrowserResolver(context) }
+        try {
+          val result =
+            withTimeout(15_000) {
+              browser.resolve(
+                ResolveRequest.newBuilder().addUrls(origin.url("/page").toString()).build()
+              )
+            }
+          assertEquals(origin.url("/inline.m3u8").toString(), result.streamsList.single().stream.url)
+          assertFalse("The inline frame must retain ad blocking: $requests", "/ads/custom_ads.js" in requests)
+          assertFalse("The inline frame must not open a popup: $requests", "/popup" in requests)
+        } finally {
+          withContext(Dispatchers.Main) { browser.close() }
+        }
+      }
+    }
+
+  @Test
   fun bothOfficialBlockersAreInstalledAndEnabled() =
     runBlocking<Unit> {
       val extensions =

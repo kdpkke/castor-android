@@ -19,9 +19,13 @@ The exact integrated release is recorded in [android/upstream.json](android/upst
 - `BrowserServer` supplies scraping and device discovery through authenticated
   loopback RPCs. GeckoView opens web pages with uBlock Origin and AdGuard; Android
   NSD and SSDP find receivers. Protocol-specific device control remains in Go.
-- `ExtensionGateway` separately authorizes the Castor browser extension on the
-  same phone. Pairing grants a revocable token and only a limited set of device
-  and cast RPCs; the engine's own token never leaves the app.
+- `LocalVideos` serves only owner-selected Android documents through opaque
+  loopback capabilities on `BrowserServer`, including HEAD and byte ranges.
+  The engine serves these files to receivers; no full-file copy or storage-wide
+  permission is needed. Ending the cast revokes its file capabilities.
+- Automatic input classification checks HTTP headers for extensionless downloads.
+  HTML still follows webpage extraction; detected media uses the engine's existing
+  progressive delivery rather than waiting for a complete download.
 
 ## Contracts and trust boundaries
 

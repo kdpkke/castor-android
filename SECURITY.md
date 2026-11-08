@@ -24,20 +24,18 @@ The integrated core version is recorded in [android/upstream.json](android/upstr
   GeckoView and its extensions have separate network activity described in the
   [browser guide](android/docs/ADBLOCK.md).
 
-## Web pages and browser extensions
+## Web pages and selected videos
 
 The embedded GeckoView browser runs uBlock Origin and AdGuard before loading a
 page. It refuses new-window popups, file/content URLs and protected-media
 permission requests. Websites have no native bridge. This does not guarantee
 that every website or stream is safe or supported.
 
-The optional browser-extension gateway listens on `127.0.0.1:8411`. It accepts
-only that exact Host and refuses web-page Origins. A browser must pair through an
-explicit owner approval in the app or a notification; only the token's SHA-256 is
-stored. The gateway exposes limited device and cast RPCs, accepts browser-found
-streams rather than webpage resolution, and never reveals engine credentials.
-Any app on the phone can request pairing: approve only a request you initiated.
-Use **Browser extension** in the menu to revoke all grants.
+Local videos are opened through Android's document picker or a video share grant.
+The app requests no storage-wide permission. Only explicitly selected content
+receives an unguessable loopback capability; ending the cast revokes that access.
+Web pages still cannot open file/content URLs. The retired external browser
+extension gateway is no longer started or exposed in settings.
 
 ## Distribution and secrets
 

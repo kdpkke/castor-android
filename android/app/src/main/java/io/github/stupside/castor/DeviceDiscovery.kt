@@ -14,8 +14,12 @@ import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.MulticastSocket
 import java.net.NetworkInterface
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.URI
 import java.net.URL
+import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.awaitClose
@@ -23,6 +27,13 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import org.xmlpull.v1.XmlPullParser
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import org.json.JSONObject
+import org.json.JSONException
 
 // Android supplies mDNS and active hotspot interfaces; no restricted netlink enumeration is needed.
 class DeviceDiscovery(private val context: Context) {
@@ -34,8 +45,9 @@ class DeviceDiscovery(private val context: Context) {
   // Every route is searched independently: one that fails (a cellular default route refusing
   // multicast, a hotspot that just stopped) neither hides receivers found on the others nor the
   // Chromecasts. The search fails only when nothing was found and some route failed.
-  suspend fun find(): List<Device> = coroutineScope {
+  suspend fun find(remembered: Device? = null): List<Device> = coroutineScope {
     val cast = async { attempt { chromecasts() } }
+    val known = async { rememberedChromecast(remembered) }
     val ssdp =
       async(Dispatchers.IO) {
         // The default route can be cellular while the TV sits on this phone's hotspot, and the
@@ -45,7 +57,9 @@ class DeviceDiscovery(private val context: Context) {
         routes.map { async { attempt { ssdp(it) } } }.awaitAll()
       }
     val results = ssdp.await() + cast.await()
-    val found = results.flatMap { it.getOrNull().orEmpty() }.distinctBy { "${it.type}:${it.id}" }
+    val found =
+      (results.flatMap { it.getOrNull().orEmpty() } + listOfNotNull(known.await()))
+        .distinctBy { "${it.type}:${it.id}" }
     if (found.isEmpty()) results.firstNotNullOfOrNull { it.exceptionOrNull() }?.let { throw it }
     found
   }
@@ -237,5 +251,75 @@ class DeviceDiscovery(private val context: Context) {
       }
     }
     return found
+  }
+
+  companion object {
+    internal val knownClient =
+      OkHttpClient.Builder()
+        .callTimeout(3, TimeUnit.SECONDS)
+        .connectTimeout(1, TimeUnit.SECONDS)
+        .readTimeout(2500, TimeUnit.MILLISECONDS)
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .retryOnConnectionFailure(false)
+        .build()
+
+    internal suspend fun rememberedChromecast(
+      remembered: Device?,
+      client: OkHttpClient = knownClient,
+    ): Device? {
+      if (remembered == null || remembered.type != DeviceType.DEVICE_TYPE_CHROMECAST) return null
+      val rawId = remembered.id.removePrefix("chromecast:")
+      val expected = castIdentity(rawId) ?: return null
+      val address = runCatching {
+        URI(if ("://" in remembered.address) remembered.address else "http://${remembered.address}")
+      }.getOrNull() ?: return null
+      val host = address.host ?: return null
+      if (
+        address.scheme != "http" || address.userInfo != null || address.rawQuery != null ||
+          address.fragment != null || address.path !in listOf("", "/") || address.port !in 1..65535
+      ) return null
+      val call = runCatching {
+        val endpoint = URI("http", null, host, 8008, "/setup/eureka_info", null, null).toASCIIString()
+        client.newCall(Request.Builder().url(endpoint).header("Accept", "application/json").build())
+      }.getOrNull() ?: return null
+      return suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+          override fun onFailure(call: Call, e: java.io.IOException) {
+            if (continuation.isActive) continuation.resume(null)
+          }
+
+          override fun onResponse(call: Call, response: Response) {
+            val found = try {
+              response.use {
+                if (!it.isSuccessful) return@use null
+                val bytes = io.github.stupside.castor.data.Rpc.readLimited(it.body.byteStream(), 65_536)
+                val info = JSONObject(bytes.toString(Charsets.UTF_8))
+                // A reused IP or friendly name is not evidence of the saved receiver's identity.
+                if (castIdentity(info.optString("ssdp_udn")) != expected) return@use null
+                Socket().use { socket -> socket.connect(InetSocketAddress(host, address.port), 500) }
+                remembered.toBuilder()
+                  .setId(rawId)
+                  .setName(info.optString("name").ifBlank { remembered.name })
+                  .build()
+              }
+            } catch (_: java.io.IOException) {
+              null
+            } catch (_: JSONException) {
+              null
+            } catch (_: IllegalStateException) {
+              // The bounded reader rejects oversized descriptions before JSON parsing.
+              null
+            }
+            if (continuation.isActive) continuation.resume(found)
+          }
+        })
+      }
+    }
+
+    private fun castIdentity(value: String): String? =
+      value.removePrefix("uuid:").replace("-", "").lowercase(Locale.ROOT)
+        .takeIf { it.matches(Regex("[0-9a-f]{32}")) }
   }
 }

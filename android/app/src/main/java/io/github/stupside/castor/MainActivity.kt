@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModelProvider
 import io.github.stupside.castor.theme.*
-import io.github.stupside.castor.ui.main.BrowserRequestDialog
 import io.github.stupside.castor.ui.main.CastOptions
 import io.github.stupside.castor.ui.main.MainScreen
 import io.github.stupside.castor.ui.main.MainScreenViewModel
@@ -38,6 +37,11 @@ class MainActivity : ComponentActivity() {
   private var permissionDenied by mutableStateOf(false)
   private var bound = false
   private lateinit var model: MainScreenViewModel
+  private var sharedUrl by mutableStateOf("")
+  private val videoPicker =
+    registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+      uri?.let { model.selectVideo(applicationContext.contentResolver, it) }
+    }
   private val permissions =
     registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
       permissionDenied =
@@ -62,11 +66,29 @@ class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     model = ViewModelProvider(this)[MainScreenViewModel::class.java]
+    sharedUrl = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
+    if (savedInstanceState == null) receiveVideo(intent)
     enableEdgeToEdge()
     setContent {
       val options = remember { CastOptions(this) }
       var theme by remember { mutableStateOf(options.theme()) }
-      LaunchedEffect(service) { service?.endpoint?.collect { model.connect(it) } }
+      LaunchedEffect(service) { service?.endpoint?.collect { model.connect(it, service?.videos) } }
+      LaunchedEffect(service) {
+        if (service == null) return@LaunchedEffect
+        model.selectedVideo.collect { video ->
+          if (
+            video != null && contentResolver.persistedUriPermissions.none { it.uri == video.uri }
+          ) {
+            try {
+              // Non-persistable shares keep their temporary grant through background playback.
+              startService(videoIntent(video.uri))
+            } catch (error: SecurityException) {
+              model.clearVideo()
+              model.fail(error)
+            }
+          }
+        }
+      }
       LaunchedEffect(service) {
         service?.failure?.collect { message ->
           message?.let { model.fail(IllegalStateException(it)) }
@@ -127,15 +149,11 @@ class MainActivity : ComponentActivity() {
                 }
               }
             }
-          service?.let { current ->
-            val asking by current.browserRequest.collectAsState()
-            if (asking) BrowserRequestDialog(current::answerBrowser)
-          }
           if (!permissionDenied)
             MainScreen(
               model,
               service?.browser,
-              intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty(),
+              sharedUrl,
               restart = { restartEngine() },
               close = {
                 stopService(Intent(this, CastorService::class.java))
@@ -155,12 +173,38 @@ class MainActivity : ComponentActivity() {
                 options.theme(selected)
                 theme = selected
               },
+              pickVideo = { videoPicker.launch(arrayOf("video/*")) },
             )
         }
       }
     }
     requestPermissions()
   }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    sharedUrl = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
+    if (sharedUrl.isNotBlank()) model.clearVideo()
+    receiveVideo(intent)
+  }
+
+  private fun receiveVideo(intent: Intent) {
+    if (intent.action == Intent.ACTION_SEND && intent.type?.startsWith("video/") == true) {
+      val uri =
+        androidx.core.content.IntentCompat.getParcelableExtra(
+          intent,
+          Intent.EXTRA_STREAM,
+          android.net.Uri::class.java,
+        )
+      uri?.let { model.selectVideo(applicationContext.contentResolver, it) }
+    }
+  }
+
+  private fun videoIntent(uri: android.net.Uri) =
+    Intent(this, CastorService::class.java)
+      .setData(uri)
+      .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 
   private fun requestPermissions() {
     val needed = buildList {
@@ -197,9 +241,8 @@ class MainActivity : ComponentActivity() {
 
   private fun startEngine() {
     if (bound) return
-    val intent = Intent(this, CastorService::class.java)
-    startForegroundService(intent)
-    bound = bindService(intent, connection, BIND_AUTO_CREATE)
+    startForegroundService(Intent(this, CastorService::class.java))
+    bound = bindService(Intent(this, CastorService::class.java), connection, BIND_AUTO_CREATE)
   }
 
   override fun onResume() {

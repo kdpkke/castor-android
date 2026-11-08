@@ -33,10 +33,14 @@ uninstalling removes its saved app preferences. Later updates install normally.
 
 ## Moving from development builds
 
-Android cannot update an app signed with a different key. Uninstall a previous
-development build before installing the first stable release; uninstalling also
-removes its saved app preferences. Subsequent stable updates preserve app data
-when signed with this release key and a higher `versionCode`.
+Current development builds use `io.github.stupside.castor.debug` and appear as
+**Castor (test)**. They install alongside the stable app and have separate preferences.
+They do not update the stable installation or require its removal.
+
+Android cannot update the same package with a different key. Legacy development
+builds using `io.github.stupside.castor` must be uninstalled before installing a
+stable release; uninstalling removes their saved preferences. Subsequent stable
+updates preserve app data when signed with this release key and a higher `versionCode`.
 
 ## Maintainer procedure
 

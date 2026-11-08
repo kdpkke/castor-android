@@ -121,6 +121,8 @@ class MainScreenViewModelTest {
     assertFalse(direct.source.hasPages())
     assertEquals(2160, direct.preferences.maxHeight)
     assertEquals(target, direct.target)
+    assertTrue(direct.preferences.managedPlayback)
+    assertTrue(page.preferences.managedPlayback)
   }
 
   @Test
@@ -131,8 +133,32 @@ class MainScreenViewModelTest {
     assertEquals(Int.MAX_VALUE, native.preferences.maxHeight)
     assertEquals(url, native.source.stream.url)
     assertTrue(native.preferences.subtitles.hasDisabled())
+    assertTrue(native.preferences.preserveSource)
     val limited = MainScreenViewModel.request(url, false, target, "720")
     assertEquals(720, limited.preferences.maxHeight)
+    assertFalse(limited.preferences.preserveSource)
+  }
+
+  @Test
+  fun optimizedAllowsConversionAndNativeNeverGeneratesSubtitles() {
+    val optimized =
+      MainScreenViewModel.request("https://example.org/video", false, target, "optimized", "it")
+    assertFalse(optimized.preferences.preserveSource)
+    assertEquals(1080, optimized.preferences.maxHeight)
+    assertTrue(optimized.preferences.subtitles.preferences.transcribeIfMissing)
+    val native =
+      MainScreenViewModel.request("https://example.org/video", false, target, "native", "it")
+    assertTrue(native.preferences.preserveSource)
+    assertFalse(native.preferences.subtitles.preferences.transcribeIfMissing)
+    assertEquals(listOf("it"), native.preferences.subtitles.preferences.languagesList)
+  }
+
+  @Test
+  fun previousNumericQualityChoicesBelongToOptimized() {
+    for (saved in listOf("720", "1080", "2160", "1440", "optimized", "")) {
+      assertEquals("optimized", playbackQuality(saved))
+    }
+    assertEquals("native", playbackQuality("native"))
   }
 
   @Test

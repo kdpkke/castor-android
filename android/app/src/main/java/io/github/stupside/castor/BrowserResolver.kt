@@ -1,6 +1,7 @@
 package io.github.stupside.castor
 
 import android.content.Context
+import android.content.MutableContextWrapper
 import castor.scraping.v1.Scraping.ResolveRequest
 import castor.scraping.v1.Scraping.ResolveResponse
 import castor.v1.StreamOuterClass.Stream
@@ -26,8 +27,37 @@ data class BrowserPage(
 class BrowserResolver(private val context: Context) {
   val active = MutableStateFlow(false)
   val page = MutableStateFlow<BrowserPage?>(null)
+  private val viewContext = MutableContextWrapper(context)
   // TextureView participates in Compose scrolling/clipping; SurfaceView uses a separate surface.
-  val view = GeckoView(context).apply { setViewBackend(GeckoView.BACKEND_TEXTURE_VIEW) }
+  val view =
+    object : GeckoView(viewContext) {
+        override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+          // A gesture that begins in the webpage belongs to Gecko, including its pan/zoom handling.
+          // The enclosing Compose scrollable still handles gestures started outside this view.
+          val finished =
+            event.actionMasked == android.view.MotionEvent.ACTION_UP ||
+              event.actionMasked == android.view.MotionEvent.ACTION_CANCEL
+          if (!finished) parent?.requestDisallowInterceptTouchEvent(true)
+          return super.dispatchTouchEvent(event).also {
+            if (finished) parent?.requestDisallowInterceptTouchEvent(false)
+          }
+        }
+      }
+      .apply { setViewBackend(GeckoView.BACKEND_TEXTURE_VIEW) }
+
+  internal fun attachView(context: Context): GeckoView {
+    detachView()
+    // Gecko needs the visible Activity's window for IME insets and input coordinates. The
+    // service keeps the session, but must not retain that Activity after the view is released.
+    viewContext.baseContext = context
+    return view
+  }
+
+  internal fun detachView() {
+    (view.parent as? android.view.ViewGroup)?.removeView(view)
+    viewContext.baseContext = context
+  }
+
   private val engine by lazy { BrowserEngine.get(context) }
   private val session =
     GeckoSession(GeckoSessionSettings.Builder().suspendMediaWhenInactive(false).build())
@@ -89,7 +119,10 @@ class BrowserResolver(private val context: Context) {
           request: GeckoSession.NavigationDelegate.LoadRequest,
         ): GeckoResult<AllowOrDeny> =
           GeckoResult.fromValue(
-            if (isHttp(request.uri) || request.uri == "about:blank") AllowOrDeny.ALLOW
+            // Turnstile and other embedded widgets use inline documents. These inherit the
+            // embedding page's origin; top-level navigation still accepts only HTTP(S)/blank.
+            if (isHttp(request.uri) || request.uri in setOf("about:blank", "about:srcdoc"))
+              AllowOrDeny.ALLOW
             else AllowOrDeny.DENY
           )
 
@@ -384,6 +417,7 @@ class BrowserResolver(private val context: Context) {
 
   private fun clearPage() {
     page.value = null
+    sourcePage = ""
     capturing = false
     extracting = false
     loadFailure = null
@@ -401,7 +435,7 @@ class BrowserResolver(private val context: Context) {
     active.value = false
     clearPage()
     closed = true
-    (view.parent as? android.view.ViewGroup)?.removeView(view)
+    detachView()
     if (listening) engine.pageErrors -= pageError
     if (opened) {
       view.releaseSession()
@@ -463,11 +497,10 @@ class BrowserResolver(private val context: Context) {
       return kept
     }
 
-    internal fun isHttp(value: String): Boolean =
-      runCatching {
-          val uri = URI(value)
-          uri.scheme in setOf("http", "https") && !uri.host.isNullOrBlank() && uri.userInfo == null
-        }
-        .getOrDefault(false)
+    internal fun isHttp(value: String): Boolean = runCatching {
+      val uri = URI(value)
+      uri.scheme in setOf("http", "https") && !uri.host.isNullOrBlank() && uri.userInfo == null
+    }
+      .getOrDefault(false)
   }
 }

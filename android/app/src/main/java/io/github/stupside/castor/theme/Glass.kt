@@ -158,6 +158,7 @@ fun GlassButton(
   modifier: Modifier = Modifier,
   enabled: Boolean = true,
   prominent: Boolean = false,
+  contentPadding: androidx.compose.foundation.layout.PaddingValues = ButtonDefaults.ContentPadding,
   content: @Composable RowScope.() -> Unit,
 ) {
   val shape = RoundedCornerShape(50)
@@ -166,6 +167,7 @@ fun GlassButton(
     enabled = enabled,
     modifier = modifier.heightIn(min = 48.dp).glassMaterial(shape, prominent && enabled),
     shape = shape,
+    contentPadding = contentPadding,
     colors =
       ButtonDefaults.buttonColors(
         containerColor = Color.Transparent,

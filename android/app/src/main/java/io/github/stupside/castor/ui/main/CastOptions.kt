@@ -9,10 +9,13 @@ import io.github.stupside.castor.theme.AppTheme
 import java.net.URI
 import java.util.Locale
 
-// The existing RPC accepts a height ceiling. Its largest signed value leaves source dimensions
-// untouched without inheriting the server's default 1080p ceiling.
 internal const val NATIVE_QUALITY = "native"
 internal const val NATIVE_HEIGHT_CEILING = Int.MAX_VALUE
+internal const val OPTIMIZED_QUALITY = "optimized"
+internal const val OPTIMIZED_HEIGHT_CEILING = 1080
+
+internal fun playbackQuality(saved: String): String =
+  if (saved == NATIVE_QUALITY) NATIVE_QUALITY else OPTIMIZED_QUALITY
 
 internal val receiverTypes =
   listOf(
@@ -31,9 +34,10 @@ enum class VideoSourceMode {
       WebPage -> true
       DirectStream -> false
       Automatic -> {
-        val extension =
-          runCatching { URI(url).path.orEmpty().substringAfterLast('.').lowercase(Locale.ROOT) }
-            .getOrDefault("")
+        val extension = runCatching {
+          URI(url).path.orEmpty().substringAfterLast('.').lowercase(Locale.ROOT)
+        }
+          .getOrDefault("")
         extension !in setOf("m3u8", "mpd", "mp4", "m4v", "webm", "mkv", "ts", "mov")
       }
     }
@@ -65,11 +69,10 @@ data class SavedTv(
       manual -> false
       // Receivers saved before discovery identities kept only an address whose port changes when
       // the TV restarts. The same name and protocol on the same host is that receiver.
-      else -> device.name == name && host(address)?.let { it == host(device.address) } == true
+      else ->
+        device.name == name &&
+          receiverHost(address)?.let { it == receiverHost(device.address) } == true
     }
-
-  private fun host(value: String): String? =
-    runCatching { URI(if ("://" in value) value else "http://$value").host }.getOrNull()
 
   fun target(): Target =
     Target.newBuilder()
@@ -141,8 +144,8 @@ class CastOptions(private val context: Context) {
       .apply()
   }
 
-  // Keep the selected stream's resolution unless the user chose a limit.
-  fun height(): String = preferences.getString("height", NATIVE_QUALITY).orEmpty()
+  // Existing numeric ceilings belong to Optimized; Native now forbids any re-encoding.
+  fun height(): String = playbackQuality(preferences.getString("height", NATIVE_QUALITY).orEmpty())
 
   fun subtitles(): String = preferences.getString("subtitles", "off").orEmpty()
 

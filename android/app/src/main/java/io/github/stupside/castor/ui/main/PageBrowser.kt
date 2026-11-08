@@ -70,13 +70,13 @@ internal fun PageBrowser(
     )
     page.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     AndroidView(
-      factory = { browser.view.also { (it.parent as? android.view.ViewGroup)?.removeView(it) } },
+      factory = { browser.attachView(it) },
       modifier =
         Modifier.fillMaxWidth()
           .height(if (compact) 220.dp else 360.dp)
           .bringIntoViewRequester(bringIntoView)
           .testTag("page-browser"),
-      onRelease = { (it.parent as? android.view.ViewGroup)?.removeView(it) },
+      onRelease = { browser.detachView() },
     )
   }
 }

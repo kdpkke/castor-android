@@ -1,0 +1,74 @@
+package io.github.stupside.castor.ui.main
+
+import castor.v1.DeviceOuterClass.Device
+import castor.v1.DeviceOuterClass.DeviceType
+import org.junit.Assert.*
+import org.junit.Test
+
+class DiscoveredTvsTest {
+  private fun device(id: String, name: String, address: String, type: DeviceType) =
+    Device.newBuilder().setId(id).setName(name).setAddress(address).setType(type).build()
+
+  @Test
+  fun oneTVHasItsOwnProtocolChoicesWithoutMergingAnotherTVWithTheSameName() {
+    val cast =
+      device("chromecast:one", "Living room", "192.0.2.10:8009", DeviceType.DEVICE_TYPE_CHROMECAST)
+    val dlna =
+      device(
+        "dlna:one",
+        "LG renderer",
+        "http://192.0.2.10:1676/device.xml",
+        DeviceType.DEVICE_TYPE_DLNA,
+      )
+    val other =
+      device("chromecast:two", "Living room", "192.0.2.20:8009", DeviceType.DEVICE_TYPE_CHROMECAST)
+    val groups = discoveredTvs(listOf(cast, dlna, other, cast), null)
+    assertEquals(2, groups.size)
+    val first = groups.single { it.host == "192.0.2.10" }
+    assertEquals("Living room", first.name)
+    assertEquals("192.0.2.10:8009 · 192.0.2.10:1676", first.addresses)
+    assertEquals(listOf(cast.id, dlna.id), first.protocols.map { it.target().deviceId })
+    assertEquals(dlna.address, first.protocols[1].address)
+  }
+
+  @Test
+  fun confirmedSavedTVIsFirstAndUsesTheFreshProtocolAddress() {
+    val old =
+      device("dlna:saved", "Bedroom", "http://192.0.2.20:1000/old.xml", DeviceType.DEVICE_TYPE_DLNA)
+    val fresh = old.toBuilder().setAddress("http://192.0.2.20:2000/current.xml").build()
+    val other =
+      device(
+        "dlna:other",
+        "Living room",
+        "http://192.0.2.10:3000/device.xml",
+        DeviceType.DEVICE_TYPE_DLNA,
+      )
+    val groups = discoveredTvs(listOf(other, fresh), SavedTv(old))
+    assertEquals("192.0.2.20", groups.first().host)
+    assertEquals(fresh.address, groups.first().protocols.single().address)
+    assertEquals("192.0.2.20:2000", groups.first().addresses)
+    assertTrue(discoveredTvs(emptyList(), SavedTv(old)).isEmpty())
+  }
+
+  @Test
+  fun addressesShowPortsIncludingDefaultsAndIpv6WithoutDescriptionPaths() {
+    assertEquals(
+      "192.0.2.10:8009",
+      receiverEndpoint(SavedTv("TV", "192.0.2.10", DeviceType.DEVICE_TYPE_CHROMECAST)),
+    )
+    assertEquals(
+      "192.0.2.10:8060",
+      receiverEndpoint(SavedTv("TV", "192.0.2.10", DeviceType.DEVICE_TYPE_ROKU)),
+    )
+    assertEquals(
+      "192.0.2.10:443",
+      receiverEndpoint(
+        SavedTv("TV", "https://192.0.2.10/private/description.xml", DeviceType.DEVICE_TYPE_DLNA)
+      ),
+    )
+    assertEquals(
+      "[2001:db8::1]:8009",
+      receiverEndpoint(SavedTv("TV", "[2001:db8::1]:8009", DeviceType.DEVICE_TYPE_CHROMECAST)),
+    )
+  }
+}

@@ -85,7 +85,7 @@ for abi in "${@:-arm64-v8a}"; do
         mkdir -p "$build/zimg"
         (cd "$build/zimg"; "$cache/zimg/configure" --host="$triple" --prefix="$prefix" --enable-static --disable-shared --with-pic --disable-x86simd; make -j"$jobs"; make install)
     fi
-    if [ ! -f "$build/ffmpeg/.castor-filters-asm" ]; then
+    if [ ! -f "$build/ffmpeg/.castor-mediacodec-ndk" ]; then
         mkdir -p "$build/ffmpeg"
         (cd "$build/ffmpeg"
          export PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig"
@@ -93,12 +93,12 @@ for abi in "${@:-arm64-v8a}"; do
             --cc="$CC" --cxx="$CXX" --ar=llvm-ar --ranlib=llvm-ranlib --strip=llvm-strip \
             --sysroot="$toolchain/sysroot" --prefix="$prefix" --enable-static --disable-shared \
             --enable-pic --enable-gpl --enable-version3 --enable-libx264 --enable-openssl \
-            --enable-libfreetype --enable-libharfbuzz --enable-libzimg \
+            --enable-libfreetype --enable-libharfbuzz --enable-libzimg --enable-jni --enable-mediacodec --disable-indev=android_camera \
             --disable-doc --disable-debug --disable-ffplay --disable-autodetect \
             --extra-cflags="-I$prefix/include" --extra-ldflags="-L$prefix/lib -Wl,-z,max-page-size=16384 -static-libstdc++" \
             --pkg-config-flags=--static --extra-libs=-lm
          make -j"$jobs"
-         touch .castor-filters-asm)
+         touch .castor-mediacodec-ndk)
     fi
     cp "$build/ffmpeg/ffmpeg" "$out/libffmpeg.so"
     cp "$build/ffmpeg/ffprobe" "$out/libffprobe.so"

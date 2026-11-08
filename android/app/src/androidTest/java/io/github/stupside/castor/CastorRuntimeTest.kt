@@ -107,6 +107,14 @@ class CastorRuntimeTest {
 
   @Test fun phoneEngineTranscodesForADlnaReceiverAndStops() = castFixture(false)
 
+  @Test
+  fun phoneVideoRestartsOnTheSameTVWithoutLosingItsPrivateFileRoute() =
+    castFixture(false, local = true, restart = true)
+
+  @Test
+  fun aLiveReceiverStalledAtOneSecondRestartsWithoutTheScreen() =
+    castFixture(true, renewing = true, stalledLive = true)
+
   @Test fun pageWithPixelWrappedHlsIsAdmittedAndCasts() = castFixture(true)
 
   @Test
@@ -120,11 +128,24 @@ class CastorRuntimeTest {
   fun nativeQualityKeeps1440pInsteadOfInheritingThe1080pDefault() =
     castFixture(false, nativeQuality = true)
 
+  @Test
+  @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
+  fun selectedPhoneVideoCastsThroughTheEngineAndSurvivesActivityRecreation() =
+    castFixture(false, local = true)
+
+  @Test
+  fun extensionlessDownloadStartsCastingBeforeTheOriginFinishes() =
+    castFixture(false, download = true)
+
   private fun castFixture(
     pixels: Boolean,
     nativeQuality: Boolean = false,
     renewing: Boolean = false,
     denyRenewal: Boolean = false,
+    local: Boolean = false,
+    download: Boolean = false,
+    restart: Boolean = false,
+    stalledLive: Boolean = false,
   ) = runBlocking {
     grantPermissions()
     ActivityScenario.launch(MainActivity::class.java).use { activity ->
@@ -153,8 +174,14 @@ class CastorRuntimeTest {
             service.endpoint.value!!
           }
         val sample =
-          File.createTempFile("castor-fixture", if (pixels) ".ts" else ".mp4", context.cacheDir)
-        val duration = if (renewing) 4 else if (pixels) 60 else if (nativeQuality) 12 else 30
+          File.createTempFile(
+            "castor-fixture",
+            if (pixels) ".ts" else if (download) ".mkv" else ".mp4",
+            context.cacheDir,
+          )
+        val duration =
+          if (download) 240
+          else if (renewing) 4 else if (pixels) 60 else if (nativeQuality) 12 else 30
         val command =
           listOf(
             "${context.applicationInfo.nativeLibraryDir}/libffmpeg.so",
@@ -172,12 +199,15 @@ class CastorRuntimeTest {
             duration.toString(),
             "-c:v",
             "libx264",
+            "-profile:v",
+            "main",
             "-pix_fmt",
             "yuv420p",
             "-c:a",
             "aac",
           ) +
-            (if (pixels) listOf("-f", "mpegts") else listOf("-movflags", "+faststart")) +
+            (if (pixels) listOf("-f", "mpegts")
+            else if (download) listOf("-f", "matroska") else listOf("-movflags", "+faststart")) +
             sample.path
         val encoder =
           ProcessBuilder(command)
@@ -187,6 +217,9 @@ class CastorRuntimeTest {
         val log = encoder.inputStream.bufferedReader().readText()
         assertEquals(log, 0, encoder.waitFor())
         assertTrue(sample.length() > 0)
+        val selected =
+          if (local) videoFixture(context, "Phone video.mp4", sample.readBytes()) else null
+        val originStarted = java.util.concurrent.atomic.AtomicLong()
         val wrapped = if (pixels) pixelSegment(sample.readBytes()) else null
         val nativeMedia = java.io.ByteArrayOutputStream()
         val received = CountDownLatch(1)
@@ -203,6 +236,7 @@ class CastorRuntimeTest {
         // Like a real renderer, the fixture stops once it read the whole stream and played it out;
         // a live stream that ended leaves it only the few seconds near the live edge.
         val playing = java.util.concurrent.atomic.AtomicLong()
+        val plays = java.util.concurrent.atomic.AtomicInteger()
         val exhausted = java.util.concurrent.atomic.AtomicBoolean()
         fun playedOut() =
           exhausted.get() &&
@@ -253,7 +287,7 @@ class CastorRuntimeTest {
                 return MockResponse()
                   .setHeader("Content-Type", "image/png")
                   .setBody(Buffer().write(wrapped!!))
-              if (request.path == "/video.mp4") {
+              if (request.path == "/video.mp4" || request.path == "/download") {
                 val bytes = sample.readBytes()
                 val start =
                   request
@@ -261,8 +295,19 @@ class CastorRuntimeTest {
                     ?.substringAfter("bytes=")
                     ?.substringBefore('-')
                     ?.toIntOrNull() ?: 0
+                if (download && request.method != "HEAD" && start == 0)
+                  originStarted.compareAndSet(0, android.os.SystemClock.elapsedRealtime())
                 return MockResponse()
-                  .setHeader("Content-Type", "video/mp4")
+                  .setHeader(
+                    "Content-Type",
+                    if (download) "application/octet-stream" else "video/mp4",
+                  )
+                  .apply {
+                    if (download) {
+                      setHeader("Content-Disposition", "attachment; filename=movie.mkv")
+                      throttleBody(4096, 50, TimeUnit.MILLISECONDS)
+                    }
+                  }
                   .setHeader("Accept-Ranges", "bytes")
                   .setResponseCode(if (request.getHeader("Range") != null) 206 else 200)
                   .apply {
@@ -288,6 +333,8 @@ class CastorRuntimeTest {
                     ""
                   }
                   "Play" -> {
+                    plays.incrementAndGet()
+                    if (stalledLive) confirmed.countDown()
                     playing.set(android.os.SystemClock.elapsedRealtime())
                     fetches.launch {
                       val response = URL(uri).openConnection() as HttpURLConnection
@@ -310,7 +357,7 @@ class CastorRuntimeTest {
                               }
                             if (confirmed.count == 0L) continued.countDown()
                             received.countDown()
-                            if (pixels && confirmed.count > 0L) {
+                            if (pixels && !stalledLive && confirmed.count > 0L) {
                               check(confirmed.await(20, TimeUnit.SECONDS)) {
                                 "Playback was not confirmed after the missing Play acknowledgement"
                               }
@@ -318,6 +365,12 @@ class CastorRuntimeTest {
                             delay(20)
                           }
                         }
+                      } catch (error: java.io.IOException) {
+                        // Restart deliberately closes the old chunked response before the new
+                        // LOAD. A real receiver reconnects; the synthetic reader must not crash
+                        // instrumentation while the replacement is being verified below.
+                        if (!restart && !stalledLive && currentCoroutineContext().isActive)
+                          throw error
                       } finally {
                         response.disconnect()
                       }
@@ -326,6 +379,15 @@ class CastorRuntimeTest {
                   }
                   "GetTransportInfo" ->
                     "<CurrentTransportState>${if (playedOut()) "STOPPED" else "PLAYING"}</CurrentTransportState><CurrentTransportStatus>OK</CurrentTransportStatus><CurrentSpeed>1</CurrentSpeed>"
+                  "GetPositionInfo" -> {
+                    val seconds =
+                      if (stalledLive) 1L
+                      else
+                        ((android.os.SystemClock.elapsedRealtime() - playing.get()) / 1000)
+                          .coerceAtLeast(0)
+                    val position = "00:%02d:%02d".format(seconds / 60, seconds % 60)
+                    "<Track>1</Track><TrackDuration>00:00:30</TrackDuration><TrackMetaData/><TrackURI>${uri.replace("&", "&amp;")}</TrackURI><RelTime>$position</RelTime><AbsTime>$position</AbsTime><RelCount>0</RelCount><AbsCount>0</AbsCount>"
+                  }
                   "GetMediaInfo" -> {
                     confirmed.countDown()
                     "<CurrentURI>${uri.replace("&", "&amp;")}</CurrentURI>"
@@ -340,7 +402,8 @@ class CastorRuntimeTest {
                 .apply {
                   // The receiver is already reading, but its Play acknowledgement misses the
                   // deadline.
-                  if (pixels && action == "Play") setHeadersDelay(15, TimeUnit.SECONDS)
+                  if (pixels && !stalledLive && action == "Play")
+                    setHeadersDelay(15, TimeUnit.SECONDS)
                 }
             }
           }
@@ -380,12 +443,21 @@ class CastorRuntimeTest {
             if (!pixels && !nativeQuality) {
               activity.onActivity {
                 model = ViewModelProvider(it)[MainScreenViewModel::class.java]
+                selected?.let { video -> model!!.selectVideo(context.contentResolver, video.uri) }
+              }
+              if (selected != null)
+                withTimeout(5000) {
+                  while (model!!.selectedVideo.value == null) delay(50)
+                }
+              activity.onActivity {
                 model!!.cast(
-                  server.url("/video.mp4").toString(),
-                  false,
+                  server.url(if (download) "/download" else "/video.mp4").toString(),
+                  download,
                   request.target,
                   "90",
                   "off",
+                  localVideo = selected,
+                  automatic = download,
                 )
               }
               withTimeout(15_000) {
@@ -405,6 +477,16 @@ class CastorRuntimeTest {
             withContext(Dispatchers.IO) { received.await(90, TimeUnit.SECONDS) },
           )
           assertTrue("DLNA must fetch the phone's media route", uri.contains("/media/"))
+          if (download) {
+            val beganDownload = originStarted.get()
+            assertTrue("The origin was never read", beganDownload > 0)
+            val minimumFullDownloadMs = (sample.length() / 4096 - 1) * 50
+            assertTrue(
+              "Casting waited for the full throttled download",
+              android.os.SystemClock.elapsedRealtime() - beganDownload < minimumFullDownloadMs,
+            )
+            assertFalse("A download must not open a webpage", service.browser.active.value)
+          }
           if (model != null) {
             val running = model!!
             activity.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
@@ -428,6 +510,39 @@ class CastorRuntimeTest {
                 assertFalse(service.stopped.value)
               }
             }
+          }
+          if (restart) {
+            delay(1500)
+            val before = data.playback(id)
+            assertTrue(
+              "The receiver must report a finite resume position",
+              before.hasPosition() && before.position.seconds > 0,
+            )
+            val bytesBefore = receivedBytes.get()
+            data.restart(id)
+            withTimeout(30_000) {
+              while (plays.get() < 2 || receivedBytes.get() <= bytesBefore) delay(50)
+            }
+            assertEquals(
+              "Restart keeps the original cast and device lease",
+              listOf(id),
+              data.casts().map { it.id },
+            )
+            assertNull("Restart must not end the cast", ended)
+            assertFalse(
+              "Restart must keep the engine and private file bridge",
+              service.stopped.value,
+            )
+          }
+          if (stalledLive) {
+            withTimeout(50_000) { while (plays.get() < 2) delay(100) }
+            val active = data.casts().single()
+            assertEquals("Automatic recovery keeps the cast identity", id, active.id)
+            assertTrue(
+              "The live recovery must be visible",
+              active.status.casting.automaticRestarts > 0,
+            )
+            assertNull("A live restart must not end the cast", ended)
           }
           if (pixels) {
             assertTrue(
@@ -520,6 +635,7 @@ class CastorRuntimeTest {
         } finally {
           fetches.cancel()
           server.shutdown()
+          selected?.let { context.contentResolver.delete(it.uri, null, null) }
           sample.delete()
         }
       } finally {

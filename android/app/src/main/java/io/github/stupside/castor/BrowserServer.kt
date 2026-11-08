@@ -18,11 +18,13 @@ class BrowserServer(
   private val resolver: BrowserResolver,
   private val discovery: suspend () -> List<castor.v1.DeviceOuterClass.Device>,
   private val token: String,
+  content: android.content.ContentResolver? = null,
 ) : AutoCloseable {
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private val server = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
   private val playlists = BrowserPlaylists(resolver)
   val url = "http://127.0.0.1:${server.localPort}"
+  val videos = content?.let { LocalVideos(it, url) }
 
   init {
     scope.launch {
@@ -75,6 +77,12 @@ class BrowserServer(
         "application/json",
         JSONObject().put("code", code).put("message", message).toString().toByteArray(),
       )
+    val target = request.split(' ')
+    if (target.size == 3 && target[1].startsWith("/files/") && videos != null) {
+      socket.soTimeout = 0
+      videos.serve(socket, target[0], target[1], headers)
+      return
+    }
     if (request.startsWith("GET /playlists/") && request.endsWith(" HTTP/1.1")) {
       socket.soTimeout = 0
       kotlinx.coroutines.coroutineScope {
@@ -152,12 +160,14 @@ class BrowserServer(
   }
 
   override fun close() {
+    videos?.close()
     playlists.clear()
     server.close()
     scope.cancel()
   }
 
   fun playbackEnded() {
+    videos?.clear()
     playlists.clear()
   }
 }

@@ -8,10 +8,11 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.platform.app.InstrumentationRegistry
@@ -31,6 +32,35 @@ import org.junit.Test
 
 class MainScreenTest {
   @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+  @Test
+  fun choosingAndRemovingALocalVideoKeepsTheSourceClear() {
+    val model = MainScreenViewModel()
+    var picks = 0
+    compose.setContent {
+      io.github.stupside.castor.theme.CastorTheme {
+        MainScreen(model, null, "", {}, pickVideo = { picks++ })
+      }
+    }
+    compose.onNodeWithText("Choose video").performClick()
+    compose.runOnIdle {
+      assertEquals(1, picks)
+      model.selectedVideo.value =
+        io.github.stupside.castor.LocalVideo(
+          android.net.Uri.parse("content://fixture/video"),
+          "Holiday video.mp4",
+          "video/mp4",
+        )
+    }
+    compose.onNodeWithText("Holiday video.mp4").assertIsDisplayed()
+    compose.onNodeWithText("On this device").assertIsDisplayed()
+    compose.onNodeWithTag("video-url").assertDoesNotExist()
+    compose.onNodeWithContentDescription("Remove video").performClick()
+    compose.onNodeWithTag("selected-video").assertDoesNotExist()
+    compose.onNodeWithTag("video-url").assertIsDisplayed()
+    compose.onNodeWithContentDescription("More options").performClick()
+    compose.onNodeWithText("Browser extension").assertDoesNotExist()
+  }
 
   private val context
     get() = InstrumentationRegistry.getInstrumentation().targetContext
@@ -139,7 +169,7 @@ class MainScreenTest {
         model.connect(Rpc(server.url("/").toString().removeSuffix("/"), "fixture"))
       }
       compose.waitUntil(5000) { model.uiState.value.castId == "already-active" }
-      compose.onNodeWithText("Living room renderer").assertExists()
+      compose.onAllNodesWithText("Living room renderer").onFirst().assertExists()
       compose.onNodeWithText("active.example.org").assertExists()
       compose.onNodeWithText("Bedroom TV").assertDoesNotExist()
       compose.onNodeWithText("incoming.example.org").assertDoesNotExist()
@@ -184,7 +214,7 @@ class MainScreenTest {
       compose.waitUntil(5000) { model.uiState.value.ready }
       compose.onNodeWithTag("cast-action").performClick()
       compose.waitUntil(5000) { model.uiState.value.castId == "new-cast" }
-      compose.onNodeWithText("Chosen receiver").assertExists()
+      compose.onAllNodesWithText("Chosen receiver").onFirst().assertExists()
       compose.onNodeWithText("submitted.example.org").assertExists()
       compose.runOnIdle {
         assertEquals("192.0.2.88", model.uiState.value.activeCast?.device?.address)
@@ -202,7 +232,7 @@ class MainScreenTest {
   @Test
   fun manualTvSelectionEnablesCastAndRemembersReceiver() {
     val model = MainScreenViewModel()
-    model.uiState.value = MainScreenUiState(ready = true, phase = CastPhase.Ready)
+    model.uiState.value = MainScreenUiState(ready = true, idlePhase = CastPhase.Ready)
     compose.setContent {
       io.github.stupside.castor.theme.CastorTheme {
         MainScreen(model, null, "https://example.org/watch", {})
@@ -218,22 +248,24 @@ class MainScreenTest {
   }
 
   @Test
-  fun playbackSettingsValidateCustomHeightAndLanguageBeforeSaving() {
+  fun playbackSettingsOfferTwoModesAndValidateSubtitleLanguageBeforeSaving() {
     val model = MainScreenViewModel()
     compose.setContent {
       io.github.stupside.castor.theme.CastorTheme { MainScreen(model, null, "", {}) }
     }
     compose.onNodeWithText("Playback settings").performScrollTo().performClick()
-    compose.onNodeWithText("720p").performClick().assertIsSelected()
+    compose.onNodeWithText("Optimized").performClick().assertIsSelected()
+    compose.onNodeWithText("720p").assertDoesNotExist()
+    compose.onNodeWithText("Custom").assertDoesNotExist()
     compose.onNodeWithText("Language", useUnmergedTree = true).performClick()
     compose.onNodeWithText("Save").performScrollTo().assertIsNotEnabled()
     compose.onNodeWithText("Language code, e.g. it or en").performScrollTo().performTextInput("it")
     // The system IME can still resize the sheet after Compose becomes idle.
     closeSoftKeyboard()
     compose.onNodeWithText("Save").performScrollTo().assertIsEnabled().performClick()
-    compose.onNodeWithText("720p · Subtitles: IT").assertExists()
+    compose.onNodeWithText("Optimized · Subtitles: IT").assertExists()
     compose.runOnIdle {
-      assertEquals("720", CastOptions(context).height())
+      assertEquals("optimized", CastOptions(context).height())
       assertEquals("it", CastOptions(context).subtitles())
     }
   }
@@ -244,36 +276,35 @@ class MainScreenTest {
     compose.setContent {
       io.github.stupside.castor.theme.CastorTheme { MainScreen(model, null, "", {}) }
     }
-    compose.onNodeWithText("Native quality · Subtitles: Off").assertExists()
+    compose.onNodeWithText("Native · Subtitles: Off").assertExists()
     // Without changes the sheet closes directly.
     compose.onNodeWithText("Playback settings").performScrollTo().performClick()
     compose.onNodeWithContentDescription("Close").performClick()
     compose.onNodeWithText("Save your changes?").assertDoesNotExist()
     // X with a change asks first; Don't save keeps the stored setting.
     compose.onNodeWithText("Playback settings").performScrollTo().performClick()
-    compose.onNodeWithText("720p").performClick()
+    compose.onNodeWithText("Optimized").performClick()
     compose.onNodeWithContentDescription("Close").performClick()
     compose.onNodeWithText("Save your changes?").assertIsDisplayed()
     compose.onNodeWithText("Don’t save").performClick()
-    compose.onNodeWithText("Native quality · Subtitles: Off").assertExists()
+    compose.onNodeWithText("Native · Subtitles: Off").assertExists()
     compose.runOnIdle { assertEquals("native", CastOptions(context).height()) }
     // Back with a change asks too; Save stores it.
     compose.onNodeWithText("Playback settings").performScrollTo().performClick()
-    compose.onNodeWithText("720p").performClick()
+    compose.onNodeWithText("Optimized").performClick()
     androidx.test.espresso.Espresso.pressBack()
     compose.onNodeWithTag("unsaved-save").performClick()
-    compose.onNodeWithText("720p · Subtitles: Off").assertExists()
-    compose.runOnIdle { assertEquals("720", CastOptions(context).height()) }
+    compose.onNodeWithText("Optimized · Subtitles: Off").assertExists()
+    compose.runOnIdle { assertEquals("optimized", CastOptions(context).height()) }
     // An invalid value cannot be saved from the prompt; dismissing it returns to editing.
     compose.onNodeWithText("Playback settings").performScrollTo().performClick()
-    compose.onNodeWithText("Custom").performClick()
-    compose.onNodeWithText("Maximum height in pixels").performTextClearance()
+    compose.onNodeWithText("Language", useUnmergedTree = true).performClick()
     compose.onNodeWithContentDescription("Close").performClick()
     compose.onNodeWithTag("unsaved-save").assertIsNotEnabled()
     androidx.test.espresso.Espresso.pressBack()
     compose.onNodeWithText("Save your changes?").assertDoesNotExist()
-    compose.onNodeWithText("Maximum height in pixels").assertExists()
-    compose.runOnIdle { assertEquals("720", CastOptions(context).height()) }
+    compose.onNodeWithText("Language code, e.g. it or en").assertExists()
+    compose.runOnIdle { assertEquals("optimized", CastOptions(context).height()) }
   }
 
   @Test
@@ -348,7 +379,7 @@ class MainScreenTest {
     CastOptions(context)
       .television(SavedTv("Fixture TV", "192.0.2.65", DeviceType.DEVICE_TYPE_DLNA, manual = true))
     val model = MainScreenViewModel()
-    model.uiState.value = MainScreenUiState(ready = true, phase = CastPhase.Ready)
+    model.uiState.value = MainScreenUiState(ready = true, idlePhase = CastPhase.Ready)
     compose.setContent {
       io.github.stupside.castor.theme.CastorTheme {
         MainScreen(model, null, "https://example.org/watch", {})
@@ -363,23 +394,27 @@ class MainScreenTest {
   }
 
   @Test
-  fun nativeQualityIsSavedAndCustomStillRequiresAValidHeight() {
+  fun nativeAndOptimizedAreSavedAndExplainTheSelectedBehavior() {
     val model = MainScreenViewModel()
     compose.setContent {
       io.github.stupside.castor.theme.CastorTheme { MainScreen(model, null, "", {}) }
     }
     compose.onNodeWithText("Playback settings").performScrollTo().performClick()
-    compose.onNodeWithText("Native quality").performClick().assertIsSelected()
+    compose.onNodeWithText("Native").performClick().assertIsSelected()
+    compose
+      .onNodeWithText(context.getString(io.github.stupside.castor.R.string.quality_native_help))
+      .assertExists()
     compose.onNodeWithText("Save").performScrollTo().performClick()
-    compose.onNodeWithText("Native quality · Subtitles: Off").assertExists()
+    compose.onNodeWithText("Native · Subtitles: Off").assertExists()
     compose.runOnIdle { assertEquals("native", CastOptions(context).height()) }
     compose.onNodeWithText("Playback settings").performScrollTo().performClick()
-    compose.onNodeWithText("Native quality").assertIsSelected()
-    compose.onNodeWithText("Custom").performClick()
-    compose.onNodeWithText("Save").performScrollTo().assertIsNotEnabled()
-    compose.onNodeWithText("1080p").performScrollTo().performClick()
+    compose.onNodeWithText("Native").assertIsSelected()
+    compose.onNodeWithText("Optimized").performClick()
+    compose
+      .onNodeWithText(context.getString(io.github.stupside.castor.R.string.quality_optimized_help))
+      .assertExists()
     compose.onNodeWithText("Save").performScrollTo().performClick()
-    compose.onNodeWithText("1080p · Subtitles: Off").assertExists()
+    compose.onNodeWithText("Optimized · Subtitles: Off").assertExists()
   }
 
   @Test
