@@ -149,7 +149,7 @@
     <string name="tv_busy_help">This TV is already casting. Choose another TV, or select its transmission above.</string>
     <string name="tv_in_use">Already casting</string>
     <string name="available_protocols">Available protocols</string>
-    <string name="verdict_original_file">Native: the original file, Dolby Vision kept</string>
+    <string name="verdict_original_file">Native: the original file, unchanged</string>
     <string name="verdict_original_tracks">Native: the original tracks</string>
     <string name="verdict_converted">Native: converted</string>
     <string name="recommended">Recommended</string>

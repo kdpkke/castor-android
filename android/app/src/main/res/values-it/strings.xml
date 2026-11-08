@@ -149,7 +149,7 @@
     <string name="tv_busy_help">Questa TV sta già trasmettendo. Scegline un’altra oppure seleziona la sua trasmissione sopra.</string>
     <string name="tv_in_use">Trasmissione in corso</string>
     <string name="available_protocols">Protocolli disponibili</string>
-    <string name="verdict_original_file">Nativo: il file originale, Dolby Vision incluso</string>
+    <string name="verdict_original_file">Nativo: il file originale, senza modifiche</string>
     <string name="verdict_original_tracks">Nativo: le tracce originali</string>
     <string name="verdict_converted">Nativo: convertito</string>
     <string name="recommended">Consigliato</string>
