@@ -84,6 +84,15 @@ class DeviceDiscoveryTest {
     }
   }
 
+  @Test
+  fun aSavedRendererIsCheckedByTheUdnInsideTheIdCastorSavedIt() {
+    val usn = "uuid:00000000-0000-4000-8000-0000000000aa::urn:schemas-upnp-org:device:MediaRenderer:1"
+    assertEquals("uuid:00000000-0000-4000-8000-0000000000aa", DeviceDiscovery.rendererUdn("dlna:$usn"))
+    assertEquals("uuid:00000000-0000-4000-8000-0000000000aa", DeviceDiscovery.rendererUdn(usn))
+    assertNull(DeviceDiscovery.rendererUdn("dlna:http://192.0.2.21:1221/"))
+    assertNull(DeviceDiscovery.rendererUdn(""))
+  }
+
   @Test(timeout = 15_000)
   fun aClosedCastPortAndHttpRefusalsKeepTheTvOffline() = runBlocking {
     val closedPort = ServerSocket(0).use { it.localPort }

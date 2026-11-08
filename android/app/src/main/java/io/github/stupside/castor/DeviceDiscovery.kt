@@ -194,8 +194,9 @@ class DeviceDiscovery(private val context: Context) {
   // A saved renderer is read again at its description URL, and kept only when its UDN is the same.
   private fun savedRenderer(remembered: Device): Device? {
     if (remembered.type != DeviceType.DEVICE_TYPE_DLNA || !BrowserResolver.isHttp(remembered.address)) return null
-    val udn = remembered.id.substringBefore("::").takeIf { it.startsWith("uuid:") } ?: return null
-    return describe(remembered.id, remembered.address, DeviceType.DEVICE_TYPE_DLNA, udn)
+    val usn = remembered.id.removePrefix("dlna:")
+    val udn = rendererUdn(remembered.id) ?: return null
+    return describe(usn, remembered.address, DeviceType.DEVICE_TYPE_DLNA, udn)
   }
 
   // Each protocol on its own port: AirPlay and FCast by unicast DNS-SD, Cast by its setup API, DLNA by SSDP.
@@ -363,6 +364,10 @@ class DeviceDiscovery(private val context: Context) {
   }
 
   companion object {
+    // A saved renderer's id is the engine's "dlna:" before the USN the TV announced.
+    internal fun rendererUdn(id: String): String? =
+      id.removePrefix("dlna:").substringBefore("::").takeIf { it.startsWith("uuid:") }
+
     internal val knownClient =
       OkHttpClient.Builder()
         .callTimeout(3, TimeUnit.SECONDS)
