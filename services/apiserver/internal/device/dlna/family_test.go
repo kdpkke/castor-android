@@ -3,8 +3,12 @@ package dlna
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,5 +82,32 @@ func TestSSDPSearchWithoutCallerDeadlineStillEnds(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > searchTimeout+time.Second {
 		t.Fatalf("unanswered SSDP search waited %s beyond its %s budget", elapsed, searchTimeout)
+	}
+}
+
+func TestATypedPortIsTheDescriptionServerNotTheSSDPPort(t *testing.T) {
+	description := `<?xml version="1.0"?><root xmlns="urn:schemas-upnp-org:device-1-0"><specVersion><major>1</major><minor>0</minor></specVersion>` +
+		`<device><deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType><friendlyName>Living room</friendlyName>` +
+		`<UDN>uuid:00000000-0000-4000-8000-0000000000aa</UDN></device></root>`
+	renderer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = io.WriteString(w, description)
+	}))
+	defer renderer.Close()
+	typed := strings.TrimPrefix(renderer.URL, "http://")
+	if got, err := (Family{}).Locate(t.Context(), typed); err != nil || got != renderer.URL+"/" {
+		t.Fatalf("Locate(%q) = %q, %v; want its root description", typed, got, err)
+	}
+
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "<html>router login</html>")
+	}))
+	defer page.Close()
+	// Not a description: the host is searched for instead, here with no SSDP answer.
+	if got, err := (Family{}).Locate(t.Context(), strings.TrimPrefix(page.URL, "http://")); err == nil {
+		t.Fatalf("Locate of a web page = %q, want an error", got)
 	}
 }

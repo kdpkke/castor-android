@@ -20,6 +20,7 @@ English one.
 - AirPlay TVs such as LG also keep Dolby Vision from MKV files, which Castor converts to HLS for them.
 - A Native file the TV plays unchanged ends the cast as soon as the TV finishes it, instead of about 30 seconds later on DLNA TVs.
 - Restarting or stopping a cast on a DLNA TV that already dropped the video, as LG TVs do, no longer fails with "Transition not available".
+- A DLNA TV entered as an IP address with a port is read at that port, where its description is, instead of being searched for there.
 - TVs whose Wi-Fi drops the network's search messages still appear. Every search also asks the saved TV's address directly on each protocol, and **Find this TV’s protocols** does the same for an IP address typed in **Enter a TV address**.
 
 - Reopening the same webpage for another cast loads it again after the previous player closed, instead of leaving a blank browser with an endless loading message. Retrying a page that is still open preserves the player's state.
@@ -62,6 +63,7 @@ English one.
 - Le TV AirPlay come le LG mantengono il Dolby Vision anche dai file MKV, che Castor converte in HLS per loro.
 - Un file Nativo che la TV riproduce senza modifiche chiude la trasmissione appena la TV lo finisce, invece di circa 30 secondi dopo sulle TV DLNA.
 - Riavviare o fermare una trasmissione su una TV DLNA che ha già abbandonato il video, come fanno le TV LG, non fallisce più con "Transition not available".
+- Una TV DLNA inserita come indirizzo IP con la porta viene letta su quella porta, dove si trova la sua descrizione, invece di esservi cercata.
 - Compaiono anche le TV il cui Wi-Fi perde i messaggi di ricerca della rete. Ogni ricerca interroga direttamente, su ogni protocollo, l’indirizzo della TV salvata, e **Trova i protocolli di questa TV** fa lo stesso con un indirizzo IP scritto in **Inserisci l’indirizzo della TV**.
 
 - Riaprire la stessa pagina per un altro cast la carica nuovamente dopo la chiusura del player precedente, evitando il browser nero con caricamento infinito. Riprovare una pagina ancora aperta mantiene lo stato del player.

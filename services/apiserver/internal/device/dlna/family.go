@@ -6,13 +6,18 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
+	"time"
 
 	"github.com/huin/goupnp"
 
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	"github.com/stupside/castor/services/apiserver/internal/device"
 )
+
+// describeTimeout bounds reading a typed address's root before it is searched for instead.
+const describeTimeout = 2 * time.Second
 
 // serviceVersions: UPnP service versions (newest first); many implement :3, not just :1.
 var serviceVersions = []int{3, 2, 1}
@@ -61,12 +66,25 @@ func (Family) Locate(ctx context.Context, address string) (string, error) {
 	if u, err := url.Parse(address); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" {
 		return address, nil
 	}
+	// A typed port is the description server's, as SSDP always answers on its own port.
+	// LG renderers that stop answering SSDP still describe themselves at that server's root.
+	typed := address
+	if host, port, err := net.SplitHostPort(address); err == nil {
+		root := &url.URL{Scheme: "http", Host: net.JoinHostPort(host, port), Path: "/"}
+		check, cancel := context.WithTimeout(ctx, describeTimeout)
+		_, err := goupnp.DeviceByURLCtx(check, root)
+		cancel()
+		if err == nil {
+			return root.String(), nil
+		}
+		address = host
+	}
 
 	location, err := searchDescription(ctx, address)
 	if err != nil {
 		return "", fmt.Errorf(
 			"resolving DLNA description for %q (device did not answer a unicast SSDP search; "+
-				"pin it at its full description URL instead): %w", address, err)
+				"pin it at its full description URL instead): %w", typed, err)
 	}
 	return location, nil
 }
