@@ -5,7 +5,7 @@ English one.
 
 ## 1.4.0 — Unreleased
 
-- The TV picker lists each host once with its IP addresses and ports. Selecting a TV opens its available casting protocols, with Back below the choices.
+- The TV picker lists each TV once with its IP address and the protocols it answers on. Selecting a TV opens those protocols with their ports, with Back below the choices.
 
 - Cast different videos to different TVs at the same time. Switch transmissions to control one, or choose New cast to prepare another without stopping the others.
 - Restart casting reloads the same source on the same TV. Videos resume from their last reported position, while live streams return to live.
@@ -43,7 +43,7 @@ English one.
 
 ### Italiano
 
-- La ricerca mostra ogni TV una sola volta con IP e porte. Selezionandola si apre la pagina dei protocolli disponibili, con Indietro sotto le opzioni.
+- La ricerca mostra ogni TV una sola volta con il suo IP e i protocolli su cui risponde. Selezionandola si apre la pagina dei protocolli con le loro porte, con Indietro sotto le opzioni.
 
 - Trasmetti video diversi su TV diverse contemporaneamente. Seleziona una trasmissione per controllarla oppure usa Nuovo cast senza fermare le altre.
 - Riavvia trasmissione ricarica la stessa sorgente sulla stessa TV. I video riprendono dall’ultima posizione rilevata; le dirette tornano al punto live.
