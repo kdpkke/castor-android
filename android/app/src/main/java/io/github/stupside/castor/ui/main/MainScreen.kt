@@ -315,6 +315,9 @@ fun MainScreen(
               ?.device
               ?.takeIf { it.address.isNotBlank() && it.type in receiverTypes }
               ?.let { SavedTv(it) }
+          // The page this cast came from, to check by hand whether it still plays.
+          val pageUrl =
+            activeUrl.takeIf { browser != null && source?.hasPages() == true && !extracting }
           key(state.castId) {
             ActiveCast(
               state.phase,
@@ -328,6 +331,11 @@ fun MainScreen(
               viewModel::togglePlaybackPause,
               viewModel::seekBy,
               viewModel::seekTo,
+              pageShown = pageUrl?.let { browserPage != null },
+              togglePage = {
+                if (browserPage != null) browser?.dismissPage()
+                else pageUrl?.let { scope.launch { browser?.showPage(it) } }
+              },
             )
             if ((active?.status?.casting?.automaticRestarts ?: 0) > 0) {
               Text(
@@ -819,6 +827,8 @@ private fun ActiveCast(
   togglePause: () -> Unit,
   seekBy: (Long) -> Unit,
   seekTo: (Long) -> Unit,
+  pageShown: Boolean? = null,
+  togglePage: () -> Unit = {},
 ) {
   val (title, help) =
     when (phase) {
@@ -867,6 +877,13 @@ private fun ActiveCast(
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
           )
+        }
+        pageShown?.let { shown ->
+          GlassButton(onClick = togglePage, modifier = Modifier.testTag("page-toggle")) {
+            CastIcon(R.drawable.ic_video)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(if (shown) R.string.hide_page else R.string.show_page))
+          }
         }
         if (phase == CastPhase.Casting) {
           HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

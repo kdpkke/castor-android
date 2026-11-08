@@ -85,6 +85,9 @@
     <string name="page_browser">Page player</string>
     <string name="page_loading">Loading the page…</string>
     <string name="page_play_help">Start the video here while Castor looks for a stream.</string>
+    <string name="page_check_help">Play the video here to see whether the page works. The cast to the TV carries on.</string>
+    <string name="show_page">Show the page</string>
+    <string name="hide_page">Hide the page</string>
     <string name="page_retry_help">Try playing the video here, then tap %1$s again. If the channel is offline, try another link.</string>
     <string name="cast_error">Unable to finish casting</string>
     <string name="error_help">Review the link and selected TV, then try again. The full details are available below.</string>

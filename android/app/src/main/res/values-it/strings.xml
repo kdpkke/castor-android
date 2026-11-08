@@ -85,6 +85,9 @@
     <string name="page_browser">Lettore della pagina</string>
     <string name="page_loading">Caricamento della pagina…</string>
     <string name="page_play_help">Avvia il video qui mentre Castor cerca un flusso.</string>
+    <string name="page_check_help">Avvia il video qui per vedere se la pagina funziona. La trasmissione alla TV continua.</string>
+    <string name="show_page">Mostra la pagina</string>
+    <string name="hide_page">Nascondi la pagina</string>
     <string name="page_retry_help">Prova ad avviare il video qui, poi tocca di nuovo %1$s. Se il canale è offline, prova un altro link.</string>
     <string name="cast_error">Impossibile completare la trasmissione</string>
     <string name="error_help">Controlla il link e la TV selezionata, poi riprova. I dettagli completi sono disponibili qui sotto.</string>

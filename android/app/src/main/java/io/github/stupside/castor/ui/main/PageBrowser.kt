@@ -52,6 +52,7 @@ internal fun PageBrowser(
       when {
         page.loading -> stringResource(R.string.page_loading)
         extracting -> stringResource(R.string.page_play_help)
+        casting -> stringResource(R.string.page_check_help)
         else -> stringResource(R.string.page_retry_help, stringResource(R.string.cast_video))
       }
     Text(

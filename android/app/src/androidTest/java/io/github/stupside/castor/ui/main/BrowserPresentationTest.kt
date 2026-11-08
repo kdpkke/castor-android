@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.core.view.ViewCompat
@@ -55,6 +56,50 @@ class BrowserPresentationTest {
       compose.activity.window.setSoftInputMode(softInputMode)
     }
   }
+
+  @Test
+  fun aCastFromAPageShowsAndHidesThatPageOnRequest() =
+    runBlocking<Unit> {
+      val context = InstrumentationRegistry.getInstrumentation().targetContext
+      val server = MockWebServer()
+      server.dispatcher =
+        object : Dispatcher() {
+          override fun dispatch(request: RecordedRequest) =
+            MockResponse().setHeader("Content-Type", "text/html").setBody("<p>Live channel</p>")
+        }
+      server.start()
+      val address = server.url("/watch").toString()
+      val browser = withContext(Dispatchers.Main) { BrowserResolver(context) }
+      val model = MainScreenViewModel()
+      val cast =
+        castor.v1.CastOuterClass.Cast.newBuilder()
+          .setSource(
+            castor.v1.CastOuterClass.Source.newBuilder()
+              .setPages(castor.v1.CastOuterClass.Source.Pages.newBuilder().addUrls(address))
+          )
+          .build()
+      model.uiState.value =
+        castingScreenState(castId = "page-cast", activeCast = cast, phase = CastPhase.Casting)
+      compose.setContent { CastorTheme { MainScreen(model, browser, "", {}) } }
+      try {
+        compose.onNodeWithTag("page-browser").assertDoesNotExist()
+        compose.onNodeWithTag("page-toggle").performScrollTo().performClick()
+        withTimeout(30_000) { while (browser.page.value?.loading != false) delay(100) }
+        assertEquals(address, browser.page.value?.url)
+        assertNull(browser.page.value?.error)
+        compose.onNodeWithTag("page-browser").assertExists()
+        compose
+          .onNodeWithText(context.getString(io.github.stupside.castor.R.string.page_check_help))
+          .assertExists()
+        compose.onNodeWithTag("page-toggle").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertNull(browser.page.value)
+        compose.onNodeWithTag("page-browser").assertDoesNotExist()
+      } finally {
+        server.shutdown()
+        withContext(Dispatchers.Main) { browser.close() }
+      }
+    }
 
   @Test
   fun focusedInputKeepsPageGesturesAndWebButtonsUsable() =

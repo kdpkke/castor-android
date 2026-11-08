@@ -409,6 +409,37 @@ class BrowserResolver(private val context: Context) {
     if (!mutex.isLocked) clearPage()
   }
 
+  // Opens address for the viewer to play by hand, as a page kept after a failed search is.
+  suspend fun showPage(address: String) {
+    if (!isHttp(address) || address.length > 8192 || !mutex.tryLock()) return
+    try {
+      withContext(Dispatchers.Main) {
+        if (page.value != null) return@withContext
+        page.value = BrowserPage(address)
+        try {
+          prepare()
+        } catch (failure: Exception) {
+          if (failure is CancellationException) throw failure
+          page.value = BrowserPage(address, loading = false, error = failure.message)
+          return@withContext
+        }
+        candidates.clear()
+        requestErrors.clear()
+        mainPort = null
+        finishEvaluations()
+        sourcePage = address
+        loadFailure = null
+        capturing = true
+        page.value = BrowserPage(address, protectionReady = true)
+        blankPage?.let { withTimeoutOrNull(5_000) { it.await() } }
+        navigationStarted = System.currentTimeMillis()
+        session.loadUri(address)
+      }
+    } finally {
+      mutex.unlock()
+    }
+  }
+
   private fun finishEvaluations() {
     val callbacks = evaluations.values.toList()
     evaluations.clear()
