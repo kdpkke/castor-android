@@ -2,10 +2,32 @@ package io.github.stupside.castor.data
 
 import castor.v1.CastOuterClass.*
 import castor.v1.DeviceOuterClass.*
+import castor.v1.DeviceOuterClass.Target
 
 class DataRepository(private val api: Rpc) {
   suspend fun devices(): List<Device> =
     api.result { api.devices.listDevices(ListDevicesRequest.getDefaultInstance()) }.devicesList
+
+  // The most of a source a Native cast keeps on target, as the engine judges its protocol.
+  suspend fun describe(target: Target): Fidelity =
+    api.result { api.devices.describe(DescribeRequest.newBuilder().setTarget(target).build()) }.fidelity
+
+  // The TV shows a PIN until finishPairing proves it or cancelPairing abandons it.
+  suspend fun startPairing(target: Target): String =
+    api
+      .result { api.devices.startPairing(StartPairingRequest.newBuilder().setTarget(target).build()) }
+      .pairingId
+      .also { check(it.isNotBlank()) { "The server returned an empty pairing ID" } }
+
+  suspend fun finishPairing(id: String, pin: String) {
+    api.result {
+      api.devices.finishPairing(FinishPairingRequest.newBuilder().setPairingId(id).setPin(pin).build())
+    }
+  }
+
+  suspend fun cancelPairing(id: String) {
+    api.result { api.devices.cancelPairing(CancelPairingRequest.newBuilder().setPairingId(id).build()) }
+  }
 
   suspend fun casts(): List<Cast> =
     api.result { api.casts.listCasts(ListCastsRequest.getDefaultInstance()) }.castsList

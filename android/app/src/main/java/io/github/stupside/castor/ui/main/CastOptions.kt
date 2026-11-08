@@ -22,6 +22,8 @@ internal val receiverTypes =
     DeviceType.DEVICE_TYPE_DLNA,
     DeviceType.DEVICE_TYPE_CHROMECAST,
     DeviceType.DEVICE_TYPE_ROKU,
+    DeviceType.DEVICE_TYPE_AIRPLAY,
+    DeviceType.DEVICE_TYPE_FCAST,
   )
 
 enum class VideoSourceMode {

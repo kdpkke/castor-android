@@ -149,4 +149,16 @@
     <string name="tv_busy_help">Questa TV sta già trasmettendo. Scegline un’altra oppure seleziona la sua trasmissione sopra.</string>
     <string name="tv_in_use">Trasmissione in corso</string>
     <string name="available_protocols">Protocolli disponibili</string>
+    <string name="verdict_original_file">Nativo: il file originale, Dolby Vision incluso</string>
+    <string name="verdict_original_tracks">Nativo: le tracce originali</string>
+    <string name="verdict_converted">Nativo: convertito</string>
+    <string name="recommended">Consigliato</string>
+    <string name="pair_title">Abbina la TV</string>
+    <string name="pair_message">%1$s riproduce solo per i dispositivi abbinati.</string>
+    <string name="pair_asking">Richiesta del PIN alla TV…</string>
+    <string name="pair_pin">Inserisci il PIN mostrato dalla TV</string>
+    <string name="pair_confirm">Abbina e trasmetti</string>
+    <string name="pair_wrong_pin">Il PIN non corrisponde. Chiedine uno nuovo alla TV.</string>
+    <string name="pair_retry">Mostra un nuovo PIN</string>
+    <string name="pair_cancel">Annulla</string>
 </resources>

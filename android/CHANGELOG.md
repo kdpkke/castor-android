@@ -13,6 +13,10 @@ English one.
 - Conversions use the phone's hardware video encoder when it works. If it fails to start, dies or stops producing during a cast, Castor continues in software: on DLNA TVs fed MPEG-TS in the same stream, without the TV reloading; elsewhere from where the viewer was. A failed hardware encoder is not used again until Castor restarts.
 - DLNA TVs receive finished files in Native unchanged, keeping every track and Dolby Vision signaling, and report whether they got the original file, its tracks or a conversion. On LG TVs seeking such a file now works, also while paused.
 - The playback position stays right after a restart or an automatic recovery, and is no longer reported as zero when the TV stops. Seeking before where a restarted stream begins, or on a TV that refuses its own seek, prepares the stream again from that point; a Native original is never converted to seek.
+- Cast to AirPlay TVs: Apple TVs and TVs with AirPlay built in, such as LG webOS models, are found on the network. The first cast to a TV that asks for pairing shows a PIN dialog; enter the PIN the TV displays, or ask it for a new one. Castor keeps the pairing on the phone.
+- Cast to FCast receivers, found on the network or added by address.
+- The protocol list of a TV says what a Native cast keeps on each one (the original file, its tracks, or a conversion) and recommends the one keeping the most.
+- In Native, HDR and Dolby Vision files a Chromecast or AirPlay TV can fetch itself are handed to it unchanged: AirPlay TVs such as LG now show Dolby Vision. A TV that refuses the file gets Castor's stream instead.
 
 - Reopening the same webpage for another cast loads it again after the previous player closed, instead of leaving a blank browser with an endless loading message. Retrying a page that is still open preserves the player's state.
 - A saved Chromecast remains discoverable when multicast announcements disappear: Castor verifies its receiver UUID and open Cast port at the saved address. Offline receivers and reused addresses stay hidden.
@@ -47,6 +51,10 @@ English one.
 - Le conversioni usano l'encoder video hardware del telefono quando funziona. Se non parte, si interrompe o smette di produrre durante una trasmissione, Castor continua in software: sulle TV DLNA che ricevono MPEG-TS nello stesso flusso, senza ricaricare la TV; altrove dal punto in cui si trovava lo spettatore. Un encoder hardware fallito non viene riusato fino al riavvio di Castor.
 - Le TV DLNA ricevono i file finiti in Nativa senza modifiche, con tutte le tracce e il segnale Dolby Vision, e indicano se hanno ricevuto il file originale, le sue tracce o una conversione. Sulle TV LG lo spostamento in questi file ora funziona, anche in pausa.
 - La posizione resta corretta dopo un riavvio o un recupero automatico e non viene più indicata come zero quando la TV si ferma. Uno spostamento prima dell'inizio di un flusso riavviato, o su una TV che rifiuta il proprio seek, prepara di nuovo il flusso da quel punto; un originale in Nativa non viene mai convertito per spostarsi.
+- Trasmetti alle TV AirPlay: le Apple TV e le TV con AirPlay integrato, come i modelli LG webOS, vengono trovate in rete. Il primo cast verso una TV che chiede l'abbinamento apre una finestra per il PIN: inserisci quello mostrato dalla TV, oppure chiedine uno nuovo. Castor conserva l'abbinamento sul telefono.
+- Trasmetti ai ricevitori FCast, trovati in rete o aggiunti per indirizzo.
+- L'elenco dei protocolli di una TV indica cosa mantiene una trasmissione Nativa su ciascuno (il file originale, le sue tracce o una conversione) e consiglia quello che mantiene di più.
+- In Nativa i file HDR e Dolby Vision che una TV Chromecast o AirPlay può scaricare da sé le arrivano senza modifiche: le TV AirPlay come le LG ora mostrano il Dolby Vision. Se la TV rifiuta il file, riceve il flusso di Castor.
 
 - Riaprire la stessa pagina per un altro cast la carica nuovamente dopo la chiusura del player precedente, evitando il browser nero con caricamento infinito. Riprovare una pagina ancora aperta mantiene lo stato del player.
 - L’ultima Chromecast salvata resta rilevabile quando spariscono gli annunci multicast: Castor verifica UUID del ricevitore e porta Cast aperta all’indirizzo salvato. TV offline e indirizzi riutilizzati restano nascosti.

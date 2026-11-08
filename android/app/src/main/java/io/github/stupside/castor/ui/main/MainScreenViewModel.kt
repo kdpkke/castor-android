@@ -61,6 +61,10 @@ data class MainScreenUiState(
   val discoveryComplete: Boolean = false,
   val discoveryError: String? = null,
   val recovering: Boolean = false,
+  // What a Native cast keeps on each receiver protocol, by verdictKey.
+  val verdicts: Map<String, Fidelity> = emptyMap(),
+  // A TV that asked to be paired before it plays, while the user enters its PIN.
+  val pairing: PairingUiState? = null,
 ) {
   val selected: CastSessionUiState?
     get() = sessions.firstOrNull { it.cast.id == selectedCastId }
@@ -100,6 +104,18 @@ data class MainScreenUiState(
   }
 }
 
+data class PairingUiState(
+  val tv: String,
+  val target: Target,
+  // Set once the TV shows its PIN; a wrong PIN ends that pairing and the next one shows a new PIN.
+  val pairingId: String? = null,
+  val busy: Boolean = false,
+  val wrongPin: Boolean = false,
+  val error: String? = null,
+)
+
+internal fun verdictKey(tv: SavedTv) = "${tv.type.number}|${tv.address}"
+
 data class PlaybackUiState(
   val positionMs: Long? = null,
   val durationMs: Long? = null,
@@ -126,6 +142,8 @@ class MainScreenViewModel : ViewModel() {
   private var endpoint: Rpc? = null
   private var discovery: Job? = null
   private var submission: Job? = null
+  // The last cast asked for, cast again once the TV it was refused by is paired.
+  private var lastCast: (() -> Unit)? = null
   private var recovery: Job? = null
   private var composing = false
 
@@ -265,6 +283,93 @@ class MainScreenViewModel : ViewModel() {
         )
   }
 
+  private fun target(device: Device): Target =
+    Target.newBuilder()
+      .apply {
+        if (device.id.isNotBlank()) deviceId = device.id
+        else setPinned(Target.Pinned.newBuilder().setAddress(device.address).setType(device.type))
+      }
+      .build()
+
+  // Asks each protocol of a TV what a Native cast keeps there, once per protocol.
+  fun describe(tvs: List<SavedTv>) {
+    val data = repository ?: return
+    for (tv in tvs) {
+      val key = verdictKey(tv)
+      if (key in uiState.value.verdicts) continue
+      viewModelScope.launch {
+        val fidelity =
+          try {
+            data.describe(tv.target())
+          } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            return@launch
+          }
+        uiState.value = uiState.value.copy(verdicts = uiState.value.verdicts + (key to fidelity))
+      }
+    }
+  }
+
+  // Asks the TV to show a PIN.
+  fun startPairing() {
+    val pairing = uiState.value.pairing ?: return
+    val data = repository ?: return
+    uiState.value = uiState.value.copy(pairing = pairing.copy(pairingId = null, busy = true, error = null))
+    viewModelScope.launch {
+      val next =
+        try {
+          pairing.copy(pairingId = data.startPairing(pairing.target), busy = false, wrongPin = false)
+        } catch (error: Exception) {
+          if (error is CancellationException) throw error
+          pairing.copy(pairingId = null, busy = false, error = error.message ?: "Pairing failed")
+        }
+      if (uiState.value.pairing?.target == pairing.target)
+        uiState.value = uiState.value.copy(pairing = next)
+    }
+  }
+
+  // Proves the PIN; once paired, the cast the TV refused is asked again.
+  fun finishPairing(pin: String) {
+    val pairing = uiState.value.pairing ?: return
+    val id = pairing.pairingId ?: return
+    val data = repository ?: return
+    uiState.value = uiState.value.copy(pairing = pairing.copy(busy = true, error = null))
+    viewModelScope.launch {
+      try {
+        data.finishPairing(id, pin.trim())
+        uiState.value = uiState.value.copy(pairing = null)
+        lastCast?.invoke()
+      } catch (error: Exception) {
+        if (error is CancellationException) throw error
+        val wrong = (error.cause as? ConnectException)?.code == Code.INVALID_ARGUMENT
+        uiState.value =
+          uiState.value.copy(
+            pairing =
+              pairing.copy(
+                pairingId = null,
+                busy = false,
+                wrongPin = wrong,
+                error = if (wrong) null else error.message ?: "Pairing failed",
+              )
+          )
+      }
+    }
+  }
+
+  fun cancelPairing() {
+    val pairing = uiState.value.pairing ?: return
+    uiState.value = uiState.value.copy(pairing = null)
+    val id = pairing.pairingId ?: return
+    val data = repository ?: return
+    viewModelScope.launch {
+      try {
+        data.cancelPairing(id)
+      } catch (error: Exception) {
+        if (error is CancellationException) throw error
+      }
+    }
+  }
+
   fun dismissError() {
     uiState.value.castId?.let { update(it) { it.copy(error = null, nativeIncompatible = false) } }
     uiState.value =
@@ -311,6 +416,9 @@ class MainScreenViewModel : ViewModel() {
   ) {
     if (!uiState.value.ready || uiState.value.recovering || submission?.isActive == true) return
     val data = repository ?: return
+    lastCast = {
+      cast(url, page, target, maxHeight, subtitles, receiverName, subtitleLanguage, localVideo, automatic)
+    }
     submission = viewModelScope.launch {
       try {
         val videoUrl =
@@ -428,6 +536,8 @@ class MainScreenViewModel : ViewModel() {
           if (event.hasEnded()) {
             val ended = event.ended
             forget(cast.id)
+            val unpaired =
+              ended.hasFailed() && ended.failed.code == FailureCode.FAILURE_CODE_PAIRING_REQUIRED
             uiState.value =
               uiState.value.copy(
                 idlePhase =
@@ -436,11 +546,17 @@ class MainScreenViewModel : ViewModel() {
                     ended.hasCompleted() -> CastPhase.Completed
                     else -> CastPhase.Failed
                   },
-                failure = if (ended.hasFailed()) ended.failed.message else uiState.value.failure,
+                failure =
+                  if (ended.hasFailed() && !unpaired) ended.failed.message else uiState.value.failure,
+                pairing =
+                  if (unpaired)
+                    PairingUiState(cast.device.name.ifBlank { cast.device.address }, target(cast.device))
+                  else uiState.value.pairing,
                 idleNativeIncompatible =
                   ended.hasFailed() &&
                     ended.failed.code == FailureCode.FAILURE_CODE_NATIVE_INCOMPATIBLE,
               )
+            if (unpaired) startPairing()
             if (ended.hasFailed()) recover(data)
           } else
             update(cast.id) {

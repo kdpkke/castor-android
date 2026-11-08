@@ -2,6 +2,7 @@ package io.github.stupside.castor.ui.main
 
 import castor.v1.DeviceOuterClass.Device
 import castor.v1.DeviceOuterClass.DeviceType
+import castor.v1.DeviceOuterClass.Fidelity
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -26,7 +27,7 @@ class DiscoveredTvsTest {
     assertEquals(2, groups.size)
     val first = groups.single { it.host == "192.0.2.10" }
     assertEquals("Living room", first.name)
-    assertEquals("192.0.2.10:8009 · 192.0.2.10:1676", first.addresses)
+    assertEquals("192.0.2.10 · Chromecast, DLNA", first.summary)
     assertEquals(listOf(cast.id, dlna.id), first.protocols.map { it.target().deviceId })
     assertEquals(dlna.address, first.protocols[1].address)
   }
@@ -46,7 +47,7 @@ class DiscoveredTvsTest {
     val groups = discoveredTvs(listOf(other, fresh), SavedTv(old))
     assertEquals("192.0.2.20", groups.first().host)
     assertEquals(fresh.address, groups.first().protocols.single().address)
-    assertEquals("192.0.2.20:2000", groups.first().addresses)
+    assertEquals("192.0.2.20 · ${protocolName(fresh.type)}", groups.first().summary)
     assertTrue(discoveredTvs(emptyList(), SavedTv(old)).isEmpty())
   }
 
@@ -70,5 +71,25 @@ class DiscoveredTvsTest {
       "[2001:db8::1]:8009",
       receiverEndpoint(SavedTv("TV", "[2001:db8::1]:8009", DeviceType.DEVICE_TYPE_CHROMECAST)),
     )
+  }
+
+  @Test
+  fun theProtocolKeepingMostOfANativeCastIsListedFirstAndRecommendedOnlyWhenItKeepsMore() {
+    val dlna = SavedTv("TV", "http://192.0.2.10:1676/d.xml", DeviceType.DEVICE_TYPE_DLNA)
+    val cast = SavedTv("TV", "192.0.2.10:8009", DeviceType.DEVICE_TYPE_CHROMECAST)
+    val airplay = SavedTv("TV", "192.0.2.10:7000", DeviceType.DEVICE_TYPE_AIRPLAY)
+    val verdicts =
+      mapOf(
+        verdictKey(cast) to Fidelity.FIDELITY_ORIGINAL_TRACKS,
+        verdictKey(airplay) to Fidelity.FIDELITY_ORIGINAL_TRACKS,
+        verdictKey(dlna) to Fidelity.FIDELITY_ORIGINAL_FILE,
+      )
+    val ranked = rankedProtocols(listOf(cast, airplay, dlna), verdicts)
+    assertEquals(listOf(dlna, cast, airplay), ranked)
+    assertEquals(dlna, recommendedProtocol(ranked, verdicts))
+    // A tie, or no verdict yet, recommends nothing.
+    val tied = rankedProtocols(listOf(cast, airplay), verdicts)
+    assertNull(recommendedProtocol(tied, verdicts))
+    assertNull(recommendedProtocol(rankedProtocols(listOf(cast, dlna), emptyMap()), emptyMap()))
   }
 }

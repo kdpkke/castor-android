@@ -615,10 +615,13 @@ fun MainScreen(
   if (sheet == "language") AppLanguagePicker(language, { sheet = null }, selectLanguage)
   if (sheet == "theme") AppThemePicker(theme, { sheet = null }, selectTheme)
   if (sheet == "tv")
-    TvPicker(state, tv, { sheet = null }, { viewModel.discover() }) { selected ->
+    TvPicker(state, tv, { sheet = null }, { viewModel.discover() }, viewModel::describe) { selected ->
       saveTv(selected)
       sheet = null
     }
+  state.pairing?.let {
+    PairingDialog(it, viewModel::startPairing, viewModel::finishPairing, viewModel::cancelPairing)
+  }
   if (sheet == "settings")
     PlaybackSettings(height, subtitles, { sheet = null }) { newHeight, newSubtitles ->
       height = newHeight
@@ -637,6 +640,8 @@ internal fun protocolName(type: DeviceType): String =
   when (type) {
     DeviceType.DEVICE_TYPE_CHROMECAST -> "Chromecast"
     DeviceType.DEVICE_TYPE_ROKU -> "Roku"
+    DeviceType.DEVICE_TYPE_AIRPLAY -> "AirPlay"
+    DeviceType.DEVICE_TYPE_FCAST -> "FCast"
     else -> "DLNA"
   }
 

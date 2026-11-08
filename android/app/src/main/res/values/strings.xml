@@ -149,4 +149,16 @@
     <string name="tv_busy_help">This TV is already casting. Choose another TV, or select its transmission above.</string>
     <string name="tv_in_use">Already casting</string>
     <string name="available_protocols">Available protocols</string>
+    <string name="verdict_original_file">Native: the original file, Dolby Vision kept</string>
+    <string name="verdict_original_tracks">Native: the original tracks</string>
+    <string name="verdict_converted">Native: converted</string>
+    <string name="recommended">Recommended</string>
+    <string name="pair_title">Pair with the TV</string>
+    <string name="pair_message">%1$s plays only for devices paired with it.</string>
+    <string name="pair_asking">Asking the TV for a PIN…</string>
+    <string name="pair_pin">Enter the PIN shown on the TV</string>
+    <string name="pair_confirm">Pair and cast</string>
+    <string name="pair_wrong_pin">That PIN does not match. Ask the TV for a new one.</string>
+    <string name="pair_retry">Show a new PIN</string>
+    <string name="pair_cancel">Cancel</string>
 </resources>

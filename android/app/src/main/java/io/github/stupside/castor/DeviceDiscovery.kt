@@ -26,6 +26,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.withLock
 import org.xmlpull.v1.XmlPullParser
 import okhttp3.Call
 import okhttp3.Callback
@@ -47,6 +48,8 @@ class DeviceDiscovery(private val context: Context) {
   // Chromecasts. The search fails only when nothing was found and some route failed.
   suspend fun find(remembered: Device? = null): List<Device> = coroutineScope {
     val cast = async { attempt { chromecasts() } }
+    val airplay = async { attempt { airPlays() } }
+    val fcast = async { attempt { fCasts() } }
     val known = async { rememberedChromecast(remembered) }
     val ssdp =
       async(Dispatchers.IO) {
@@ -56,7 +59,7 @@ class DeviceDiscovery(private val context: Context) {
         val routes = listOf<NetworkInterface?>(null) + hotspotInterfaces()
         routes.map { async { attempt { ssdp(it) } } }.awaitAll()
       }
-    val results = ssdp.await() + cast.await()
+    val results = ssdp.await() + cast.await() + airplay.await() + fcast.await()
     val found =
       (results.flatMap { it.getOrNull().orEmpty() } + listOfNotNull(known.await()))
         .distinctBy { "${it.type}:${it.id}" }
@@ -191,8 +194,36 @@ class DeviceDiscovery(private val context: Context) {
     }
   }
 
+  private suspend fun chromecasts(): List<Device> =
+    services("_googlecast._tcp.") { resolved, host ->
+      val address = URI("http", null, host, resolved.port, null, null, null).rawAuthority
+      val name = resolved.attributes["fn"]?.toString(Charsets.UTF_8) ?: resolved.serviceName
+      val id = resolved.attributes["id"]?.toString(Charsets.UTF_8) ?: resolved.serviceName
+      Device.newBuilder()
+        .setId(id)
+        .setName(name)
+        .setType(DeviceType.DEVICE_TYPE_CHROMECAST)
+        .setAddress(address)
+        .build()
+    }
+
+  // AirPlay receivers that play video; audio-only speakers and Macs are left out, as the engine refuses them.
+  private suspend fun airPlays(): List<Device> =
+    services("_airplay._tcp.") { resolved, host ->
+      val txt = resolved.attributes.mapValues { it.value?.toString(Charsets.UTF_8).orEmpty() }
+      ReceiverAnnouncements.airPlay(resolved.serviceName, txt, host, resolved.port)
+    }
+
+  private suspend fun fCasts(): List<Device> =
+    services("_fcast._tcp.") { resolved, host ->
+      ReceiverAnnouncements.fCast(resolved.serviceName, host, resolved.port)
+    }
+
+  // Android resolves one service at a time on older releases: every family's resolutions take turns.
+  private val resolving = kotlinx.coroutines.sync.Mutex()
+
   @Suppress("DEPRECATION")
-  private suspend fun chromecasts(): List<Device> {
+  private suspend fun services(type: String, device: (NsdServiceInfo, String) -> Device?): List<Device> {
     val found = mutableListOf<Device>()
     val services = callbackFlow {
       val listener =
@@ -213,40 +244,33 @@ class DeviceDiscovery(private val context: Context) {
 
           override fun onStopDiscoveryFailed(type: String, code: Int) {}
         }
-      nsd.discoverServices("_googlecast._tcp.", NsdManager.PROTOCOL_DNS_SD, listener)
+      nsd.discoverServices(type, NsdManager.PROTOCOL_DNS_SD, listener)
       awaitClose { runCatching { nsd.stopServiceDiscovery(listener) } }
     }
     withTimeoutOrNull(4000) {
       services.collect { service ->
         val resolved =
-          withTimeoutOrNull(700) {
-            suspendCancellableCoroutine<NsdServiceInfo?> { continuation ->
-              nsd.resolveService(
-                service,
-                object : NsdManager.ResolveListener {
-                  override fun onResolveFailed(info: NsdServiceInfo, code: Int) {
-                    if (continuation.isActive) continuation.resume(null)
-                  }
+          resolving.withLock {
+            withTimeoutOrNull(700) {
+              suspendCancellableCoroutine<NsdServiceInfo?> { continuation ->
+                nsd.resolveService(
+                  service,
+                  object : NsdManager.ResolveListener {
+                    override fun onResolveFailed(info: NsdServiceInfo, code: Int) {
+                      if (continuation.isActive) continuation.resume(null)
+                    }
 
-                  override fun onServiceResolved(info: NsdServiceInfo) {
-                    if (continuation.isActive) continuation.resume(info)
-                  }
-                },
-              )
+                    override fun onServiceResolved(info: NsdServiceInfo) {
+                      if (continuation.isActive) continuation.resume(info)
+                    }
+                  },
+                )
+              }
             }
           }
         if (resolved != null) {
           val host = resolved.host?.hostAddress ?: return@collect
-          val address = URI("http", null, host, resolved.port, null, null, null).rawAuthority
-          val name = resolved.attributes["fn"]?.toString(Charsets.UTF_8) ?: resolved.serviceName
-          val id = resolved.attributes["id"]?.toString(Charsets.UTF_8) ?: resolved.serviceName
-          found +=
-            Device.newBuilder()
-              .setId(id)
-              .setName(name)
-              .setType(DeviceType.DEVICE_TYPE_CHROMECAST)
-              .setAddress(address)
-              .build()
+          device(resolved, host)?.let { found += it }
         }
       }
     }

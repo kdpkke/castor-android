@@ -156,6 +156,7 @@ internal fun TvPicker(
   saved: SavedTv?,
   dismiss: () -> Unit,
   refresh: () -> Unit,
+  describe: (List<SavedTv>) -> Unit,
   select: (SavedTv) -> Unit,
 ) {
   var manual by rememberSaveable { mutableStateOf(false) }
@@ -223,12 +224,15 @@ internal fun TvPicker(
           }
         }
         selected != null -> {
+          LaunchedEffect(selected.host) { describe(selected.protocols) }
+          val ranked = rankedProtocols(selected.protocols, state.verdicts)
+          val recommended = recommendedProtocol(ranked, state.verdicts)
           Text(
             stringResource(R.string.available_protocols),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
-          selected.protocols.forEach { tv ->
+          ranked.forEach { tv ->
             GlassPanel(
               Modifier.fillMaxWidth().testTag("receiver-protocol-${tv.type.number}"),
               onClick = { select(tv) },
@@ -238,6 +242,9 @@ internal fun TvPicker(
                 supportingContent = {
                   Column {
                     Text(receiverEndpoint(tv))
+                    state.verdicts[verdictKey(tv)]?.let { Text(stringResource(verdictLabel(it))) }
+                    if (tv == recommended)
+                      Text(stringResource(R.string.recommended), color = MaterialTheme.colorScheme.primary)
                     if (state.occupying(tv) != null) Text(stringResource(R.string.tv_in_use))
                   }
                 },
@@ -268,7 +275,7 @@ internal fun TvPicker(
             ) {
               ListItem(
                 headlineContent = { Text(tv.name) },
-                supportingContent = { Text(tv.addresses) },
+                supportingContent = { Text(tv.summary) },
                 leadingContent = { CastIcon(R.drawable.ic_tv) },
                 trailingContent = { CastIcon(R.drawable.ic_next) },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -436,6 +443,66 @@ internal fun PlaybackSettings(
       ) {
         Text(stringResource(R.string.save))
       }
+    }
+  }
+}
+
+@Composable
+internal fun PairingDialog(
+  pairing: PairingUiState,
+  retry: () -> Unit,
+  finish: (String) -> Unit,
+  cancel: () -> Unit,
+) {
+  var pin by rememberSaveable(pairing.pairingId) { mutableStateOf("") }
+  GlassDialog(cancel) {
+    Text(
+      stringResource(R.string.pair_title),
+      style = MaterialTheme.typography.headlineSmall,
+      modifier = Modifier.semantics { heading() },
+    )
+    Text(
+      stringResource(R.string.pair_message, pairing.tv),
+      style = MaterialTheme.typography.bodyMedium,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    when {
+      pairing.pairingId != null ->
+        OutlinedTextField(
+          pin,
+          { value -> pin = value.filter(Char::isDigit).take(8) },
+          // A placeholder, not a label: a floating label moves the outline below the glass surface.
+          placeholder = { Text(stringResource(R.string.pair_pin)) },
+          modifier = Modifier.fillMaxWidth().glassMaterial(MaterialTheme.shapes.medium).testTag("pairing-pin"),
+          shape = MaterialTheme.shapes.medium,
+          colors = glassFieldColors(),
+          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+          singleLine = true,
+          enabled = !pairing.busy,
+        )
+      pairing.busy -> {
+        LinearProgressIndicator(Modifier.fillMaxWidth())
+        Text(stringResource(R.string.pair_asking), style = MaterialTheme.typography.bodyMedium)
+      }
+    }
+    if (pairing.wrongPin)
+      Text(stringResource(R.string.pair_wrong_pin), color = MaterialTheme.colorScheme.error)
+    pairing.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    if (pairing.pairingId != null)
+      GlassButton(
+        prominent = true,
+        onClick = { finish(pin) },
+        enabled = pin.isNotBlank() && !pairing.busy,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("pairing-confirm"),
+      ) {
+        Text(stringResource(R.string.pair_confirm))
+      }
+    else if (!pairing.busy)
+      GlassButton(onClick = retry, modifier = Modifier.fillMaxWidth().testTag("pairing-retry")) {
+        Text(stringResource(R.string.pair_retry))
+      }
+    GlassButton(onClick = cancel, modifier = Modifier.fillMaxWidth().testTag("pairing-cancel")) {
+      Text(stringResource(R.string.pair_cancel))
     }
   }
 }

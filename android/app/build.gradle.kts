@@ -20,7 +20,7 @@ android {
         minSdk = 28
         ndk { abiFilters += targetAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "x86_64") }
         targetSdk = 37
-        versionCode = 35
+        versionCode = 36
         versionName = "1.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["appLabel"] = "@string/app_name"
@@ -33,7 +33,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            versionNameSuffix = "-test.16"
+            versionNameSuffix = "-test.17"
             manifestPlaceholders["appLabel"] = "Castor (test)"
         }
         release {
