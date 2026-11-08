@@ -83,7 +83,7 @@ func TestNativeTrialValidatesOriginalTracksInsteadOfUnverifiedReceiverDefaults(t
 	close(p.buf.reader.done)
 	d := delivery{sink: &artifactMechanism{path: path}, output: p.buf.reader}
 	opts := encodePlan{
-		EncodeOptions: encoding.EncodeOptions{Probe: original, Format: encoding.SpoolFormat, Video: codec.CopyVideo(), Audio: codec.CopyAudio()},
+		Probe: original, Format: encoding.SpoolFormat, Video: codec.CopyVideo(), Audio: codec.CopyAudio(),
 		delivery: output.Selection{Capabilities: media.Capabilities{NativePlaybackTrial: true, Formats: []media.FormatSupport{{
 			Transport: media.TransportMPEGTS, Video: media.VideoSupport{Codec: media.CodecHEVC}, Audio: media.AudioSupport{Codec: media.CodecAC3},
 		}}}},

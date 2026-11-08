@@ -4,7 +4,7 @@ package castor.v1;
 
 import "buf/validate/validate.proto";
 
-// Revision is a cast's latest change of plan, and why.
+// Revision is a cast's latest change of plan.
 message Revision {
   RecoveryAction action = 1 [(buf.validate.field).enum = {
     defined_only: true
@@ -20,9 +20,10 @@ enum RecoveryAction {
   RECOVERY_ACTION_RELAX_READ = 3;
   RECOVERY_ACTION_SERVE_INSTEAD = 4;
   RECOVERY_ACTION_STAY = 5;
-  // Android extension: convert a live source only after native planning refuses it.
+  // Convert a live source only after native planning refuses it.
+  // Android extension; upstream proposal: stupside/castor#83.
   RECOVERY_ACTION_OPTIMIZE_LIVE = 1000;
-  // Android extension: encode the picture in software after a hardware encoder failed.
+  // Encode the picture in software after a hardware encoder's output never validated.
   // Upstream proposal: stupside/castor#85.
   RECOVERY_ACTION_SOFTWARE_ENCODE = 1001;
 }

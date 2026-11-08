@@ -188,21 +188,28 @@ class PlaybackControlRequestsTest {
               return MockResponse().setResponseCode(401)
             return when (request.path) {
               "/castor.v1.CastService/ListCasts" ->
-                proto(ListCastsResponse.newBuilder().addCasts(active).build().toByteArray())
-              "/castor.v1.CastService/Playback" ->
-                proto(PlaybackResponse.newBuilder().setPlayback(state()).build().toByteArray())
-              "/castor.v1.CastService/Control" -> {
-                val control = ControlRequest.parseFrom(request.body.readByteArray())
-                assertEquals(active.id, control.castId)
+                proto(ListCastsResponse.newBuilder().addCasts(playing()).build().toByteArray())
+              "/castor.v1.CastService/Pause",
+              "/castor.v1.CastService/Resume",
+              "/castor.v1.CastService/Seek" -> {
+                val body = request.body.readByteArray()
+                val castId =
+                  when (request.path) {
+                    "/castor.v1.CastService/Pause" -> PauseRequest.parseFrom(body).castId
+                    "/castor.v1.CastService/Resume" -> ResumeRequest.parseFrom(body).castId
+                    else -> SeekRequest.parseFrom(body).castId
+                  }
+                assertEquals(active.id, castId)
                 controls.incrementAndGet()
                 if (failNext.getAndSet(false))
                   return MockResponse()
                     .setResponseCode(503)
                     .setHeader("Content-Type", "application/json")
                     .setBody("{\"code\":\"unavailable\",\"message\":\"receiver busy\"}")
-                when {
-                  control.hasSeek() -> {
-                    val at = control.seek.seconds * 1000 + control.seek.nanos / 1_000_000
+                when (request.path) {
+                  "/castor.v1.CastService/Seek" -> {
+                    val seek = SeekRequest.parseFrom(body).position
+                    val at = seek.seconds * 1000 + seek.nanos / 1_000_000
                     seeks.add(at)
                     if (blockFirstSeek && seeks.size == 1) {
                       firstSeek.countDown()
@@ -210,10 +217,10 @@ class PlaybackControlRequestsTest {
                     }
                     position.set(at)
                   }
-                  control.hasPause() -> paused.set(true)
-                  control.hasResume() -> paused.set(false)
+                  "/castor.v1.CastService/Pause" -> paused.set(true)
+                  else -> paused.set(false)
                 }
-                proto(ControlResponse.newBuilder().setPlayback(state()).build().toByteArray())
+                proto(byteArrayOf())
               }
               "/castor.v1.CastService/Stop" -> {
                 stops.incrementAndGet()
@@ -250,13 +257,23 @@ class PlaybackControlRequestsTest {
       withContext(Dispatchers.Main) { model.refreshPlayback(active.id) }
     }
 
-    private fun state() =
-      PlaybackState.newBuilder()
-        .setPosition(Duration.newBuilder().setSeconds(position.get() / 1000))
-        .setDuration(Duration.newBuilder().setSeconds(600))
-        .setPaused(paused.get())
-        .setCanPause(true)
-        .setCanSeek(true)
+    // The cast as the engine lists it, with the playhead it last heard from the TV.
+    private fun playing() =
+      active
+        .toBuilder()
+        .setStatus(
+          CastStatus.newBuilder()
+            .setCasting(
+              active.status.casting
+                .toBuilder()
+                .setPlayhead(
+                  Playhead.newBuilder()
+                    .setPosition(Duration.newBuilder().setSeconds(position.get() / 1000))
+                    .setDuration(Duration.newBuilder().setSeconds(600))
+                    .setPaused(paused.get())
+                )
+            )
+        )
         .build()
 
     fun close() {

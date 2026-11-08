@@ -1,15 +1,14 @@
 package cast
 
 import (
-	"connectrpc.com/connect"
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"connectrpc.com/connect"
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"github.com/stupside/castor/services/apiserver/internal/device"
@@ -19,19 +18,11 @@ import (
 
 type restartDevice struct {
 	device.Device
-	mu          sync.Mutex
-	head        device.Playhead
-	positionErr error
-	stops       atomic.Int32
-	onStop      func()
-	ended       chan struct{}
+	stops  atomic.Int32
+	onStop func()
+	ended  chan struct{}
 }
 
-func (d *restartDevice) Position(context.Context) (device.Playhead, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.head, d.positionErr
-}
 func (d *restartDevice) Stop(context.Context) error {
 	d.stops.Add(1)
 	if d.onStop != nil {
@@ -40,13 +31,6 @@ func (d *restartDevice) Stop(context.Context) error {
 	return nil
 }
 func (d *restartDevice) Play(context.Context, device.Playback) error { return nil }
-func (d *restartDevice) Pause(context.Context) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.head.Paused = true
-	return nil
-}
-func (d *restartDevice) Controls() device.Controls { return device.Controls{Pause: true} }
 
 func (d *restartDevice) AwaitEnd(ctx context.Context) error {
 	select {
@@ -71,6 +55,19 @@ func (d *stoppedAfterEnd) AwaitEnd(ctx context.Context) error {
 	return context.Cause(ctx)
 }
 
+var (
+	finite = device.Playback{Play: &mediav1.DeviceCommand_Play{}}
+	live   = device.Playback{Play: &mediav1.DeviceCommand_Play{Live: true}}
+	source = device.Playback{Play: &mediav1.DeviceCommand_Play{Stream: &mediav1.DeviceCommand_Play_Source_{Source: &mediav1.DeviceCommand_Play_Source{Duration: durationpb.New(time.Hour)}}}}
+)
+
+// heard is the media server saying where c's device plays.
+func heard(c *cast, at time.Duration, paused bool) {
+	c.show(&castorv1.CastStatus{State: &castorv1.CastStatus_Casting{Casting: &castorv1.CastingStatus{Attempt: 1, Playhead: &castorv1.Playhead{Position: durationpb.New(at), Paused: paused}}}})
+}
+
+func noPause(context.Context, string) error { return nil }
+
 func TestManagedHandoffEndsWhenTheReceiverAlreadyReportedTheEnd(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c := newCast("managed-ended", &castorv1.Device{}, &castorv1.CastRequest{Preferences: &castorv1.Preferences{ManagedPlayback: true}}, func(error) {})
@@ -78,16 +75,16 @@ func TestManagedHandoffEndsWhenTheReceiverAlreadyReportedTheEnd(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
 		began := time.Now()
-		ended, err := runRestartable(ctx, c, d, func(ctx context.Context, p *playback, _ string, _ time.Duration) (*castorv1.Ended, error) {
-			if err := p.Play(ctx, device.Playback{Play: &mediav1.DeviceCommand_Play{Stream: &mediav1.DeviceCommand_Play_Source_{Source: &mediav1.DeviceCommand_Play_Source{Duration: durationpb.New(12 * time.Second)}}}}); err != nil {
+		ended, err := runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration) (*castorv1.Ended, error) {
+			if err := w.Play(ctx, source); err != nil {
 				return nil, err
 			}
 			// The media server follows the handoff to the receiver's own end.
-			if err := p.AwaitEnd(ctx); err != nil {
+			if err := w.AwaitEnd(ctx); err != nil {
 				return nil, err
 			}
 			return &castorv1.Ended{Result: &castorv1.Ended_Completed{Completed: &emptypb.Empty{}}}, nil
-		})
+		}, noPause)
 		if err != nil || ended.GetCompleted() == nil {
 			t.Fatalf("ended = %v, %v", ended, err)
 		}
@@ -97,33 +94,28 @@ func TestManagedHandoffEndsWhenTheReceiverAlreadyReportedTheEnd(t *testing.T) {
 	})
 }
 
-func TestRestartPositionPreservesTheCompleteFiniteClockAndExplicitLiveEdge(t *testing.T) {
-	d := &restartDevice{head: device.Playhead{At: time.Minute, Paused: true}}
-	p := &playback{Device: d}
-	loaded := &loadedPlayback{base: 30 * time.Minute, duration: 2 * time.Hour,
-		media: device.Playback{Play: &mediav1.DeviceCommand_Play{}}}
-	p.loaded.Store(loaded)
-	at, paused, err := restartPosition(t.Context(), p, 0)
-	if err != nil || at != 31*time.Minute || !paused {
+func TestRestartPositionIsWhereTheMediaServerLastHeardTheDeviceAndTheLiveEdge(t *testing.T) {
+	c := newCast("position", &castorv1.Device{}, &castorv1.CastRequest{}, func(error) {})
+	w := &watched{}
+	if at, paused, err := restartPosition(c, w, 5*time.Minute); err != nil || at != 5*time.Minute || paused {
+		t.Fatalf("before any stream = %s, %v, %v; want the cast's own start", at, paused, err)
+	}
+	w.loaded.Store(&finite)
+	heard(c, 31*time.Minute, true)
+	if at, paused, err := restartPosition(c, w, 0); err != nil || at != 31*time.Minute || !paused {
 		t.Fatalf("finite = %s, %v, %v", at, paused, err)
 	}
-	d.positionErr = errors.New("receiver unavailable")
-	at, paused, err = restartPosition(t.Context(), p, 0)
-	if err != nil || at != 31*time.Minute || !paused {
-		t.Fatalf("last observation = %s, %v, %v", at, paused, err)
-	}
-	p.loaded.Store(&loadedPlayback{media: device.Playback{Play: &mediav1.DeviceCommand_Play{Live: true}}})
-	at, paused, err = restartPosition(t.Context(), p, 0)
-	if err != nil || at != 0 || paused {
+	w.loaded.Store(&live)
+	if at, paused, err := restartPosition(c, w, 0); err != nil || at != 0 || paused {
 		t.Fatalf("live = %s, %v, %v", at, paused, err)
 	}
 }
 
 func TestUnknownFinitePositionCannotSilentlyRestartFromZero(t *testing.T) {
-	d := &restartDevice{positionErr: device.ErrNoPosition}
-	p := &playback{Device: d}
-	p.loaded.Store(&loadedPlayback{media: device.Playback{Play: &mediav1.DeviceCommand_Play{}}})
-	if _, _, err := restartPosition(t.Context(), p, 0); err == nil {
+	c := newCast("unknown", &castorv1.Device{}, &castorv1.CastRequest{}, func(error) {})
+	w := &watched{}
+	w.loaded.Store(&finite)
+	if _, _, err := restartPosition(c, w, 0); err == nil {
 		t.Fatal("unknown position restarted the video")
 	}
 }
@@ -134,9 +126,10 @@ func TestRestartJoinsOldPipelineBeforeStopAndKeepsTheCastIdentity(t *testing.T) 
 		defer cancel()
 		c := newCast("same-cast", &castorv1.Device{Id: "same-tv"}, &castorv1.CastRequest{}, func(error) {})
 		s := New(nil, nil, nil, nil)
-		d := &restartDevice{head: device.Playhead{At: 42 * time.Minute}}
+		d := &restartDevice{}
 		var running atomic.Int32
 		starts := make(chan time.Duration, 3)
+		ids := make(chan string, 3)
 		finished := make(chan struct{})
 		if err := s.casts.Add(c.id, c, finished); err != nil {
 			t.Fatal(err)
@@ -144,23 +137,31 @@ func TestRestartJoinsOldPipelineBeforeStopAndKeepsTheCastIdentity(t *testing.T) 
 		go func() {
 			defer close(finished)
 			defer close(c.done)
-			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, p *playback, _ string, start time.Duration) (*castorv1.Ended, error) {
+			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, id string, start time.Duration) (*castorv1.Ended, error) {
 				if running.Add(1) != 1 {
 					t.Error("replacement raced old cleanup")
 				}
-				p.loaded.Store(&loadedPlayback{duration: time.Hour, media: device.Playback{Play: &mediav1.DeviceCommand_Play{}}})
+				_ = w.Play(ctx, finite)
+				heard(c, 42*time.Minute, false)
+				ids <- id
 				starts <- start
 				<-ctx.Done()
 				running.Add(-1)
 				return nil, ctx.Err()
-			})
+			}, noPause)
 		}()
 		<-starts
+		if first := <-ids; first != c.id || c.mediaID() != c.id {
+			t.Fatalf("the first run played as %q and controls reach %q, want the cast's own id", first, c.mediaID())
+		}
 		if _, err := s.Restart(ctx, &castorv1.RestartRequest{CastId: c.id}); err != nil {
 			t.Fatal(err)
 		}
 		if at := <-starts; at != 42*time.Minute {
 			t.Fatalf("resumed at %s", at)
+		}
+		if next := <-ids; next == c.id || c.mediaID() != next {
+			t.Fatalf("the restart played as %q and controls reach %q, want a new media cast they follow", next, c.mediaID())
 		}
 		if d.stops.Load() != 1 || c.device.Id != "same-tv" {
 			t.Fatal("restart did not retain the receiver")
@@ -171,40 +172,87 @@ func TestRestartJoinsOldPipelineBeforeStopAndKeepsTheCastIdentity(t *testing.T) 
 	})
 }
 
+func TestARestartOfAPausedVideoPausesTheNewRunThroughTheMediaServer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		c := newCast("paused", &castorv1.Device{}, &castorv1.CastRequest{}, func(error) {})
+		s := New(nil, nil, nil, nil)
+		finished := make(chan struct{})
+		if err := s.casts.Add(c.id, c, finished); err != nil {
+			t.Fatal(err)
+		}
+		var mu sync.Mutex
+		var paused []string
+		ids := make(chan string, 2)
+		go func() {
+			defer close(finished)
+			defer close(c.done)
+			_, _ = runRestartable(ctx, c, &restartDevice{}, func(ctx context.Context, w *watched, id string, _ time.Duration) (*castorv1.Ended, error) {
+				_ = w.Play(ctx, finite)
+				heard(c, time.Minute, true)
+				ids <- id
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}, func(_ context.Context, id string) error {
+				mu.Lock()
+				defer mu.Unlock()
+				paused = append(paused, id)
+				return nil
+			})
+		}()
+		<-ids
+		if _, err := s.Restart(ctx, &castorv1.RestartRequest{CastId: c.id}); err != nil {
+			t.Fatal(err)
+		}
+		next := <-ids
+		synctest.Wait()
+		mu.Lock()
+		got := append([]string(nil), paused...)
+		mu.Unlock()
+		if len(got) != 1 || got[0] != next {
+			t.Fatalf("paused %v, want only the restarted run %q, as its viewer had it", got, next)
+		}
+		cancel()
+		<-finished
+		s.Drain(t.Context())
+	})
+}
+
 func TestLiveStallUsesTenSecondsOfKnownUnpausedReceiverTime(t *testing.T) {
-	live := &loadedPlayback{media: device.Playback{Play: &mediav1.DeviceCommand_Play{Live: true}}}
-	finite := &loadedPlayback{media: device.Playback{Play: &mediav1.DeviceCommand_Play{}}}
 	base := time.Unix(0, 0)
+	at := func(d time.Duration, paused bool) *castorv1.Playhead {
+		return &castorv1.Playhead{Position: durationpb.New(d), Paused: paused}
+	}
 	var tracker liveStall
-	if tracker.sample(base, live, device.Playhead{At: time.Second}, nil) {
+	if tracker.sample(base, &live, at(time.Second, false)) {
 		t.Fatal("first observation stalled")
 	}
-	if tracker.sample(base.Add(10*time.Second), live, device.Playhead{At: time.Second}, nil) {
+	if tracker.sample(base.Add(10*time.Second), &live, at(time.Second, false)) {
 		t.Fatal("exactly ten seconds restarted")
 	}
-	if !tracker.sample(base.Add(10*time.Second+time.Millisecond), live, device.Playhead{At: time.Second}, nil) {
+	if !tracker.sample(base.Add(10*time.Second+time.Millisecond), &live, at(time.Second, false)) {
 		t.Fatal("live stall was ignored")
 	}
 	for _, tc := range []struct {
 		name   string
-		loaded *loadedPlayback
-		head   device.Playhead
-		err    error
+		loaded *device.Playback
+		head   *castorv1.Playhead
 	}{
-		{"finite with unknown duration", finite, device.Playhead{}, nil},
-		{"paused live", live, device.Playhead{Paused: true}, nil},
-		{"unknown live position", live, device.Playhead{}, device.ErrNoPosition},
+		{"finite", &finite, at(time.Second, false)},
+		{"paused live", &live, at(time.Second, true)},
+		{"unknown live position", &live, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var tracker liveStall
-			tracker.sample(base, tc.loaded, tc.head, tc.err)
-			if tracker.sample(base.Add(time.Minute), tc.loaded, tc.head, tc.err) {
+			tracker.sample(base, tc.loaded, tc.head)
+			if tracker.sample(base.Add(time.Minute), tc.loaded, tc.head) {
 				t.Fatal("not a live stall")
 			}
 		})
 	}
-	tracker.sample(base.Add(time.Minute), live, device.Playhead{At: 2 * time.Second}, nil)
-	if tracker.sample(base.Add(time.Minute+5*time.Second), live, device.Playhead{At: 2 * time.Second}, nil) {
+	tracker.sample(base.Add(time.Minute), &live, at(2*time.Second, false))
+	if tracker.sample(base.Add(time.Minute+5*time.Second), &live, at(2*time.Second, false)) {
 		t.Fatal("progress did not reset timer")
 	}
 }
@@ -213,28 +261,35 @@ func TestOnlyLiveStallsRestartInTheBackgroundAndRetriesAreBounded(t *testing.T) 
 	for _, tc := range []struct {
 		name         string
 		live, paused bool
-		err          error
+		heard        bool
 		want         int32
 	}{
-		{"live", true, false, nil, 2}, {"finite", false, false, nil, 1},
-		{"paused", true, true, nil, 1}, {"unknown", true, false, device.ErrNoPosition, 1},
+		{"live", true, false, true, 2}, {"finite", false, false, true, 1},
+		{"paused", true, true, true, 1}, {"unknown", true, false, false, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				c := newCast("live", &castorv1.Device{}, &castorv1.CastRequest{}, func(error) {})
-				d := &restartDevice{head: device.Playhead{At: time.Second, Paused: tc.paused}, positionErr: tc.err}
+				d := &restartDevice{}
 				var starts atomic.Int32
 				done := make(chan struct{})
 				go func() {
 					defer close(done)
-					_, _ = runRestartable(ctx, c, d, func(ctx context.Context, p *playback, _ string, _ time.Duration) (*castorv1.Ended, error) {
-						p.loaded.Store(&loadedPlayback{media: device.Playback{Play: &mediav1.DeviceCommand_Play{Live: tc.live}}})
+					_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration) (*castorv1.Ended, error) {
+						played := finite
+						if tc.live {
+							played = live
+						}
+						_ = w.Play(ctx, played)
+						if tc.heard {
+							heard(c, time.Second, tc.paused)
+						}
 						starts.Add(1)
 						<-ctx.Done()
 						return nil, ctx.Err()
-					})
+					}, noPause)
 				}()
 				time.Sleep(13 * time.Second)
 				synctest.Wait()
@@ -255,22 +310,13 @@ func TestOnlyLiveStallsRestartInTheBackgroundAndRetriesAreBounded(t *testing.T) 
 	}
 }
 
-func TestFiniteRestartUsesLastKnownPositionWhenReceiverReadFails(t *testing.T) {
-	p := &playback{Device: &restartDevice{positionErr: errors.New("offline")}}
-	p.loaded.Store(&loadedPlayback{media: device.Playback{Play: &mediav1.DeviceCommand_Play{}}})
-	p.last.Store(&castorv1.PlaybackState{Position: durationpb.New(54 * time.Minute)})
-	if at, _, err := restartPosition(t.Context(), p, 0); err != nil || at != 54*time.Minute {
-		t.Fatalf("resume = %s, %v", at, err)
-	}
-}
-
 func TestStopDuringRestartCannotLaunchAnotherPipeline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		c := newCast("stop-during-restart", &castorv1.Device{}, &castorv1.CastRequest{}, func(error) {})
 		s := New(nil, nil, nil, nil)
-		d := &restartDevice{head: device.Playhead{At: time.Minute}, onStop: cancel}
+		d := &restartDevice{onStop: cancel}
 		var starts atomic.Int32
 		started, cleaning, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 		finished := make(chan struct{})
@@ -280,18 +326,19 @@ func TestStopDuringRestartCannotLaunchAnotherPipeline(t *testing.T) {
 		go func() {
 			defer close(finished)
 			defer close(c.done)
-			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, p *playback, _ string, _ time.Duration) (*castorv1.Ended, error) {
+			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration) (*castorv1.Ended, error) {
 				if starts.Add(1) > 1 {
 					t.Error("Stop resurrected playback")
 					return nil, ctx.Err()
 				}
-				p.loaded.Store(&loadedPlayback{media: device.Playback{Play: &mediav1.DeviceCommand_Play{}}})
+				_ = w.Play(ctx, finite)
+				heard(c, time.Minute, false)
 				close(started)
 				<-ctx.Done()
 				close(cleaning)
 				<-release
 				return nil, ctx.Err()
-			})
+			}, noPause)
 		}()
 		<-started
 		response := make(chan error, 1)
@@ -319,7 +366,7 @@ func TestManagedHandoffKeepsControlsAndRestartUntilTheReceiverEnds(t *testing.T)
 		defer cancel()
 		c := newCast("managed-source", &castorv1.Device{}, &castorv1.CastRequest{Preferences: &castorv1.Preferences{ManagedPlayback: true}}, func(error) {})
 		s := New(nil, nil, nil, nil)
-		d := &restartDevice{head: device.Playhead{At: time.Minute}, ended: make(chan struct{})}
+		d := &restartDevice{ended: make(chan struct{})}
 		var starts atomic.Int32
 		ready := make(chan struct{}, 2)
 		finished := make(chan struct{})
@@ -329,14 +376,15 @@ func TestManagedHandoffKeepsControlsAndRestartUntilTheReceiverEnds(t *testing.T)
 		go func() {
 			defer close(finished)
 			defer close(c.done)
-			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, p *playback, _ string, start time.Duration) (*castorv1.Ended, error) {
+			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration) (*castorv1.Ended, error) {
 				starts.Add(1)
-				if err := p.Play(ctx, device.Playback{Play: &mediav1.DeviceCommand_Play{Stream: &mediav1.DeviceCommand_Play_Source_{Source: &mediav1.DeviceCommand_Play_Source{Duration: durationpb.New(time.Hour)}}}}); err != nil {
+				if err := w.Play(ctx, source); err != nil {
 					return nil, err
 				}
+				heard(c, time.Minute, false)
 				ready <- struct{}{}
 				return &castorv1.Ended{Result: &castorv1.Ended_Completed{Completed: &emptypb.Empty{}}}, nil
-			})
+			}, noPause)
 		}()
 		<-ready
 		synctest.Wait()
@@ -356,4 +404,15 @@ func TestManagedHandoffKeepsControlsAndRestartUntilTheReceiverEnds(t *testing.T)
 		<-finished
 		s.Drain(t.Context())
 	})
+}
+
+func TestControlsReachTheMediaCastTheCastPlaysNow(t *testing.T) {
+	req := &castorv1.SeekRequest{CastId: "api-cast", Position: durationpb.New(time.Minute)}
+	moved := withCastID(req, "media-run-2")
+	if moved.GetCastId() != "media-run-2" || moved.GetPosition().AsDuration() != time.Minute || req.GetCastId() != "api-cast" {
+		t.Fatalf("withCastID = %v from %v, want the same seek for the media run, the request untouched", moved, req)
+	}
+	if same := withCastID(req, "api-cast"); same != req {
+		t.Error("a request already naming the media cast was copied")
+	}
 }

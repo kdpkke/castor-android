@@ -512,11 +512,19 @@ class CastorRuntimeTest {
             }
           }
           if (restart) {
-            delay(1500)
-            val before = data.playback(id)
+            // The engine publishes where the TV plays once it asked, at most every five seconds.
+            val before =
+              withTimeoutOrNull(15_000) {
+                var heard = data.playback(id)
+                while ((heard.positionMs ?: 0) <= 0) {
+                  delay(250)
+                  heard = data.playback(id)
+                }
+                heard
+              }
             assertTrue(
               "The receiver must report a finite resume position",
-              before.hasPosition() && before.position.seconds > 0,
+              (before?.positionMs ?: 0) > 0,
             )
             val bytesBefore = receivedBytes.get()
             data.restart(id)

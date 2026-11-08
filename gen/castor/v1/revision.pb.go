@@ -31,9 +31,10 @@ const (
 	RecoveryAction_RECOVERY_ACTION_RELAX_READ       RecoveryAction = 3
 	RecoveryAction_RECOVERY_ACTION_SERVE_INSTEAD    RecoveryAction = 4
 	RecoveryAction_RECOVERY_ACTION_STAY             RecoveryAction = 5
-	// Android extension: convert a live source only after native planning refuses it.
+	// Convert a live source only after native planning refuses it.
+	// Android extension; upstream proposal: stupside/castor#83.
 	RecoveryAction_RECOVERY_ACTION_OPTIMIZE_LIVE RecoveryAction = 1000
-	// Android extension: encode the picture in software after a hardware encoder failed.
+	// Encode the picture in software after a hardware encoder's output never validated.
 	// Upstream proposal: stupside/castor#85.
 	RecoveryAction_RECOVERY_ACTION_SOFTWARE_ENCODE RecoveryAction = 1001
 )
@@ -89,7 +90,7 @@ func (RecoveryAction) EnumDescriptor() ([]byte, []int) {
 	return file_castor_v1_revision_proto_rawDescGZIP(), []int{0}
 }
 
-// Revision is a cast's latest change of plan, and why.
+// Revision is a cast's latest change of plan.
 type Revision struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Action        RecoveryAction         `protobuf:"varint,1,opt,name=action,proto3,enum=castor.v1.RecoveryAction" json:"action,omitempty"`

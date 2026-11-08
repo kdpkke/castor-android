@@ -22,6 +22,7 @@ English one.
 - Restarting or stopping a cast on a DLNA TV that already dropped the video, as LG TVs do, no longer fails with "Transition not available".
 - A DLNA TV entered as an IP address with a port is read at that port, where its description is, instead of being searched for there.
 - While a cast from a web page runs, **Show the page** opens that page in Castor, to check by hand whether its video still plays; **Hide the page** closes it.
+- The engine now carries castor's current core: pause, resume and seek use castor's own controls, and the TV's position arrives with the cast's status instead of being asked for every second. Seeking a file the TV plays unchanged moves the TV itself, so Dolby Vision stays; any other stream is prepared again from the new position. Restart and the automatic restart of stalled live streams work as before, and a video restarted while paused stays paused.
 - TVs whose Wi-Fi drops the network's search messages still appear. Every search also asks the saved TV's address directly on each protocol, and **Find this TV’s protocols** does the same for an IP address typed in **Enter a TV address**.
 
 - Reopening the same webpage for another cast loads it again after the previous player closed, instead of leaving a blank browser with an endless loading message. Retrying a page that is still open preserves the player's state.
@@ -66,6 +67,7 @@ English one.
 - Riavviare o fermare una trasmissione su una TV DLNA che ha già abbandonato il video, come fanno le TV LG, non fallisce più con "Transition not available".
 - Una TV DLNA inserita come indirizzo IP con la porta viene letta su quella porta, dove si trova la sua descrizione, invece di esservi cercata.
 - Durante una trasmissione da una pagina web, **Mostra la pagina** apre quella pagina in Castor, per controllare a mano se il suo video si vede ancora; **Nascondi la pagina** la chiude.
+- Il motore porta il core attuale di castor: pausa, ripresa e spostamento usano i comandi di castor, e la posizione della TV arriva con lo stato della trasmissione invece di essere chiesta ogni secondo. Spostarsi in un file che la TV riproduce senza modifiche fa muovere la TV stessa, così il Dolby Vision resta; ogni altro flusso viene preparato di nuovo dalla nuova posizione. Il riavvio e il riavvio automatico delle dirette bloccate funzionano come prima, e un video riavviato in pausa resta in pausa.
 - Compaiono anche le TV il cui Wi-Fi perde i messaggi di ricerca della rete. Ogni ricerca interroga direttamente, su ogni protocollo, l’indirizzo della TV salvata, e **Trova i protocolli di questa TV** fa lo stesso con un indirizzo IP scritto in **Inserisci l’indirizzo della TV**.
 
 - Riaprire la stessa pagina per un altro cast la carica nuovamente dopo la chiusura del player precedente, evitando il browser nero con caricamento infinito. Riprovare una pagina ancora aperta mantiene lo stato del player.

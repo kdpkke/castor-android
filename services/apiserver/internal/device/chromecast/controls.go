@@ -57,7 +57,7 @@ func (s *session) awaitHLSStart(ctx context.Context, reply []byte) error {
 			nudged = true
 			slog.DebugContext(ctx, "recovering HLS playback buffered at zero", "at", time.Second)
 			reply, err = s.ch.request(ctx, transport, nsMedia, &seekCommand{
-				MediaHeader: castmedia.MediaHeader{Type: "SEEK", MediaSessionId: mediaSession},
+				Type: "SEEK", MediaSessionId: mediaSession,
 				CurrentTime: 1, ResumeState: "PLAYBACK_START",
 			})
 			if err != nil {
@@ -89,7 +89,7 @@ func (s *session) Seek(ctx context.Context, at time.Duration) error {
 	}
 	// Omitting resumeState preserves the receiver's current paused/playing state.
 	reply, err := s.ch.request(ctx, transport, nsMedia, &seekCommand{
-		MediaHeader: castmedia.MediaHeader{Type: "SEEK", MediaSessionId: mediaSession},
+		Type: "SEEK", MediaSessionId: mediaSession,
 		CurrentTime: at.Seconds(),
 	})
 	if err == nil {

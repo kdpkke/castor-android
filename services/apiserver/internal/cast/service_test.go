@@ -10,15 +10,15 @@ import (
 	"connectrpc.com/connect"
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
+	"github.com/stupside/castor/internal/registry"
 	"github.com/stupside/castor/services/apiserver/internal/device"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func TestNativePreferenceReachesMediaWithoutInheritedQualityCeilings(t *testing.T) {
 	s := New(&mediav1.PlaybackSettings{MaxHeight: 1080, MaxBitrate: &mediav1.Bitrate{BitsPerSecond: 4_000_000}}, nil, nil, nil)
 	defer s.Drain(t.Context())
-	native := s.asked(&castorv1.Preferences{PreserveSource: proto.Bool(true)})
+	native := s.asked(&castorv1.Preferences{PreserveSource: new(true)})
 	if !native.GetPreserveSource() || native.GetMaxHeight() != ^uint32(0) || native.GetMaxBitrate() != nil {
 		t.Fatalf("native settings = %v; source must not be reduced by inherited ceilings", native)
 	}
@@ -125,7 +125,8 @@ func (busyDevice) Connect(context.Context, device.Info) (device.Device, error) {
 	return nil, &device.Busy{Address: "192.0.2.1"}
 }
 func TestBusyReceiverReportsActionablePlaybackFailure(t *testing.T) {
-	s := &Service{devices: busyDevice{}}
+	// No cast of this server holds the device, so none is replaced.
+	s := &Service{devices: busyDevice{}, casts: registry.New[*cast](linger)}
 	ended := s.play(t.Context(), &cast{}, device.Info{}, nil)
 	if ended.GetFailed().GetCode() != castorv1.FailureCode_FAILURE_CODE_PLAYBACK_FAILED || !strings.Contains(ended.GetFailed().GetMessage(), "stop its current cast") {
 		t.Fatalf("ended=%v", ended)

@@ -72,8 +72,11 @@ class MultipleCastsTest {
         compose.onNodeWithTag("video-url").assertExists()
         assertEquals(2, fixture.model.uiState.value.sessions.size)
         compose.onNodeWithTag("cast-action").assertIsEnabled().performClick()
-        compose.waitUntil(5000) { fixture.model.uiState.value.sessions.size == 3 }
-        assertEquals("new-transmission", fixture.model.uiState.value.castId)
+        // The new session is listed, then selected: wait for both, not the moment between them.
+        compose.waitUntil(5000) {
+          fixture.model.uiState.value.sessions.size == 3 &&
+            fixture.model.uiState.value.castId == "new-transmission"
+        }
         val request = fixture.submissions.single()
         assertEquals("192.0.2.30:8009", request.target.pinned.address)
         assertEquals("https://example.test/new-video.mp4", request.source.stream.url)
@@ -166,7 +169,18 @@ class MultipleCastsTest {
               Source.newBuilder()
                 .setStream(Stream.newBuilder().setUrl("https://example.test/$id.mp4"))
             )
-            .setStatus(CastStatus.newBuilder().setCasting(CastingStatus.newBuilder().setAttempt(1)))
+            .setStatus(
+              CastStatus.newBuilder()
+                .setCasting(
+                  CastingStatus.newBuilder()
+                    .setAttempt(1)
+                    .setPlayhead(
+                      Playhead.newBuilder()
+                        .setPosition(Duration.newBuilder().setSeconds(45))
+                        .setDuration(Duration.newBuilder().setSeconds(600))
+                    )
+                )
+            )
             .build()
       }
       server.dispatcher =
@@ -211,15 +225,17 @@ class MultipleCastsTest {
                 stops += StopRequest.parseFrom(request.body.readByteArray()).castId
                 proto(byteArrayOf())
               }
-              "/castor.v1.CastService/Playback" -> proto(playback().toByteArray())
-              "/castor.v1.CastService/Control" -> {
-                controls += ControlRequest.parseFrom(request.body.readByteArray()).castId
-                proto(
-                  ControlResponse.newBuilder()
-                    .setPlayback(playback().playback)
-                    .build()
-                    .toByteArray()
-                )
+              "/castor.v1.CastService/Pause" -> {
+                controls += PauseRequest.parseFrom(request.body.readByteArray()).castId
+                proto(byteArrayOf())
+              }
+              "/castor.v1.CastService/Resume" -> {
+                controls += ResumeRequest.parseFrom(request.body.readByteArray()).castId
+                proto(byteArrayOf())
+              }
+              "/castor.v1.CastService/Seek" -> {
+                controls += SeekRequest.parseFrom(request.body.readByteArray()).castId
+                proto(byteArrayOf())
               }
               "/castor.v1.CastService/Watch" -> {
                 request.body.skip(5)
@@ -271,17 +287,6 @@ class MultipleCastsTest {
       }
       assertEquals("living-room", model.uiState.value.castId)
     }
-
-    private fun playback() =
-      PlaybackResponse.newBuilder()
-        .setPlayback(
-          PlaybackState.newBuilder()
-            .setPosition(Duration.newBuilder().setSeconds(45))
-            .setDuration(Duration.newBuilder().setSeconds(600))
-            .setCanPause(true)
-            .setCanSeek(true)
-        )
-        .build()
 
     override fun close() {
       compose.runOnIdle { model.connect(null) }

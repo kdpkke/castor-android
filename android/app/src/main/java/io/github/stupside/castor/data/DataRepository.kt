@@ -46,47 +46,56 @@ class DataRepository(private val api: Rpc) {
     api.result { api.casts.restart(RestartRequest.newBuilder().setCastId(id).build()) }
   }
 
-  suspend fun playback(id: String): PlaybackState =
-    api
-      .result { api.casts.playback(PlaybackRequest.newBuilder().setCastId(id).build()) }
-      .let {
-        check(it.hasPlayback()) { "The server returned no playback state" }
-        it.playback
-      }
+  // Where the TV plays, as the engine last heard it; Pause, Resume and Seek act on it.
+  suspend fun playback(id: String): PlaybackObservation =
+    casts().firstOrNull { it.id == id }?.status?.let(::observation)
+      ?: throw IllegalStateException("This cast has ended")
 
-  suspend fun pause(id: String, paused: Boolean): PlaybackState =
-    control(
-      ControlRequest.newBuilder()
-        .setCastId(id)
-        .apply {
-          if (paused) setPause(com.google.protobuf.Empty.getDefaultInstance())
-          else setResume(com.google.protobuf.Empty.getDefaultInstance())
-        }
-        .build()
-    )
-
-  suspend fun seek(id: String, positionMs: Long): PlaybackState {
-    require(positionMs >= 0)
-    return control(
-      ControlRequest.newBuilder()
-        .setCastId(id)
-        .setSeek(
-          com.google.protobuf.Duration.newBuilder()
-            .setSeconds(positionMs / 1000)
-            .setNanos(((positionMs % 1000) * 1_000_000).toInt())
-        )
-        .build()
-    )
+  suspend fun pause(id: String, paused: Boolean): PlaybackObservation {
+    if (paused) api.result { api.casts.pause(PauseRequest.newBuilder().setCastId(id).build()) }
+    else api.result { api.casts.resume(ResumeRequest.newBuilder().setCastId(id).build()) }
+    return playback(id).copy(paused = paused)
   }
 
-  private suspend fun control(request: ControlRequest): PlaybackState =
-    api
-      .result { api.casts.control(request) }
-      .let {
-        check(it.hasPlayback()) { "The server returned no playback state" }
-        it.playback
-      }
+  // The engine moves the TV itself or prepares the stream again from there; the playhead follows.
+  suspend fun seek(id: String, positionMs: Long): PlaybackObservation {
+    require(positionMs >= 0)
+    api.result {
+      api.casts.seek(
+        SeekRequest.newBuilder()
+          .setCastId(id)
+          .setPosition(
+            com.google.protobuf.Duration.newBuilder()
+              .setSeconds(positionMs / 1000)
+              .setNanos(((positionMs % 1000) * 1_000_000).toInt())
+          )
+          .build()
+      )
+    }
+    return playback(id).copy(positionMs = positionMs)
+  }
 
   suspend fun watch(id: String, update: suspend (WatchResponse) -> Unit) =
     api.watch(WatchRequest.newBuilder().setCastId(id).build(), update)
+}
+
+// PlaybackObservation is the playhead the engine publishes; an absent position is not an invented zero.
+data class PlaybackObservation(
+  val positionMs: Long?,
+  val durationMs: Long?,
+  val paused: Boolean,
+  val canPause: Boolean,
+  val canSeek: Boolean,
+)
+
+internal fun observation(status: CastStatus): PlaybackObservation {
+  fun ms(value: com.google.protobuf.Duration) = value.seconds * 1000 + value.nanos / 1_000_000
+  val head = status.casting.playhead.takeIf { status.hasCasting() && status.casting.hasPlayhead() }
+  return PlaybackObservation(
+    positionMs = head?.takeIf { it.hasPosition() }?.let { ms(it.position) },
+    durationMs = head?.takeIf { it.hasDuration() }?.let { ms(it.duration) },
+    paused = head?.paused == true,
+    canPause = head != null,
+    canSeek = head?.hasDuration() == true,
+  )
 }

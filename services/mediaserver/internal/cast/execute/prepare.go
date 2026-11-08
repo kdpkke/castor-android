@@ -65,7 +65,6 @@ type presentation struct {
 	target      *url.URL
 	contentType string
 	source      bool
-	live        bool
 	// runtime is what is left of the program from where the attempt begins, zero where the source declared none.
 	runtime   time.Duration
 	readiness presentationReadiness
@@ -74,6 +73,8 @@ type presentation struct {
 	reached   ran
 	// delivers is how much of the source the device is handed, once planned.
 	delivers media.Delivery
+	// live is a stream with no end, which the Android client restarts when its playhead stalls.
+	live bool
 }
 
 // inspectedPresentation retains the selected reading and any validated local

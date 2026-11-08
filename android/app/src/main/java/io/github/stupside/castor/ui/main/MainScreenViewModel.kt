@@ -13,6 +13,7 @@ import io.github.stupside.castor.LocalVideo
 import io.github.stupside.castor.LocalVideos
 import io.github.stupside.castor.VideoSources
 import io.github.stupside.castor.data.DataRepository
+import io.github.stupside.castor.data.PlaybackObservation
 import io.github.stupside.castor.data.Rpc
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -737,18 +738,17 @@ class MainScreenViewModel : ViewModel() {
     }
   }
 
-  private fun showPlayback(id: String, remote: PlaybackState) {
-    fun ms(value: com.google.protobuf.Duration) = value.seconds * 1000 + value.nanos / 1_000_000
+  private fun showPlayback(id: String, remote: PlaybackObservation) {
     update(id) {
       it.copy(
         playback =
           it.playback.copy(
-            positionMs = if (remote.hasPosition()) ms(remote.position) else null,
-            durationMs = if (remote.hasDuration()) ms(remote.duration) else null,
+            positionMs = remote.positionMs,
+            durationMs = remote.durationMs,
             paused = remote.paused,
             canPause = remote.canPause,
             canSeek = remote.canSeek,
-            available = remote.hasPosition(),
+            available = remote.positionMs != null,
           )
       )
     }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"connectrpc.com/connect"
@@ -70,6 +71,9 @@ func (s *Service) run(ctx context.Context, c *cast, target device.Info, asked *m
 	// Connected first, so an unreachable device costs no media cast and a slow one never outlasts the media server's wait for it.
 	connectCtx, finishConnect := telemetry.Start(ctx, telemetry.Connect)
 	lent, err := s.devices.Connect(connectCtx, target)
+	if busy, ok := errors.AsType[*device.Busy](err); ok && s.supersede(connectCtx, busy) {
+		lent, err = s.devices.Connect(connectCtx, target)
+	}
 	finishConnect(err)
 	if err != nil {
 		code := castorv1.FailureCode_FAILURE_CODE_DEVICE_UNREACHABLE
@@ -99,7 +103,8 @@ func (s *Service) run(ctx context.Context, c *cast, target device.Info, asked *m
 	return s.runConnected(ctx, c, lent, asked)
 }
 
-func (s *Service) runPlayback(ctx context.Context, c *cast, controlled *playback, asked *mediav1.PlaybackSettings, id string, start time.Duration) (*castorv1.Ended, error) {
+// runPlayback resolves c's source and plays it once, from start, on player.
+func (s *Service) runPlayback(ctx context.Context, c *cast, player device.Device, asked *mediav1.PlaybackSettings, id string, start time.Duration) (*castorv1.Ended, error) {
 	if c.source.GetPages() != nil {
 		c.show(&castorv1.CastStatus{State: &castorv1.CastStatus_Extracting{Extracting: &emptypb.Empty{}}})
 	}
@@ -115,7 +120,21 @@ func (s *Service) runPlayback(ctx context.Context, c *cast, controlled *playback
 		return nil, ctx.Err()
 	}
 
-	return controlled.drive(ctx, id, start, c.show, func(run context.Context, id string, start time.Duration, player device.Device, show func(*castorv1.CastStatus)) (*castorv1.Ended, error) {
-		return s.media.Run(run, id, source, asked, player, c.mediaInfo, start, show)
-	})
+	return s.media.Run(ctx, id, source, asked, player, c.mediaInfo, start, c.show)
+}
+
+// supersede stops the cast holding busy's device and waits for it to let go, false if no cast here holds it.
+func (s *Service) supersede(ctx context.Context, busy *device.Busy) bool {
+	held, ok := s.casts.Find(busy.Owner)
+	if !ok {
+		return false
+	}
+	slog.InfoContext(ctx, "a new cast replaces the one playing on its device", "replaced", held.id)
+	held.stop(errStopped)
+	select {
+	case <-busy.Released:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
