@@ -80,9 +80,11 @@ func runRestartable(ctx context.Context, c *cast, lent device.Device, run func(c
 			select {
 			case result := <-done:
 				loaded := p.loaded.Load()
-				if c.managed && !handedOff && result.err == nil && result.ended.GetCompleted() != nil && loaded != nil && loaded.media.Play.GetSource() != nil && ctx.Err() == nil {
+				if c.managed && !handedOff && !p.ended.Load() && result.err == nil && result.ended.GetCompleted() != nil && loaded != nil && loaded.media.Play.GetSource() != nil && ctx.Err() == nil {
 					// Direct delivery needs no media pipeline after LOAD, but Android still
 					// owns the receiver until playback ends, Stop, or an explicit restart.
+					// A receiver that already reported the end is not waited for again: a
+					// stopped DLNA renderer would only be judged refused 15 polls later.
 					handedOff = true
 					done = make(chan playbackResult, 1)
 					go func() {

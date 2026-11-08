@@ -25,6 +25,8 @@ type playback struct {
 	watch       sync.Mutex
 	changed     chan struct{}
 	requests    chan *playbackSeek
+	// ended is the receiver's own report that what was loaded last has finished.
+	ended atomic.Bool
 }
 
 type loadedPlayback struct {
@@ -46,6 +48,7 @@ func (p *playback) playAt(ctx context.Context, media device.Playback, base time.
 		}
 	}
 	p.loaded.Store(&loadedPlayback{duration: base + media.Duration(), base: base, media: media})
+	p.ended.Store(false)
 	p.rewatch()
 	return nil
 }

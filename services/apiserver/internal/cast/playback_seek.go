@@ -249,6 +249,9 @@ func (p *playback) AwaitEnd(ctx context.Context) error {
 		select {
 		case err := <-done:
 			cancel()
+			if err == nil {
+				p.ended.Store(true)
+			}
 			return err
 		case <-changed:
 			cancel()

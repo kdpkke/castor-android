@@ -57,6 +57,46 @@ func (d *restartDevice) AwaitEnd(ctx context.Context) error {
 	}
 }
 
+// stoppedAfterEnd reports its end once; asked again, it waits, as a DLNA renderer that stays stopped.
+type stoppedAfterEnd struct {
+	*restartDevice
+	reported atomic.Bool
+}
+
+func (d *stoppedAfterEnd) AwaitEnd(ctx context.Context) error {
+	if d.reported.CompareAndSwap(false, true) {
+		return nil
+	}
+	<-ctx.Done()
+	return context.Cause(ctx)
+}
+
+func TestManagedHandoffEndsWhenTheReceiverAlreadyReportedTheEnd(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := newCast("managed-ended", &castorv1.Device{}, &castorv1.CastRequest{Preferences: &castorv1.Preferences{ManagedPlayback: true}}, func(error) {})
+		d := &stoppedAfterEnd{restartDevice: &restartDevice{}}
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+		began := time.Now()
+		ended, err := runRestartable(ctx, c, d, func(ctx context.Context, p *playback, _ string, _ time.Duration) (*castorv1.Ended, error) {
+			if err := p.Play(ctx, device.Playback{Play: &mediav1.DeviceCommand_Play{Stream: &mediav1.DeviceCommand_Play_Source_{Source: &mediav1.DeviceCommand_Play_Source{Duration: durationpb.New(12 * time.Second)}}}}); err != nil {
+				return nil, err
+			}
+			// The media server follows the handoff to the receiver's own end.
+			if err := p.AwaitEnd(ctx); err != nil {
+				return nil, err
+			}
+			return &castorv1.Ended{Result: &castorv1.Ended_Completed{Completed: &emptypb.Empty{}}}, nil
+		})
+		if err != nil || ended.GetCompleted() == nil {
+			t.Fatalf("ended = %v, %v", ended, err)
+		}
+		if waited := time.Since(began); waited > 0 {
+			t.Fatalf("waited %s for an end the receiver had already reported", waited)
+		}
+	})
+}
+
 func TestRestartPositionPreservesTheCompleteFiniteClockAndExplicitLiveEdge(t *testing.T) {
 	d := &restartDevice{head: device.Playhead{At: time.Minute, Paused: true}}
 	p := &playback{Device: d}
