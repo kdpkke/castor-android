@@ -41,6 +41,12 @@ const (
 	CastServiceWatchProcedure = "/castor.v1.CastService/Watch"
 	// CastServiceStopProcedure is the fully-qualified name of the CastService's Stop RPC.
 	CastServiceStopProcedure = "/castor.v1.CastService/Stop"
+	// CastServiceRestartProcedure is the fully-qualified name of the CastService's Restart RPC.
+	CastServiceRestartProcedure = "/castor.v1.CastService/Restart"
+	// CastServicePlaybackProcedure is the fully-qualified name of the CastService's Playback RPC.
+	CastServicePlaybackProcedure = "/castor.v1.CastService/Playback"
+	// CastServiceControlProcedure is the fully-qualified name of the CastService's Control RPC.
+	CastServiceControlProcedure = "/castor.v1.CastService/Control"
 	// CastServiceListCastsProcedure is the fully-qualified name of the CastService's ListCasts RPC.
 	CastServiceListCastsProcedure = "/castor.v1.CastService/ListCasts"
 )
@@ -57,6 +63,12 @@ type CastServiceClient interface {
 	Watch(context.Context, *v1.WatchRequest) (*connect.ServerStreamForClient[v1.WatchResponse], error)
 	// Stop ends a cast and returns at once.
 	Stop(context.Context, *v1.StopRequest) (*v1.StopResponse, error)
+	// Restart reloads the same source on its leased receiver, resuming finite media.
+	Restart(context.Context, *v1.RestartRequest) (*v1.RestartResponse, error)
+	// Playback reads the connected receiver's actual playhead and available controls.
+	Playback(context.Context, *v1.PlaybackRequest) (*v1.PlaybackResponse, error)
+	// Control changes the current playback without starting another cast.
+	Control(context.Context, *v1.ControlRequest) (*v1.ControlResponse, error)
 	// ListCasts is the casts playing now, oldest first.
 	ListCasts(context.Context, *v1.ListCastsRequest) (*v1.ListCastsResponse, error)
 }
@@ -96,6 +108,24 @@ func NewCastServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(castServiceMethods.ByName("Stop")),
 			connect.WithClientOptions(opts...),
 		),
+		restart: connect.NewClient[v1.RestartRequest, v1.RestartResponse](
+			httpClient,
+			baseURL+CastServiceRestartProcedure,
+			connect.WithSchema(castServiceMethods.ByName("Restart")),
+			connect.WithClientOptions(opts...),
+		),
+		playback: connect.NewClient[v1.PlaybackRequest, v1.PlaybackResponse](
+			httpClient,
+			baseURL+CastServicePlaybackProcedure,
+			connect.WithSchema(castServiceMethods.ByName("Playback")),
+			connect.WithClientOptions(opts...),
+		),
+		control: connect.NewClient[v1.ControlRequest, v1.ControlResponse](
+			httpClient,
+			baseURL+CastServiceControlProcedure,
+			connect.WithSchema(castServiceMethods.ByName("Control")),
+			connect.WithClientOptions(opts...),
+		),
 		listCasts: connect.NewClient[v1.ListCastsRequest, v1.ListCastsResponse](
 			httpClient,
 			baseURL+CastServiceListCastsProcedure,
@@ -111,6 +141,9 @@ type castServiceClient struct {
 	resolve   *connect.Client[v1.ResolveRequest, v1.ResolveResponse]
 	watch     *connect.Client[v1.WatchRequest, v1.WatchResponse]
 	stop      *connect.Client[v1.StopRequest, v1.StopResponse]
+	restart   *connect.Client[v1.RestartRequest, v1.RestartResponse]
+	playback  *connect.Client[v1.PlaybackRequest, v1.PlaybackResponse]
+	control   *connect.Client[v1.ControlRequest, v1.ControlResponse]
 	listCasts *connect.Client[v1.ListCastsRequest, v1.ListCastsResponse]
 }
 
@@ -146,6 +179,33 @@ func (c *castServiceClient) Stop(ctx context.Context, req *v1.StopRequest) (*v1.
 	return nil, err
 }
 
+// Restart calls castor.v1.CastService.Restart.
+func (c *castServiceClient) Restart(ctx context.Context, req *v1.RestartRequest) (*v1.RestartResponse, error) {
+	response, err := c.restart.CallUnary(ctx, connect.NewRequest(req))
+	if response != nil {
+		return response.Msg, err
+	}
+	return nil, err
+}
+
+// Playback calls castor.v1.CastService.Playback.
+func (c *castServiceClient) Playback(ctx context.Context, req *v1.PlaybackRequest) (*v1.PlaybackResponse, error) {
+	response, err := c.playback.CallUnary(ctx, connect.NewRequest(req))
+	if response != nil {
+		return response.Msg, err
+	}
+	return nil, err
+}
+
+// Control calls castor.v1.CastService.Control.
+func (c *castServiceClient) Control(ctx context.Context, req *v1.ControlRequest) (*v1.ControlResponse, error) {
+	response, err := c.control.CallUnary(ctx, connect.NewRequest(req))
+	if response != nil {
+		return response.Msg, err
+	}
+	return nil, err
+}
+
 // ListCasts calls castor.v1.CastService.ListCasts.
 func (c *castServiceClient) ListCasts(ctx context.Context, req *v1.ListCastsRequest) (*v1.ListCastsResponse, error) {
 	response, err := c.listCasts.CallUnary(ctx, connect.NewRequest(req))
@@ -167,6 +227,12 @@ type CastServiceHandler interface {
 	Watch(context.Context, *v1.WatchRequest, *connect.ServerStream[v1.WatchResponse]) error
 	// Stop ends a cast and returns at once.
 	Stop(context.Context, *v1.StopRequest) (*v1.StopResponse, error)
+	// Restart reloads the same source on its leased receiver, resuming finite media.
+	Restart(context.Context, *v1.RestartRequest) (*v1.RestartResponse, error)
+	// Playback reads the connected receiver's actual playhead and available controls.
+	Playback(context.Context, *v1.PlaybackRequest) (*v1.PlaybackResponse, error)
+	// Control changes the current playback without starting another cast.
+	Control(context.Context, *v1.ControlRequest) (*v1.ControlResponse, error)
 	// ListCasts is the casts playing now, oldest first.
 	ListCasts(context.Context, *v1.ListCastsRequest) (*v1.ListCastsResponse, error)
 }
@@ -202,6 +268,24 @@ func NewCastServiceHandler(svc CastServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(castServiceMethods.ByName("Stop")),
 		connect.WithHandlerOptions(opts...),
 	)
+	castServiceRestartHandler := connect.NewUnaryHandlerSimple(
+		CastServiceRestartProcedure,
+		svc.Restart,
+		connect.WithSchema(castServiceMethods.ByName("Restart")),
+		connect.WithHandlerOptions(opts...),
+	)
+	castServicePlaybackHandler := connect.NewUnaryHandlerSimple(
+		CastServicePlaybackProcedure,
+		svc.Playback,
+		connect.WithSchema(castServiceMethods.ByName("Playback")),
+		connect.WithHandlerOptions(opts...),
+	)
+	castServiceControlHandler := connect.NewUnaryHandlerSimple(
+		CastServiceControlProcedure,
+		svc.Control,
+		connect.WithSchema(castServiceMethods.ByName("Control")),
+		connect.WithHandlerOptions(opts...),
+	)
 	castServiceListCastsHandler := connect.NewUnaryHandlerSimple(
 		CastServiceListCastsProcedure,
 		svc.ListCasts,
@@ -218,6 +302,12 @@ func NewCastServiceHandler(svc CastServiceHandler, opts ...connect.HandlerOption
 			castServiceWatchHandler.ServeHTTP(w, r)
 		case CastServiceStopProcedure:
 			castServiceStopHandler.ServeHTTP(w, r)
+		case CastServiceRestartProcedure:
+			castServiceRestartHandler.ServeHTTP(w, r)
+		case CastServicePlaybackProcedure:
+			castServicePlaybackHandler.ServeHTTP(w, r)
+		case CastServiceControlProcedure:
+			castServiceControlHandler.ServeHTTP(w, r)
 		case CastServiceListCastsProcedure:
 			castServiceListCastsHandler.ServeHTTP(w, r)
 		default:
@@ -243,6 +333,18 @@ func (UnimplementedCastServiceHandler) Watch(context.Context, *v1.WatchRequest, 
 
 func (UnimplementedCastServiceHandler) Stop(context.Context, *v1.StopRequest) (*v1.StopResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("castor.v1.CastService.Stop is not implemented"))
+}
+
+func (UnimplementedCastServiceHandler) Restart(context.Context, *v1.RestartRequest) (*v1.RestartResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("castor.v1.CastService.Restart is not implemented"))
+}
+
+func (UnimplementedCastServiceHandler) Playback(context.Context, *v1.PlaybackRequest) (*v1.PlaybackResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("castor.v1.CastService.Playback is not implemented"))
+}
+
+func (UnimplementedCastServiceHandler) Control(context.Context, *v1.ControlRequest) (*v1.ControlResponse, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("castor.v1.CastService.Control is not implemented"))
 }
 
 func (UnimplementedCastServiceHandler) ListCasts(context.Context, *v1.ListCastsRequest) (*v1.ListCastsResponse, error) {

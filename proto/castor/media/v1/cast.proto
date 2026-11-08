@@ -51,6 +51,9 @@ message PlaybackSettings {
       expression: "this.bits_per_second <= 1000000000000"
     }
   ];
+  // preserve_source keeps finite sources original; live sources may be optimized after a native refusal.
+  // Android extension; keep low field numbers available to upstream.
+  bool preserve_source = 1000;
 }
 
 message StartResponse {}

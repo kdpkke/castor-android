@@ -20,4 +20,9 @@ enum RecoveryAction {
   RECOVERY_ACTION_RELAX_READ = 3;
   RECOVERY_ACTION_SERVE_INSTEAD = 4;
   RECOVERY_ACTION_STAY = 5;
+  // Android extension: convert a live source only after native planning refuses it.
+  RECOVERY_ACTION_OPTIMIZE_LIVE = 1000;
+  // Android extension: encode the picture in software after a hardware encoder failed.
+  // Upstream proposal: stupside/castor#85.
+  RECOVERY_ACTION_SOFTWARE_ENCODE = 1001;
 }

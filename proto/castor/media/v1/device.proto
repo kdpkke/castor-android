@@ -61,6 +61,10 @@ message Capabilities {
   reserved "served_headers";
   // self_fetch is whether the device fetches a stream URL itself, rather than only playing what it is served.
   bool self_fetch = 5;
+  // A preserve_source cast may try measured original tracks in an admitted
+  // transport when model/firmware codec support is unknown. The receiver's
+  // playback verdict decides compatibility; this never permits conversion.
+  bool native_playback_trial = 6;
 }
 
 message FormatSupport {
@@ -266,6 +270,8 @@ message DeviceCommand {
   }
 
   message Play {
+    // True only when source inspection identified a live timeline.
+    bool live = 1000;
     // url is what the device fetches: the source itself, or what the media server serves it.
     string url = 1 [
       (buf.validate.field).string.max_len = 8192,
@@ -282,6 +288,9 @@ message DeviceCommand {
       Progressive progressive = 7;
       Playlist playlist = 8;
     }
+    // start is where in the cast's media the stream begins, its own position zero: a revision resumes a cast further on.
+    // Upstream proposal: stupside/castor#83.
+    google.protobuf.Duration start = 1001 [(buf.validate.field).duration.gte = {}];
     reserved 2, 4, 5;
     reserved "container", "duration", "seek";
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"connectrpc.com/connect"
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
@@ -92,6 +93,10 @@ func (s *Service) run(ctx context.Context, c *cast, target device.Info, asked *m
 			err = nil
 		}
 	}()
+	return s.runConnected(ctx, c, lent, asked)
+}
+
+func (s *Service) runPlayback(ctx context.Context, c *cast, controlled *playback, asked *mediav1.PlaybackSettings, id string, start time.Duration) (*castorv1.Ended, error) {
 	if c.source.GetPages() != nil {
 		c.show(&castorv1.CastStatus{State: &castorv1.CastStatus_Extracting{Extracting: &emptypb.Empty{}}})
 	}
@@ -107,5 +112,7 @@ func (s *Service) run(ctx context.Context, c *cast, target device.Info, asked *m
 		return nil, ctx.Err()
 	}
 
-	return s.media.Run(ctx, c.id, source, asked, lent, c.mediaInfo, c.start, c.show)
+	return controlled.drive(ctx, id, start, c.show, func(run context.Context, id string, start time.Duration, player device.Device, show func(*castorv1.CastStatus)) (*castorv1.Ended, error) {
+		return s.media.Run(run, id, source, asked, player, c.mediaInfo, start, show)
+	})
 }

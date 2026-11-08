@@ -21,6 +21,12 @@ service CastService {
   rpc Watch(WatchRequest) returns (stream WatchResponse);
   // Stop ends a cast and returns at once.
   rpc Stop(StopRequest) returns (StopResponse);
+  // Restart reloads the same source on its leased receiver, resuming finite media.
+  rpc Restart(RestartRequest) returns (RestartResponse);
+  // Playback reads the connected receiver's actual playhead and available controls.
+  rpc Playback(PlaybackRequest) returns (PlaybackResponse);
+  // Control changes the current playback without starting another cast.
+  rpc Control(ControlRequest) returns (ControlResponse);
   // ListCasts is the casts playing now, oldest first.
   rpc ListCasts(ListCastsRequest) returns (ListCastsResponse);
 }
@@ -99,6 +105,13 @@ message Preferences {
   SubtitleSelection subtitles = 3;
   // Ordered audio languages to try before the source's default track; absent takes the server's default.
   AudioSelection audio = 4;
+  // preserve_source keeps the selected video and audio original, allowing container changes.
+  // Live sources that cannot be preserved may be optimized automatically; finite sources stay strict.
+  // Android extension; keep low field numbers available to upstream.
+  optional bool preserve_source = 1000;
+  // Keep receiver ownership and controls after a direct source handoff.
+  // Android extension; other clients retain their existing handoff behavior.
+  bool managed_playback = 1001;
 }
 
 message AudioSelection {
@@ -142,7 +155,12 @@ message CastStatus {
     google.protobuf.Empty extracting = 2;
     MeasuringStatus measuring = 3;
     CastingStatus casting = 4;
+    RestartingStatus restarting = 1000;
   }
+}
+
+message RestartingStatus {
+  bool automatic = 1;
 }
 
 message MeasuringStatus {
@@ -156,6 +174,21 @@ message CastingStatus {
   uint32 castable = 2;
   uint32 attempt = 3 [(buf.validate.field).uint32.gte = 1];
   Revision revision = 4;
+  // True once native planning required conversion of this live cast; preferences remain unchanged.
+  bool optimized_live = 1000;
+  uint32 automatic_restarts = 1001;
+  // handover is what the playing attempt handed the device, absent until the device took it.
+  // Upstream proposal: stupside/castor#83.
+  Handover handover = 1002;
+}
+
+message Handover {
+  Fidelity fidelity = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // dolby_vision is a source declaring Dolby Vision, which only an original file is sure to keep signaled.
+  bool dolby_vision = 2;
 }
 
 message Ended {
@@ -183,6 +216,7 @@ enum FailureCode {
   FAILURE_CODE_EXTRACTION_FAILED = 3;
   FAILURE_CODE_SERVER_SHUTDOWN = 4;
   FAILURE_CODE_INTERNAL = 5;
+  FAILURE_CODE_NATIVE_INCOMPATIBLE = 1000;
 }
 
 message StopRequest {
@@ -190,6 +224,43 @@ message StopRequest {
 }
 
 message StopResponse {}
+
+message RestartRequest {
+  string cast_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message RestartResponse {}
+
+message PlaybackRequest {
+  string cast_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message PlaybackResponse {
+  PlaybackState playback = 1 [(buf.validate.field).required = true];
+}
+
+message ControlRequest {
+  string cast_id = 1 [(buf.validate.field).string.min_len = 1];
+  oneof action {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Empty pause = 2;
+    google.protobuf.Empty resume = 3;
+    google.protobuf.Duration seek = 4 [(buf.validate.field).duration.gte = {}];
+  }
+}
+
+message ControlResponse {
+  PlaybackState playback = 1 [(buf.validate.field).required = true];
+}
+
+// PlaybackState contains receiver observations; an absent position is not an invented zero.
+message PlaybackState {
+  google.protobuf.Duration position = 1 [(buf.validate.field).duration.gte = {}];
+  google.protobuf.Duration duration = 2 [(buf.validate.field).duration.gt = {}];
+  bool paused = 3;
+  bool can_pause = 4;
+  bool can_seek = 5;
+}
 
 message ListCastsRequest {}
 

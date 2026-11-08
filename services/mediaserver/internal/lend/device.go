@@ -37,7 +37,7 @@ func (d Device) Play(ctx context.Context, p execute.Playback) error {
 }
 
 func played(p execute.Playback) *mediav1.DeviceCommand_Play {
-	play := &mediav1.DeviceCommand_Play{Url: p.URL.String()}
+	play := &mediav1.DeviceCommand_Play{Start: durationpb.New(p.Start), Url: p.URL.String(), Live: p.Live}
 	for _, c := range p.Captions {
 		play.Captions = append(play.Captions, wire.Caption(c, c.URL))
 	}

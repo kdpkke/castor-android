@@ -11,8 +11,22 @@ import (
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"github.com/stupside/castor/services/apiserver/internal/device"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
+
+func TestNativePreferenceReachesMediaWithoutInheritedQualityCeilings(t *testing.T) {
+	s := New(&mediav1.PlaybackSettings{MaxHeight: 1080, MaxBitrate: &mediav1.Bitrate{BitsPerSecond: 4_000_000}}, nil, nil, nil)
+	defer s.Drain(t.Context())
+	native := s.asked(&castorv1.Preferences{PreserveSource: proto.Bool(true)})
+	if !native.GetPreserveSource() || native.GetMaxHeight() != ^uint32(0) || native.GetMaxBitrate() != nil {
+		t.Fatalf("native settings = %v; source must not be reduced by inherited ceilings", native)
+	}
+	optimized := s.asked(&castorv1.Preferences{})
+	if optimized.GetPreserveSource() || optimized.GetMaxHeight() != 1080 || optimized.GetMaxBitrate().GetBitsPerSecond() != 4_000_000 {
+		t.Fatalf("native changed later optimized casts: %v", optimized)
+	}
+}
 
 func TestPagesWithoutScrapingFailWithoutCallingMedia(t *testing.T) {
 	s := New(&mediav1.PlaybackSettings{}, nil, nil, nil)
