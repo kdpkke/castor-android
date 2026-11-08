@@ -63,12 +63,12 @@ class TvProtocolPickerTest {
         LocalConfiguration provides configuration,
         LocalResources provides localized.resources,
       ) {
-        CastorTheme { TvPicker(state, null, {}, {}, { selected = it }) }
+        CastorTheme { TvPicker(state, null, {}, {}, {}, { selected = it }) }
       }
     }
     compose.onAllNodesWithText("Living room TV").assertCountEquals(1)
     compose.onNodeWithText("Living room renderer").assertDoesNotExist()
-    compose.onNodeWithText("192.0.2.10:8009 · 192.0.2.10:1676").assertExists()
+    compose.onNodeWithText("192.0.2.10 · Chromecast, DLNA").assertExists()
     compose.onNodeWithText("Chromecast").assertDoesNotExist()
     compose.onNodeWithText("DLNA").assertDoesNotExist()
     compose.onNodeWithText("Living room TV").performClick()

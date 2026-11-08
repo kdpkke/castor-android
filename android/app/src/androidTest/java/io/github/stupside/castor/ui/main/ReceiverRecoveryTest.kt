@@ -38,7 +38,7 @@ class ReceiverRecoveryTest {
   @Test
   fun lastUsedIsHiddenUntilDiscoveryConfirmsItAndDisappearsWhenOffline() {
     val state = mutableStateOf(MainScreenUiState(ready = true))
-    compose.setContent { CastorTheme { TvPicker(state.value, SavedTv(device), {}, {}, {}) } }
+    compose.setContent { CastorTheme { TvPicker(state.value, SavedTv(device), {}, {}, {}, {}) } }
     compose.onNodeWithText(device.name).assertDoesNotExist()
     compose.runOnIdle {
       state.value =
