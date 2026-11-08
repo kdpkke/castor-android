@@ -27,7 +27,8 @@ Native Android emulator previews with sample input.
 
 - Paste a link, share a video from another app or tap **Choose video** for a file on your phone.
 - Automatic mode recognizes download links from server headers, including links without a video extension. Supported videos start playing while the phone reads them; a full download is not required first.
-- Discover Chromecast/DLNA receivers, reuse a saved TV or enter an address manually.
+- Discover DLNA, Chromecast, AirPlay and FCast receivers, reuse a saved TV or enter an address manually.
+- Cast several videos to different TVs at the same time, and restart a cast from where it was.
 - Keep casting in the background through an Android foreground service.
 - Pause, resume and seek from the app when supported by the TV. Tap a circular **10** arrow for a ten-second step, or hold it to keep seeking.
 - Native playback without re-encoding, or Optimized playback for receiver compatibility; separate subtitle preferences.
@@ -36,6 +37,45 @@ Native Android emulator previews with sample input.
 - Live-stream delivery follows future bytes; captured HLS access can renew through the original page when tokens expire.
 
 Android 9+; arm64-v8a phones and x86_64 emulators. Previous casting builds were manually tested on **OPPO Find X8 Pro / ColorOS 16 → LG C2 in Chromecast mode**; see current validation coverage below. Roku remains experimental and requires upstream's developer-channel setup.
+
+## Supported TVs and formats
+
+### TV protocols
+
+- **DLNA / UPnP**, found on most smart TVs (Samsung, LG, Philips, Sony and others).
+  - In Native, a finished MKV, MP4, MPEG-TS or WebM file in a container the TV lists is sent unchanged, Dolby Vision included.
+  - Otherwise Castor streams MPEG-TS (H.264 and AAC on TVs that list nothing more).
+  - Pause and seek work where the TV allows them.
+  - Tested on an LG C2.
+- **Chromecast**: Google Cast devices and TVs with Chromecast built in.
+  - The TV fetches the video itself when it can play it.
+  - Otherwise Castor streams HLS, MP4, MPEG-TS or WebM to it.
+  - Tested on an LG C2 in Chromecast mode.
+- **AirPlay**: Apple TV, and TVs with AirPlay built in such as LG webOS models.
+  - The first cast asks for the PIN the TV shows; the pairing is kept on the phone.
+  - The TV gets HLS, or the original MP4 file: a Dolby Vision MP4 keeps Dolby Vision in Native.
+  - Tested on an LG C2. Apple TVs are supported but not yet tested on hardware; old Apple TVs that need the legacy PIN pairing are not supported.
+- **FCast**: the FUTO receiver app and desktop receiver.
+  - HLS or MP4 with H.264 video and AAC or MP3 audio; subtitles are burnt into the picture.
+  - Not yet tested on hardware.
+- **Roku** (experimental): Castor's developer channel plays HLS, MP4 and MKV with H.264. It needs upstream's developer-channel setup and is not yet tested on hardware.
+
+### What you can cast
+
+- **Sources**:
+  - web pages with a video player (Castor finds the stream in the page);
+  - direct links and downloads, including links without a video extension;
+  - videos stored on the phone (**Choose video**, or share them to Castor).
+- **Streaming**: HLS (`.m3u8`) and DASH (`.mpd`), on demand and live.
+- **Files**: MP4 and M4V, MOV, MKV, WebM, MPEG-TS, AVI and FLV.
+- **Video**:
+  - **Native** keeps the original video (H.264, HEVC, VP9, AV1 and others, HDR10 and Dolby Vision) when the TV accepts it;
+  - **Optimized** converts to H.264 up to 1080p, HDR to SDR, using the phone's hardware encoder when it works.
+- **Audio**: Native keeps AAC, AC-3, E-AC-3, MP3, Opus, FLAC and the rest when the TV accepts them; Optimized converts what the TV cannot play.
+- **Subtitles**:
+  - the source's own subtitles in the chosen language;
+  - or subtitles generated from the audio by a downloaded speech model, on TVs Castor streams to, such as DLNA.
+  - They are sent as a subtitle track where the TV supports one (WebVTT for Chromecast and AirPlay), otherwise burnt into the picture. Native never burns or generates subtitles.
 
 ## Install and use
 
