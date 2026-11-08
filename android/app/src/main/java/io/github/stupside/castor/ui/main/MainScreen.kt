@@ -615,7 +615,16 @@ fun MainScreen(
   if (sheet == "language") AppLanguagePicker(language, { sheet = null }, selectLanguage)
   if (sheet == "theme") AppThemePicker(theme, { sheet = null }, selectTheme)
   if (sheet == "tv")
-    TvPicker(state, tv, { sheet = null }, { viewModel.discover() }, viewModel::describe) { selected ->
+    TvPicker(
+      state,
+      tv,
+      { sheet = null },
+      { host ->
+        host?.let(options::searchedHost)
+        viewModel.discover(restart = host != null)
+      },
+      viewModel::describe,
+    ) { selected ->
       saveTv(selected)
       sheet = null
     }

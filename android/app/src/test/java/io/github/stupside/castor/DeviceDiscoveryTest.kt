@@ -67,6 +67,24 @@ class DeviceDiscoveryTest {
   }
 
   @Test(timeout = 15_000)
+  fun aTypedAddressIsNamedByTheIdentityItsChromecastReports() = runBlocking {
+    MockWebServer().use { info ->
+      ServerSocket(0).use { cast ->
+        info.enqueue(
+          MockResponse().setBody("""{"name":"Living room","ssdp_udn":"A1B2C3D4-0000-4000-8000-00000000C0DE"}""")
+        )
+        val found = DeviceDiscovery.chromecastAt("127.0.0.1", cast.localPort, client(info))!!
+        assertEquals("a1b2c3d400004000800000000000c0de", found.id)
+        assertEquals("Living room", found.name)
+        assertEquals("127.0.0.1:${cast.localPort}", found.address)
+        assertEquals(DeviceType.DEVICE_TYPE_CHROMECAST, found.type)
+        info.enqueue(MockResponse().setBody("""{"name":"No identity"}"""))
+        assertNull(DeviceDiscovery.chromecastAt("127.0.0.1", cast.localPort, client(info)))
+      }
+    }
+  }
+
+  @Test(timeout = 15_000)
   fun aClosedCastPortAndHttpRefusalsKeepTheTvOffline() = runBlocking {
     val closedPort = ServerSocket(0).use { it.localPort }
     MockWebServer().use { info ->

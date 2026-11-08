@@ -35,6 +35,7 @@ import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONObject
 import org.json.JSONException
+import io.github.stupside.castor.ui.main.receiverHost
 
 // Android supplies mDNS and active hotspot interfaces; no restricted netlink enumeration is needed.
 class DeviceDiscovery(private val context: Context) {
@@ -46,11 +47,15 @@ class DeviceDiscovery(private val context: Context) {
   // Every route is searched independently: one that fails (a cellular default route refusing
   // multicast, a hotspot that just stopped) neither hides receivers found on the others nor the
   // Chromecasts. The search fails only when nothing was found and some route failed.
-  suspend fun find(remembered: Device? = null): List<Device> = coroutineScope {
+  suspend fun find(remembered: Device? = null, typed: String? = null): List<Device> = coroutineScope {
     val cast = async { attempt { chromecasts() } }
     val airplay = async { attempt { airPlays() } }
     val fcast = async { attempt { fCasts() } }
     val known = async { rememberedChromecast(remembered) }
+    // Some TVs' Wi-Fi drops multicast while they answer directly: ask the saved and typed hosts too.
+    val hosts = listOfNotNull(remembered?.address?.let(::receiverHost), typed?.let(::receiverHost)).distinct()
+    val direct =
+      async(Dispatchers.IO) { hosts.map { async { attempt { direct(it, remembered) } } }.awaitAll() }
     val ssdp =
       async(Dispatchers.IO) {
         // The default route can be cellular while the TV sits on this phone's hotspot, and the
@@ -59,7 +64,7 @@ class DeviceDiscovery(private val context: Context) {
         val routes = listOf<NetworkInterface?>(null) + hotspotInterfaces()
         routes.map { async { attempt { ssdp(it) } } }.awaitAll()
       }
-    val results = ssdp.await() + cast.await() + airplay.await() + fcast.await()
+    val results = ssdp.await() + cast.await() + airplay.await() + fcast.await() + direct.await()
     val found =
       (results.flatMap { it.getOrNull().orEmpty() } + listOfNotNull(known.await()))
         .distinctBy { "${it.type}:${it.id}" }
@@ -129,14 +134,7 @@ class DeviceDiscovery(private val context: Context) {
         } catch (_: java.net.SocketTimeoutException) {
           continue
         }
-        val headers =
-          String(packet.data, 0, packet.length, Charsets.UTF_8)
-            .lineSequence()
-            .drop(1)
-            .filter { ':' in it }
-            .associate {
-              it.substringBefore(':').trim().lowercase() to it.substringAfter(':').trim()
-            }
+        val headers = ssdpHeaders(packet)
         val location = headers["location"].orEmpty()
         val target = headers["st"].orEmpty()
         if (!BrowserResolver.isHttp(location)) continue
@@ -156,7 +154,91 @@ class DeviceDiscovery(private val context: Context) {
       .filterNotNull()
   }
 
-  private fun describe(id: String, location: String, family: DeviceType): Device? {
+  private fun ssdpHeaders(packet: DatagramPacket): Map<String, String> =
+    String(packet.data, 0, packet.length, Charsets.UTF_8)
+      .lineSequence()
+      .drop(1)
+      .filter { ':' in it }
+      .associate { it.substringBefore(':').trim().lowercase() to it.substringAfter(':').trim() }
+
+  // UPnP 1.1 lets a control point ask one device by unicast; only that device's renderer counts.
+  private suspend fun ssdpAt(host: InetAddress): List<Device> {
+    val found = linkedMapOf<String, String>()
+    java.net.DatagramSocket().use { socket ->
+      socket.soTimeout = 200
+      val literal = host.hostAddress.orEmpty().substringBefore('%').let { if (':' in it) "[$it]" else it }
+      val message =
+        "M-SEARCH * HTTP/1.1\r\nHOST: $literal:1900\r\nMAN: \"ssdp:discover\"\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n"
+          .toByteArray()
+      repeat(2) { socket.send(DatagramPacket(message, message.size, host, 1900)) }
+      val until = android.os.SystemClock.elapsedRealtime() + 1500
+      while (android.os.SystemClock.elapsedRealtime() < until) {
+        currentCoroutineContext().ensureActive()
+        val packet = DatagramPacket(ByteArray(8192), 8192)
+        try {
+          socket.receive(packet)
+        } catch (_: java.net.SocketTimeoutException) {
+          continue
+        }
+        if (packet.address != host) continue
+        val headers = ssdpHeaders(packet)
+        val location = headers["location"].orEmpty()
+        if (!BrowserResolver.isHttp(location) || !headers["st"].orEmpty().contains("MediaRenderer:")) continue
+        if (receiverHost(location) != receiverHost(literal)) continue
+        found.putIfAbsent(headers["usn"] ?: location, location)
+      }
+    }
+    return found.mapNotNull { (id, location) -> describe(id, location, DeviceType.DEVICE_TYPE_DLNA) }
+  }
+
+  // A saved renderer is read again at its description URL, and kept only when its UDN is the same.
+  private fun savedRenderer(remembered: Device): Device? {
+    if (remembered.type != DeviceType.DEVICE_TYPE_DLNA || !BrowserResolver.isHttp(remembered.address)) return null
+    val udn = remembered.id.substringBefore("::").takeIf { it.startsWith("uuid:") } ?: return null
+    return describe(remembered.id, remembered.address, DeviceType.DEVICE_TYPE_DLNA, udn)
+  }
+
+  // Each protocol on its own port: AirPlay and FCast by unicast DNS-SD, Cast by its setup API, DLNA by SSDP.
+  private suspend fun direct(host: String, remembered: Device?): List<Device> = coroutineScope {
+    val address = InetAddress.getByName(host)
+    val literal = address.hostAddress.orEmpty().substringBefore('%')
+    listOf(
+        async {
+          attempt {
+            UnicastMdns.ask(address, "_airplay._tcp.local").mapNotNull {
+              val port = it.port.takeIf { port -> port > 0 } ?: ReceiverAnnouncements.AIRPLAY_PORT
+              ReceiverAnnouncements.airPlay(it.name, it.txt, literal, port)
+            }
+          }
+        },
+        async {
+          attempt {
+            UnicastMdns.ask(address, "_fcast._tcp.local").map {
+              ReceiverAnnouncements.fCast(it.name, literal, it.port)
+            }
+          }
+        },
+        async {
+          attempt {
+            listOfNotNull(
+              chromecastAt(literal)?.let { if (it.name.isBlank()) it.toBuilder().setName(literal).build() else it }
+            )
+          }
+        },
+        async { attempt { ssdpAt(address) } },
+        async {
+          attempt {
+            listOfNotNull(
+              remembered?.takeIf { receiverHost(it.address) == host }?.let(::savedRenderer)
+            )
+          }
+        },
+      )
+      .awaitAll()
+      .flatMap { it.getOrNull().orEmpty() }
+  }
+
+  private fun describe(id: String, location: String, family: DeviceType, udn: String? = null): Device? {
     try {
       val connection = URL(location).openConnection() as HttpURLConnection
       connection.connectTimeout = 500
@@ -170,12 +252,15 @@ class DeviceDiscovery(private val context: Context) {
             parser.setFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
             parser.setInput(bytes.inputStream(), null)
             var label = ""
+            var described: String? = null
             while (parser.next() != XmlPullParser.END_DOCUMENT) {
-              if (parser.eventType == XmlPullParser.START_TAG && parser.name == "friendlyName") {
-                label = parser.nextText()
-                break
-              }
+              if (parser.eventType != XmlPullParser.START_TAG) continue
+              if (parser.name == "friendlyName" && label.isEmpty()) label = parser.nextText()
+              else if (parser.name == "UDN" && described == null) described = parser.nextText().trim()
+              if (label.isNotEmpty() && (udn == null || described != null)) break
             }
+            // A reused address must not stand in for the saved renderer.
+            if (udn != null && !udn.equals(described, ignoreCase = true)) return null
             label.ifBlank { URI(location).host }
           }
         } finally {
@@ -303,6 +388,20 @@ class DeviceDiscovery(private val context: Context) {
         address.scheme != "http" || address.userInfo != null || address.rawQuery != null ||
           address.fragment != null || address.path !in listOf("", "/") || address.port !in 1..65535
       ) return null
+      // A reused IP or friendly name is not evidence of the saved receiver's identity.
+      val found = chromecastAt(host, address.port, client)?.takeIf { it.id == expected } ?: return null
+      return remembered.toBuilder()
+        .setId(rawId)
+        .setName(found.name.ifBlank { remembered.name })
+        .build()
+    }
+
+    // The Chromecast at host as its setup API names it, once its Cast port answers; blank name if unnamed.
+    internal suspend fun chromecastAt(
+      host: String,
+      port: Int = 8009,
+      client: OkHttpClient = knownClient,
+    ): Device? {
       val call = runCatching {
         val endpoint = URI("http", null, host, 8008, "/setup/eureka_info", null, null).toASCIIString()
         client.newCall(Request.Builder().url(endpoint).header("Accept", "application/json").build())
@@ -320,12 +419,13 @@ class DeviceDiscovery(private val context: Context) {
                 if (!it.isSuccessful) return@use null
                 val bytes = io.github.stupside.castor.data.Rpc.readLimited(it.body.byteStream(), 65_536)
                 val info = JSONObject(bytes.toString(Charsets.UTF_8))
-                // A reused IP or friendly name is not evidence of the saved receiver's identity.
-                if (castIdentity(info.optString("ssdp_udn")) != expected) return@use null
-                Socket().use { socket -> socket.connect(InetSocketAddress(host, address.port), 500) }
-                remembered.toBuilder()
-                  .setId(rawId)
-                  .setName(info.optString("name").ifBlank { remembered.name })
+                val id = castIdentity(info.optString("ssdp_udn")) ?: return@use null
+                Socket().use { socket -> socket.connect(InetSocketAddress(host, port), 500) }
+                Device.newBuilder()
+                  .setId(id)
+                  .setName(info.optString("name"))
+                  .setType(DeviceType.DEVICE_TYPE_CHROMECAST)
+                  .setAddress(URI("http", null, host, port, null, null, null).rawAuthority)
                   .build()
               }
             } catch (_: java.io.IOException) {

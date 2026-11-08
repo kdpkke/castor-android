@@ -380,8 +380,12 @@ class MainScreenViewModel : ViewModel() {
       )
   }
 
-  fun discover() {
-    if (discovery?.isActive == true) return
+  // restart begins again a search already running, so it also covers an address just typed.
+  fun discover(restart: Boolean = false) {
+    if (discovery?.isActive == true) {
+      if (!restart) return
+      discovery?.cancel()
+    }
     discovery = viewModelScope.launch {
       val data = repository ?: return@launch
       uiState.value =
@@ -398,7 +402,9 @@ class MainScreenViewModel : ViewModel() {
         if (error !is CancellationException)
           uiState.value = uiState.value.copy(discoveryError = error.message ?: "Search failed")
       } finally {
-        uiState.value = uiState.value.copy(discovering = false, discoveryComplete = true)
+        // A search replaced by a restart must not end the one now running.
+        if (discovery === coroutineContext[Job])
+          uiState.value = uiState.value.copy(discovering = false, discoveryComplete = true)
       }
     }
   }

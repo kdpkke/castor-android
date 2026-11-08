@@ -16,6 +16,13 @@ internal fun receiverHost(address: String): String? = runCatching {
 }
   .getOrNull()
 
+// A typed IPv4 address alone, which Castor can ask on every protocol's own port.
+internal fun bareHost(input: String): String? =
+  input.trim().takeIf { value ->
+    val parts = value.split('.')
+    parts.size == 4 && parts.all { it.length in 1..3 && it.all(Char::isDigit) && it.toInt() <= 255 }
+  }
+
 internal fun receiverEndpoint(tv: SavedTv): String = runCatching {
   val uri = URI(if ("://" in tv.address) tv.address else "http://${tv.address}")
   val host = receiverHost(tv.address) ?: return@runCatching tv.address

@@ -23,6 +23,39 @@ class TvProtocolPickerTest {
 
   @Test fun italianTVListOpensProtocolsAndBackPreservesTheList() = exercise(Locale.ITALIAN)
 
+  @Test
+  fun aTypedAddressIsAskedOnEveryProtocolAndOpensWhatAnswers() {
+    val context = compose.activity
+    val state = androidx.compose.runtime.mutableStateOf(MainScreenUiState(ready = true, discoveryComplete = true))
+    val searched = mutableListOf<String?>()
+    compose.setContent { CastorTheme { TvPicker(state.value, null, {}, { searched += it }, {}, {}) } }
+    compose.onNodeWithText(context.getString(R.string.add_manually)).performScrollTo().performClick()
+    val find = compose.onNodeWithText(context.getString(R.string.find_address))
+    compose.onNode(hasSetTextAction()).performTextInput("192.0.2.21:7000")
+    find.assertIsNotEnabled()
+    compose.onNode(hasSetTextAction()).performTextClearance()
+    compose.onNode(hasSetTextAction()).performTextInput("192.0.2.21")
+    find.assertIsEnabled().performClick()
+    assertEquals(listOf<String?>("192.0.2.21"), searched)
+    fun device(id: String, address: String, type: DeviceType) =
+      Device.newBuilder().setId(id).setName("Living room").setAddress(address).setType(type).build()
+    compose.runOnIdle {
+      state.value =
+        state.value.copy(
+          devices =
+            listOf(
+              device("AA:BB:CC:DD:EE:01", "192.0.2.21:7000", DeviceType.DEVICE_TYPE_AIRPLAY),
+              device("a1b2c3d400004000800000000000c0de", "192.0.2.21:8009", DeviceType.DEVICE_TYPE_CHROMECAST),
+            )
+        )
+    }
+    // The answering TV opens with its protocols, as if chosen from the list.
+    compose.onNodeWithTag("receiver-protocol-${DeviceType.DEVICE_TYPE_AIRPLAY_VALUE}").assertExists()
+    compose.onNodeWithTag("receiver-protocol-${DeviceType.DEVICE_TYPE_CHROMECAST_VALUE}").assertExists()
+    compose.runOnIdle { state.value = state.value.copy(devices = emptyList()) }
+    compose.onNodeWithText(context.getString(R.string.address_not_found, "192.0.2.21")).assertExists()
+  }
+
   private fun exercise(locale: Locale) {
     fun device(id: String, name: String, address: String, type: DeviceType) =
       Device.newBuilder().setId(id).setName(name).setAddress(address).setType(type).build()

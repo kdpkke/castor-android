@@ -146,6 +146,13 @@ class CastOptions(private val context: Context) {
       .apply()
   }
 
+  // An address the user asked Castor to search directly, beside the saved TV's own.
+  fun searchedHost(): String? = preferences.getString("searched-host", "").orEmpty().ifBlank { null }
+
+  fun searchedHost(host: String) {
+    preferences.edit().putString("searched-host", host).apply()
+  }
+
   // Existing numeric ceilings belong to Optimized; Native now forbids any re-encoding.
   fun height(): String = playbackQuality(preferences.getString("height", NATIVE_QUALITY).orEmpty())
 

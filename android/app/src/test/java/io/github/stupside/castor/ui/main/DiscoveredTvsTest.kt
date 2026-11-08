@@ -92,4 +92,12 @@ class DiscoveredTvsTest {
     assertNull(recommendedProtocol(tied, verdicts))
     assertNull(recommendedProtocol(rankedProtocols(listOf(cast, dlna), emptyMap()), emptyMap()))
   }
+
+  @Test
+  fun onlyATypedIpv4AddressIsSearchedOnEveryProtocol() {
+    assertEquals("192.0.2.21", bareHost(" 192.0.2.21 "))
+    for (typed in listOf("192.0.2.21:7000", "http://192.0.2.21/", "192.168.1", "192.168.1.256", "tv.local", "", "1.2.3.4.5")) {
+      assertNull(typed, bareHost(typed))
+    }
+  }
 }

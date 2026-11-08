@@ -36,6 +36,8 @@
     <string name="manual_title">Connect by address</string>
     <string name="tv_address">TV IP or description URL</string>
     <string name="address_help">For DLNA, use the full description URL if the IP does not work.</string>
+    <string name="find_address">Find this TV’s protocols</string>
+    <string name="address_not_found">No TV answered at %1$s. Check the address, or enter it with a connection type.</string>
     <string name="device_protocol">Connection type</string>
     <string name="use_tv">Use this TV</string>
     <string name="back">Back</string>

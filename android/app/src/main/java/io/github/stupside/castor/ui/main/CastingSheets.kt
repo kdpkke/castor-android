@@ -155,12 +155,14 @@ internal fun TvPicker(
   state: MainScreenUiState,
   saved: SavedTv?,
   dismiss: () -> Unit,
-  refresh: () -> Unit,
+  // Searches again; a host is also asked directly on every protocol.
+  refresh: (String?) -> Unit,
   describe: (List<SavedTv>) -> Unit,
   select: (SavedTv) -> Unit,
 ) {
   var manual by rememberSaveable { mutableStateOf(false) }
   var selectedHost by rememberSaveable { mutableStateOf<String?>(null) }
+  var searchedFor by rememberSaveable { mutableStateOf<String?>(null) }
   var address by rememberSaveable { mutableStateOf("") }
   var type by rememberSaveable { mutableStateOf(DeviceType.DEVICE_TYPE_DLNA) }
   val televisions =
@@ -205,6 +207,23 @@ internal fun TvPicker(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             singleLine = true,
           )
+          val host = bareHost(address)
+          GlassButton(
+            onClick = {
+              host?.let {
+                searchedFor = it
+                selectedHost = it
+                manual = false
+                refresh(it)
+              }
+            },
+            enabled = host != null && state.ready,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+          ) {
+            CastIcon(R.drawable.ic_refresh)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.find_address))
+          }
           Text(
             stringResource(R.string.device_protocol),
             style = MaterialTheme.typography.titleMedium,
@@ -290,6 +309,15 @@ internal fun TvPicker(
               color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
           }
+          searchedFor
+            ?.takeIf { host -> state.discoveryComplete && !state.discovering && televisions.none { it.host == host } }
+            ?.let {
+              Text(
+                stringResource(R.string.address_not_found, it),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
           state.discoveryError?.let {
             Text(
               it,
@@ -298,7 +326,7 @@ internal fun TvPicker(
             )
           }
           GlassButton(
-            onClick = refresh,
+            onClick = { refresh(null) },
             enabled = state.ready && !state.discovering,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
           ) {

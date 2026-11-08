@@ -92,10 +92,11 @@ class CastorService : Service() {
       BrowserServer(
         browser,
         {
-          val remembered = options.television()?.takeIf { !it.manual }?.let {
+          // A TV entered by hand has no identity to confirm, but its host is asked directly too.
+          val remembered = options.television()?.let {
             Device.newBuilder().setId(it.id).setName(it.name).setAddress(it.address).setType(it.type).build()
           }
-          discovery.find(remembered)
+          discovery.find(remembered, options.searchedHost())
         },
         scrapingToken,
         contentResolver,
