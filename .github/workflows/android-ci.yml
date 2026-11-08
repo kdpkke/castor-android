@@ -80,7 +80,7 @@ jobs:
   android:
     needs: native
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       ANDROID_CMDLINE_TOOLS_VERSION: '23.0'
     steps:

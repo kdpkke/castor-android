@@ -25,6 +25,18 @@ class DeviceResultsTest(unittest.TestCase):
         self.assertIn("SettingsTest#savesLanguage", result.stdout + result.stderr)
         self.assertIn("Expected saved subtitle language IT", result.stdout + result.stderr)
 
+    def test_every_failing_suite_is_named(self):
+        result = self.check('''<testsuites>
+          <testsuite tests="2" failures="1" errors="0" skipped="0">
+            <testcase classname="BrowserTest" name="resolves"><failure>timed out</failure></testcase>
+          </testsuite>
+          <testsuite tests="3" failures="1" errors="0" skipped="0">
+            <testcase classname="RuntimeTest" name="completes"><failure>never ended</failure></testcase>
+          </testsuite></testsuites>''')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("BrowserTest#resolves", result.stdout + result.stderr)
+        self.assertIn("RuntimeTest#completes: never ended", result.stdout + result.stderr)
+
     def test_complete_success_reports_the_actual_count(self):
         result = self.check('<testsuite tests="46" failures="0" errors="0" skipped="0"/>')
         self.assertEqual(result.returncode, 0)
