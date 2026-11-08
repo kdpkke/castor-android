@@ -56,7 +56,7 @@ class ReceiverRecoveryTest {
           discoveryComplete = true,
         )
     }
-    compose.onNodeWithText("192.0.2.10:1938").assertExists()
+    compose.onNodeWithText("192.0.2.10 · DLNA").assertExists()
     compose.onAllNodesWithText(device.name).assertCountEquals(1)
     compose.onNodeWithText("DLNA").assertDoesNotExist()
     compose.onNodeWithText("Bedroom").assertExists()

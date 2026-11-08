@@ -55,7 +55,8 @@ class BrowserAdBlockIntegrationTest {
         val browser = withContext(Dispatchers.Main) { BrowserResolver(context) }
         try {
           val result =
-            withTimeout(15_000) {
+            // Beyond the resolver's own 5 s + 30 s budget: a slow emulator fails on its error.
+            withTimeout(45_000) {
               browser.resolve(
                 ResolveRequest.newBuilder().addUrls(origin.url("/page").toString()).build()
               )
