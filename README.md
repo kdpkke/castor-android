@@ -53,7 +53,7 @@ Android 9+; arm64-v8a phones and x86_64 emulators. Previous casting builds were 
   - Tested on an LG C2 in Chromecast mode.
 - **AirPlay**: Apple TV, and TVs with AirPlay built in such as LG webOS models.
   - The first cast asks for the PIN the TV shows; the pairing is kept on the phone.
-  - The TV gets HLS, or the original MP4 file: a Dolby Vision MP4 keeps Dolby Vision in Native.
+  - The TV gets HLS, or the original MP4 file. In Native, Dolby Vision is kept both for MP4 files and for MKV files Castor converts to HLS.
   - Tested on an LG C2. Apple TVs are supported but not yet tested on hardware; old Apple TVs that need the legacy PIN pairing are not supported.
 - **FCast**: the FUTO receiver app and desktop receiver.
   - HLS or MP4 with H.264 video and AAC or MP3 audio; subtitles are burnt into the picture.

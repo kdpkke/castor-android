@@ -17,6 +17,7 @@ English one.
 - Cast to FCast receivers, found on the network or added by address.
 - The protocol list of a TV says what a Native cast keeps on each one (the original file, its tracks, or a conversion) and recommends the one keeping the most.
 - In Native, HDR and Dolby Vision files a Chromecast or AirPlay TV can fetch itself are handed to it unchanged: AirPlay TVs such as LG now show Dolby Vision. A TV that refuses the file gets Castor's stream instead.
+- AirPlay TVs such as LG also keep Dolby Vision from MKV files, which Castor converts to HLS for them.
 
 - Reopening the same webpage for another cast loads it again after the previous player closed, instead of leaving a blank browser with an endless loading message. Retrying a page that is still open preserves the player's state.
 - A saved Chromecast remains discoverable when multicast announcements disappear: Castor verifies its receiver UUID and open Cast port at the saved address. Offline receivers and reused addresses stay hidden.
@@ -55,6 +56,7 @@ English one.
 - Trasmetti ai ricevitori FCast, trovati in rete o aggiunti per indirizzo.
 - L'elenco dei protocolli di una TV indica cosa mantiene una trasmissione Nativa su ciascuno (il file originale, le sue tracce o una conversione) e consiglia quello che mantiene di più.
 - In Nativa i file HDR e Dolby Vision che una TV Chromecast o AirPlay può scaricare da sé le arrivano senza modifiche: le TV AirPlay come le LG ora mostrano il Dolby Vision. Se la TV rifiuta il file, riceve il flusso di Castor.
+- Le TV AirPlay come le LG mantengono il Dolby Vision anche dai file MKV, che Castor converte in HLS per loro.
 
 - Riaprire la stessa pagina per un altro cast la carica nuovamente dopo la chiusura del player precedente, evitando il browser nero con caricamento infinito. Riprovare una pagina ancora aperta mantiene lo stato del player.
 - L’ultima Chromecast salvata resta rilevabile quando spariscono gli annunci multicast: Castor verifica UUID del ricevitore e porta Cast aperta all’indirizzo salvato. TV offline e indirizzi riutilizzati restano nascosti.
