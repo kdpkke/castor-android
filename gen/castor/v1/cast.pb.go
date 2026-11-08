@@ -34,6 +34,9 @@ const (
 	FailureCode_FAILURE_CODE_SERVER_SHUTDOWN     FailureCode = 4
 	FailureCode_FAILURE_CODE_INTERNAL            FailureCode = 5
 	FailureCode_FAILURE_CODE_NATIVE_INCOMPATIBLE FailureCode = 1000
+	// FAILURE_CODE_PAIRING_REQUIRED is a device that plays only for a client it paired with: StartPairing pairs castor with it.
+	// Upstream proposal: stupside/castor#86.
+	FailureCode_FAILURE_CODE_PAIRING_REQUIRED FailureCode = 1001
 )
 
 // Enum value maps for FailureCode.
@@ -46,6 +49,7 @@ var (
 		4:    "FAILURE_CODE_SERVER_SHUTDOWN",
 		5:    "FAILURE_CODE_INTERNAL",
 		1000: "FAILURE_CODE_NATIVE_INCOMPATIBLE",
+		1001: "FAILURE_CODE_PAIRING_REQUIRED",
 	}
 	FailureCode_value = map[string]int32{
 		"FAILURE_CODE_UNSPECIFIED":         0,
@@ -55,6 +59,7 @@ var (
 		"FAILURE_CODE_SERVER_SHUTDOWN":     4,
 		"FAILURE_CODE_INTERNAL":            5,
 		"FAILURE_CODE_NATIVE_INCOMPATIBLE": 1000,
+		"FAILURE_CODE_PAIRING_REQUIRED":    1001,
 	}
 )
 
@@ -2244,7 +2249,7 @@ const file_castor_v1_cast_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12)\n" +
 	"\x06device\x18\x02 \x01(\v2\x11.castor.v1.DeviceR\x06device\x12)\n" +
 	"\x06source\x18\x03 \x01(\v2\x11.castor.v1.SourceR\x06source\x12-\n" +
-	"\x06status\x18\x04 \x01(\v2\x15.castor.v1.CastStatusR\x06status*\xfa\x01\n" +
+	"\x06status\x18\x04 \x01(\v2\x15.castor.v1.CastStatusR\x06status*\x9e\x02\n" +
 	"\vFailureCode\x12\x1c\n" +
 	"\x18FAILURE_CODE_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cFAILURE_CODE_PLAYBACK_FAILED\x10\x01\x12#\n" +
@@ -2252,7 +2257,8 @@ const file_castor_v1_cast_proto_rawDesc = "" +
 	"\x1eFAILURE_CODE_EXTRACTION_FAILED\x10\x03\x12 \n" +
 	"\x1cFAILURE_CODE_SERVER_SHUTDOWN\x10\x04\x12\x19\n" +
 	"\x15FAILURE_CODE_INTERNAL\x10\x05\x12%\n" +
-	" FAILURE_CODE_NATIVE_INCOMPATIBLE\x10\xe8\a2\x90\x04\n" +
+	" FAILURE_CODE_NATIVE_INCOMPATIBLE\x10\xe8\a\x12\"\n" +
+	"\x1dFAILURE_CODE_PAIRING_REQUIRED\x10\xe9\a2\x90\x04\n" +
 	"\vCastService\x127\n" +
 	"\x04Cast\x12\x16.castor.v1.CastRequest\x1a\x17.castor.v1.CastResponse\x12@\n" +
 	"\aResolve\x12\x19.castor.v1.ResolveRequest\x1a\x1a.castor.v1.ResolveResponse\x12<\n" +

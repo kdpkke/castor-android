@@ -217,6 +217,9 @@ enum FailureCode {
   FAILURE_CODE_SERVER_SHUTDOWN = 4;
   FAILURE_CODE_INTERNAL = 5;
   FAILURE_CODE_NATIVE_INCOMPATIBLE = 1000;
+  // FAILURE_CODE_PAIRING_REQUIRED is a device that plays only for a client it paired with: StartPairing pairs castor with it.
+  // Upstream proposal: stupside/castor#86.
+  FAILURE_CODE_PAIRING_REQUIRED = 1001;
 }
 
 message StopRequest {
