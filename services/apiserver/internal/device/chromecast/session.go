@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -61,6 +62,9 @@ func (s *session) play(ctx context.Context, playback device.Playback) error {
 		Type: msgLoad, Autoplay: true,
 		Media: mediaItem{MediaItem: castmedia.MediaItem{ContentId: stream, ContentType: device.MIME(playback.Container()), StreamType: "BUFFERED", Duration: float32(playback.Duration().Seconds())}},
 	}
+	if playback.Play.GetLive() {
+		load.Media.StreamType = "LIVE"
+	}
 	if playback.Play.GetPlaylist() != nil {
 		load.Media.HLSSegmentFormat = "fmp4"
 		load.Media.HLSVideoSegmentFormat = "fmp4"
@@ -81,6 +85,8 @@ func (s *session) play(ctx context.Context, playback device.Playback) error {
 		s.watchMu.Lock()
 		// A Play begun since owns the watch now; this one's failure is not its to clear.
 		if s.ending == mine {
+			// The receiver's code belongs to this Play only while it still owns the watch.
+			err = s.watch.named(err)
 			s.watch.disarm()
 		}
 		s.watchMu.Unlock()
@@ -148,9 +154,12 @@ func (s *session) Position(ctx context.Context) (device.Playhead, error) {
 		return device.Playhead{}, device.ErrNoPosition
 	}
 	if err != nil {
+		slog.DebugContext(ctx, "chromecast position unavailable", "error", err)
 		return device.Playhead{}, fmt.Errorf("reading the playback position: %w", err)
 	}
-	return playhead(reply, mediaSession)
+	head, err := playhead(reply, mediaSession)
+	slog.DebugContext(ctx, "chromecast reported playhead", "at", head.At, "paused", head.Paused, "error", err)
+	return head, err
 }
 
 type receiverPosition struct {

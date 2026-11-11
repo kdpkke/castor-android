@@ -138,6 +138,31 @@ func TestChromecastPositionIsTheCurrentTimeOfTheMediaItLoaded(t *testing.T) {
 	}
 }
 
+func TestChromecastLoadDescribesLiveAndFiniteMedia(t *testing.T) {
+	for _, live := range []bool{false, true} {
+		t.Run(fmt.Sprint(live), func(t *testing.T) {
+			loaded := make(chan string, 1)
+			dev := receiverAnswering(t, func(id int, load castmedia.MediaItem) []any {
+				loaded <- load.StreamType
+				return []any{mediaStatus(id, load.ContentId, "BUFFERING", "")}
+			})
+			play := devicetest.Source(mediav1.Container_CONTAINER_MP4)
+			play.Live = live
+			stream := &url.URL{Scheme: "http", Host: "media.test", Path: "/stream.mp4"}
+			if err := dev.Play(t.Context(), device.Playback{URL: stream, Play: play}); err != nil {
+				t.Fatal(err)
+			}
+			want := "BUFFERED"
+			if live {
+				want = "LIVE"
+			}
+			if got := <-loaded; got != want {
+				t.Errorf("stream type = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
 func TestChromecastLoadIncludesSelectedMovieDetails(t *testing.T) {
 	info := &castorv1.MediaInfo{Title: "The Matrix", Synopsis: "A hacker learns the truth.", ImageUrl: "https://image.tmdb.org/t/p/w500/matrix.jpg", ReleaseDate: "1999-03-31"}
 	loaded := make(chan castmedia.MediaMetadata, 1)
