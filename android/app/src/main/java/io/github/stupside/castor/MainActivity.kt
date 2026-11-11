@@ -1,14 +1,11 @@
 package io.github.stupside.castor
 
 import android.Manifest
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.IBinder
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -33,10 +30,9 @@ class MainActivity : ComponentActivity() {
     super.attachBaseContext(CastOptions(newBase).localizedContext())
   }
 
-  private var service by mutableStateOf<CastorService?>(null)
   private var permissionDenied by mutableStateOf(false)
-  private var bound = false
   private lateinit var model: MainScreenViewModel
+  private lateinit var browser: BrowserResolver
   private var sharedUrl by mutableStateOf("")
   private val videoPicker =
     registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -49,35 +45,37 @@ class MainActivity : ComponentActivity() {
           granted["android.permission.ACCESS_LOCAL_NETWORK"] != true &&
           checkSelfPermission("android.permission.ACCESS_LOCAL_NETWORK") !=
             PackageManager.PERMISSION_GRANTED
-      if (!permissionDenied) startEngine()
-    }
-  private val connection =
-    object : ServiceConnection {
-      override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-        service = (binder as CastorService.LocalBinder).service
-      }
-
-      override fun onServiceDisconnected(name: ComponentName) {
-        service = null
-        model.connect(null)
-      }
     }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     model = ViewModelProvider(this)[MainScreenViewModel::class.java]
+    EngineHost.attach(applicationContext)
+    model.demand(EngineHost)
+    // The share of the browser belongs to the view model: a recreated screen keeps it,
+    // and each screen open at once has its own.
+    browser = BrowserHost.acquire(model, this)
     sharedUrl = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
     if (savedInstanceState == null) receiveVideo(intent)
     enableEdgeToEdge()
     setContent {
       val options = remember { CastOptions(this) }
       var theme by remember { mutableStateOf(options.theme()) }
-      LaunchedEffect(service) { service?.endpoint?.collect { model.connect(it, service?.videos) } }
-      LaunchedEffect(service) {
-        if (service == null) return@LaunchedEffect
+      val engine by EngineHost.endpoint.collectAsState()
+      LaunchedEffect(Unit) { EngineHost.endpoint.collect { model.connect(it, EngineHost.videos) } }
+      LaunchedEffect(Unit) {
+        EngineHost.failure.collect { message ->
+          message?.let { model.fail(IllegalStateException(it)) }
+        }
+      }
+      LaunchedEffect(engine) {
+        if (engine == null) return@LaunchedEffect
         model.selectedVideo.collect { video ->
+          // Only a running engine's service gets the grant, so this never starts one nobody asked for.
           if (
-            video != null && contentResolver.persistedUriPermissions.none { it.uri == video.uri }
+            EngineHost.endpoint.value != null &&
+              video != null &&
+              contentResolver.persistedUriPermissions.none { it.uri == video.uri }
           ) {
             try {
               // Non-persistable shares keep their temporary grant through background playback.
@@ -89,33 +87,12 @@ class MainActivity : ComponentActivity() {
           }
         }
       }
-      LaunchedEffect(service) {
-        service?.failure?.collect { message ->
-          message?.let { model.fail(IllegalStateException(it)) }
-        }
-      }
       CastorTheme(theme) {
         val dark = MaterialTheme.colorScheme.background.luminance() < .2f
         SideEffect {
           WindowCompat.getInsetsController(window, window.decorView).apply {
             isAppearanceLightStatusBars = !dark
             isAppearanceLightNavigationBars = !dark
-          }
-        }
-        LaunchedEffect(service) {
-          val current = service ?: return@LaunchedEffect
-          current.stopped.collect { stopped ->
-            if (stopped) {
-              if (bound) {
-                unbindService(connection)
-                bound = false
-              }
-              service = null
-              model.connect(null)
-              model.fail(
-                IllegalStateException(current.failure.value ?: "The casting engine stopped.")
-              )
-            }
           }
         }
         Surface(Modifier.fillMaxSize(), color = Color.Transparent) {
@@ -152,11 +129,11 @@ class MainActivity : ComponentActivity() {
           if (!permissionDenied)
             MainScreen(
               model,
-              service?.browser,
+              browser,
               sharedUrl,
-              restart = { restartEngine() },
+              restart = { model.dismissError() },
               close = {
-                stopService(Intent(this, CastorService::class.java))
+                EngineHost.stopNow()
                 model.connect(null)
                 finish()
               },
@@ -223,26 +200,7 @@ class MainActivity : ComponentActivity() {
     }
     if (needed.isEmpty()) {
       permissionDenied = false
-      startEngine()
     } else permissions.launch(needed.toTypedArray())
-  }
-
-  // A stopped engine leaves its service bound to this activity; binding again alone does nothing.
-  // Unbind first so a stopped service is destroyed and a running one is reconnected and recovered.
-  private fun restartEngine() {
-    if (bound) {
-      unbindService(connection)
-      bound = false
-      service = null
-      model.connect(null)
-    }
-    startEngine()
-  }
-
-  private fun startEngine() {
-    if (bound) return
-    startForegroundService(Intent(this, CastorService::class.java))
-    bound = bindService(Intent(this, CastorService::class.java), connection, BIND_AUTO_CREATE)
   }
 
   override fun onResume() {
@@ -254,12 +212,12 @@ class MainActivity : ComponentActivity() {
           PackageManager.PERMISSION_GRANTED
     ) {
       permissionDenied = false
-      startEngine()
     }
   }
 
   override fun onDestroy() {
-    if (bound) unbindService(connection)
+    // A recreated screen keeps its browser; a screen that is gone gives its share back.
+    if (!isChangingConfigurations) BrowserHost.release(model)
     super.onDestroy()
   }
 }

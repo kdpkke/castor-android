@@ -9,6 +9,7 @@ import castor.v1.StreamOuterClass.Stream
 import com.connectrpc.Code
 import com.connectrpc.ConnectException
 import io.github.stupside.castor.BrowserResolver
+import io.github.stupside.castor.EngineDemand
 import io.github.stupside.castor.LocalVideo
 import io.github.stupside.castor.LocalVideos
 import io.github.stupside.castor.VideoSources
@@ -21,7 +22,13 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class CastPhase {
   Preparing,
@@ -140,13 +147,24 @@ class MainScreenViewModel : ViewModel() {
   private var selectionGeneration = 0
   private var videos: LocalVideos? = null
   private var repository: DataRepository? = null
+  // The same repository, for work that waits until the engine answers.
+  private val engines = MutableStateFlow<DataRepository?>(null)
   private var endpoint: Rpc? = null
+  // How the screen asks for the engine. Absent where a test hands the model an endpoint itself: then nothing is asked.
+  private var engine: EngineDemand? = null
+  // The engine hold of the pairing on screen, with the TV it is for: the engine remembers a pairing only while it
+  // runs. Each pairing has its own, so the late end of one never lets go of the engine the next one needs.
+  private class PairingHold(val target: Target, val hold: AutoCloseable?)
+
+  private var pairingHold: PairingHold? = null
   private var discovery: Job? = null
   private var submission: Job? = null
   // The last cast asked for, cast again once the TV it was refused by is paired.
   private var lastCast: (() -> Unit)? = null
   private var recovery: Job? = null
   private var composing = false
+  // The work that is using the running engine, as opposed to work still waiting for one.
+  private val using = mutableSetOf<Job>()
 
   // Every cast has independent observation and control work. Selecting another TV changes only
   // presentation; it cannot cancel that TV's in-flight seek or another cast's watcher.
@@ -175,22 +193,114 @@ class MainScreenViewModel : ViewModel() {
       )
   }
 
+  // With an engine that starts when asked, the screen is ready before any engine runs.
+  internal fun demand(engine: EngineDemand) {
+    this.engine = engine
+    if (repository == null)
+      uiState.value =
+        uiState.value.copy(
+          ready = true,
+          idlePhase = CastPhase.Ready,
+          idleStatus = "Ready to cast",
+        )
+  }
+
+  // Runs work that needs the engine: asks for it, waits until it answers, and lets it go afterwards.
+  private suspend fun <T> engaged(work: suspend (DataRepository) -> T): T {
+    val demand = engine ?: return work(checkNotNull(repository) { "The casting engine is not running." })
+    val hold = demand.hold()
+    try {
+      val data =
+        withTimeoutOrNull(20_000) {
+          merge(
+              // Only the engine that answers now is used: not one that is being stopped.
+              combine(engines, demand.endpoint) { data, api ->
+                  data.takeIf { api != null && api === endpoint }
+                }
+                .filterNotNull(),
+              // An engine that failed to start ends the wait with its reason.
+              demand.failure.filterNotNull().map<String, DataRepository> {
+                throw IllegalStateException(it)
+              },
+            )
+            .first()
+        } ?: error("The casting engine did not start.")
+      val job = currentCoroutineContext()[Job]
+      job?.let(using::add)
+      try {
+        return work(data)
+      } finally {
+        job?.let(using::remove)
+      }
+    } finally {
+      hold.close()
+    }
+  }
+
+  // The one place the repository changes, so work waiting for the engine sees the same change.
+  private fun useRepository(data: DataRepository?) {
+    repository = data
+    engines.value = data
+  }
+
+  // Ends the hold of the pairing on record, if any: the engine no longer needs to stay for its PIN.
+  private fun pairingOver() {
+    pairingHold?.hold?.close()
+    pairingHold = null
+  }
+
+  override fun onCleared() {
+    pairingOver()
+    super.onCleared()
+  }
+
   fun connect(api: Rpc?, files: LocalVideos? = null) {
     videos = files
-    if (api != null && api === endpoint) return
+    // Nothing changed: a screen that is recreated hears the same engine, or the same absence, again.
+    if (api === endpoint && (api != null || engine != null)) return
+    // The engine the screen asked for has come up: what the screen is doing goes on, with it.
+    val arrived = api != null && endpoint == null && engine != null
     endpoint = api
-    jobs.keys.toList().forEach(::cancelSession)
-    discovery?.cancel()
-    submission?.cancel()
-    recovery?.cancel()
-    repository = api?.let(::DataRepository)
+    if (!arrived) {
+      pairingOver()
+      jobs.keys.toList().forEach(::cancelSession)
+      recovery?.cancel()
+      if (api == null && engine != null) {
+        // The engine stopped: what was using it ends with it; what still waits for one goes on with the next.
+        using.toList().forEach { it.cancel() }
+      } else {
+        discovery?.cancel()
+        submission?.cancel()
+      }
+    }
+    useRepository(api?.let(::DataRepository))
     uiState.value =
-      if (api != null) MainScreenUiState()
-      else
-        MainScreenUiState(
-          idleStatus = "Casting engine unavailable",
-          idlePhase = CastPhase.Unavailable,
-        )
+      when {
+        arrived -> uiState.value
+        api != null -> MainScreenUiState()
+        // The engine stopped: the screen keeps what it found.
+        engine != null ->
+          uiState.value.copy(
+            sessions = emptyList(),
+            selectedCastId = null,
+            pendingCast = null,
+            submitting = false,
+            recovering = false,
+            // A search still waiting for the next engine is still a search.
+            discovering = discovery?.isActive == true,
+            ready = true,
+            idlePhase =
+              if (uiState.value.failure == null) CastPhase.Ready else uiState.value.idlePhase,
+            idleStatus = "Ready to cast",
+            // A pairing begun in that engine is gone with it.
+            pairing = null,
+          )
+        else ->
+          MainScreenUiState(
+            idleStatus = "Casting engine unavailable",
+            idlePhase = CastPhase.Unavailable,
+          )
+      }
     repository?.let(::recover)
   }
 
@@ -294,14 +404,14 @@ class MainScreenViewModel : ViewModel() {
 
   // Asks each protocol of a TV what a Native cast keeps there, once per protocol.
   fun describe(tvs: List<SavedTv>) {
-    val data = repository ?: return
+    if (engine == null && repository == null) return
     for (tv in tvs) {
       val key = verdictKey(tv)
       if (key in uiState.value.verdicts) continue
       viewModelScope.launch {
         val fidelity =
           try {
-            data.describe(tv.target())
+            engaged { data -> data.describe(tv.target()) }
           } catch (error: Exception) {
             if (error is CancellationException) throw error
             return@launch
@@ -314,12 +424,20 @@ class MainScreenViewModel : ViewModel() {
   // Asks the TV to show a PIN.
   fun startPairing() {
     val pairing = uiState.value.pairing ?: return
-    val data = repository ?: return
+    if (engine == null && repository == null) return
+    val held = pairingHold
+    if (held == null || held.target != pairing.target) {
+      // A pairing for another TV takes its own hold before the previous one's is given back, so the engine never
+      // drops between them.
+      pairingHold = PairingHold(pairing.target, engine?.hold())
+      held?.hold?.close()
+    }
     uiState.value = uiState.value.copy(pairing = pairing.copy(pairingId = null, busy = true, error = null))
     viewModelScope.launch {
       val next =
         try {
-          pairing.copy(pairingId = data.startPairing(pairing.target), busy = false, wrongPin = false)
+          val id = engaged { data -> data.startPairing(pairing.target) }
+          pairing.copy(pairingId = id, busy = false, wrongPin = false)
         } catch (error: Exception) {
           if (error is CancellationException) throw error
           pairing.copy(pairingId = null, busy = false, error = error.message ?: "Pairing failed")
@@ -333,26 +451,30 @@ class MainScreenViewModel : ViewModel() {
   fun finishPairing(pin: String) {
     val pairing = uiState.value.pairing ?: return
     val id = pairing.pairingId ?: return
-    val data = repository ?: return
+    if (engine == null && repository == null) return
     uiState.value = uiState.value.copy(pairing = pairing.copy(busy = true, error = null))
     viewModelScope.launch {
       try {
-        data.finishPairing(id, pin.trim())
-        uiState.value = uiState.value.copy(pairing = null)
+        engaged { data -> data.finishPairing(id, pin.trim()) }
+        // Only this pairing ends here: another TV may have begun its own while the PIN was being proved.
+        if (pairingHold?.target == pairing.target) pairingOver()
+        if (uiState.value.pairing?.target == pairing.target)
+          uiState.value = uiState.value.copy(pairing = null)
         lastCast?.invoke()
       } catch (error: Exception) {
         if (error is CancellationException) throw error
         val wrong = (error.cause as? ConnectException)?.code == Code.INVALID_ARGUMENT
-        uiState.value =
-          uiState.value.copy(
-            pairing =
-              pairing.copy(
-                pairingId = null,
-                busy = false,
-                wrongPin = wrong,
-                error = if (wrong) null else error.message ?: "Pairing failed",
-              )
-          )
+        if (uiState.value.pairing?.target == pairing.target)
+          uiState.value =
+            uiState.value.copy(
+              pairing =
+                pairing.copy(
+                  pairingId = null,
+                  busy = false,
+                  wrongPin = wrong,
+                  error = if (wrong) null else error.message ?: "Pairing failed",
+                )
+            )
       }
     }
   }
@@ -360,15 +482,25 @@ class MainScreenViewModel : ViewModel() {
   fun cancelPairing() {
     val pairing = uiState.value.pairing ?: return
     uiState.value = uiState.value.copy(pairing = null)
-    val id = pairing.pairingId ?: return
-    val data = repository ?: return
-    viewModelScope.launch {
-      try {
-        data.cancelPairing(id)
-      } catch (error: Exception) {
-        if (error is CancellationException) throw error
-      }
+    // The cancelled pairing's hold leaves the record at once, so a pairing begun before the engine has answered
+    // this cancel takes its own; the answer then gives back only this one.
+    val held = pairingHold?.takeIf { it.target == pairing.target }
+    if (held != null) pairingHold = null
+    val id = pairing.pairingId
+    val data = repository
+    if (id == null || data == null) {
+      held?.hold?.close()
+      return
     }
+    viewModelScope
+      .launch {
+        try {
+          data.cancelPairing(id)
+        } catch (error: Exception) {
+          if (error is CancellationException) throw error
+        }
+      }
+      .invokeOnCompletion { held?.hold?.close() }
   }
 
   fun dismissError() {
@@ -383,12 +515,12 @@ class MainScreenViewModel : ViewModel() {
 
   // restart begins again a search already running, so it also covers an address just typed.
   fun discover(restart: Boolean = false) {
+    if (engine == null && repository == null) return
     if (discovery?.isActive == true) {
       if (!restart) return
       discovery?.cancel()
     }
     discovery = viewModelScope.launch {
-      val data = repository ?: return@launch
       uiState.value =
         uiState.value.copy(
           discovering = true,
@@ -397,7 +529,7 @@ class MainScreenViewModel : ViewModel() {
           discoveryError = null,
         )
       try {
-        val devices = data.devices()
+        val devices = engaged { data -> data.devices() }
         uiState.value = uiState.value.copy(devices = devices)
       } catch (error: Exception) {
         if (error !is CancellationException)
@@ -422,105 +554,108 @@ class MainScreenViewModel : ViewModel() {
     automatic: Boolean = false,
   ) {
     if (!uiState.value.ready || uiState.value.recovering || submission?.isActive == true) return
-    val data = repository ?: return
+    if (engine == null && repository == null) return
     lastCast = {
       cast(url, page, target, maxHeight, subtitles, receiverName, subtitleLanguage, localVideo, automatic)
     }
     submission = viewModelScope.launch {
       try {
-        val videoUrl =
-          localVideo?.let {
-            checkNotNull(videos) { "The casting engine is not ready to read this video." }
-              .register(it)
-          } ?: url
-        var request =
-          request(
-            videoUrl,
-            if (localVideo != null) false else page,
-            target,
-            maxHeight,
-            subtitles,
-            subtitleLanguage,
-          )
-        if (localVideo != null) {
-          request =
-            request
-              .toBuilder()
-              .setSource(
-                VideoSources.direct(
-                  videoUrl,
-                  localVideo.contentType.takeUnless { it == "application/octet-stream" }.orEmpty(),
-                )
-              )
-              .setPreferences(
-                request.preferences
-                  .toBuilder()
-                  .setDelivery(castor.v1.StreamOuterClass.Delivery.DELIVERY_SERVE)
-              )
-              .setMediaInfo(MediaInfo.newBuilder().setTitle(localVideo.name.take(256)))
-              .build()
-        }
-        val device =
-          uiState.value.devices.firstOrNull {
-            if (target.hasDeviceId()) it.id == target.deviceId
-            else it.address == target.pinned.address && it.type == target.pinned.type
-          }
-            ?: Device.newBuilder()
-              .apply {
-                if (target.hasPinned()) {
-                  name = receiverName.ifBlank { target.pinned.address }
-                  address = target.pinned.address
-                  type = target.pinned.type
-                } else {
-                  id = target.deviceId
-                  name = receiverName
-                }
-              }
-              .build()
-        check(
-          uiState.value.sessions.none {
-            val other = it.cast.device
-            (device.id.isNotBlank() && other.id == device.id) ||
-              (device.address.isNotBlank() &&
-                other.type == device.type &&
-                other.address == device.address)
-          }
-        ) {
-          "This TV is already casting. Select its transmission to restart or stop it."
-        }
-        val pending = Cast.newBuilder().setSource(request.source).setDevice(device).build()
-        uiState.value =
-          uiState.value.copy(
-            failure = null,
-            idleNativeIncompatible = false,
-            submitting = true,
-            selectedCastId = null,
-            pendingCast = pending,
-          )
-        if (localVideo == null && automatic && page) {
-          val source = VideoSources.automatic(url)
-          request =
-            request
-              .toBuilder()
-              .setSource(source)
-              .apply {
-                if (source.hasStream())
-                  setPreferences(
-                    request.preferences
-                      .toBuilder()
-                      .setDelivery(castor.v1.StreamOuterClass.Delivery.DELIVERY_SERVE)
+        // The engine stays for the request, and for the cast once it is followed.
+        engaged { data ->
+          val videoUrl =
+            localVideo?.let {
+              checkNotNull(videos) { "The casting engine is not ready to read this video." }
+                .register(it)
+            } ?: url
+          var request =
+            request(
+              videoUrl,
+              if (localVideo != null) false else page,
+              target,
+              maxHeight,
+              subtitles,
+              subtitleLanguage,
+            )
+          if (localVideo != null) {
+            request =
+              request
+                .toBuilder()
+                .setSource(
+                  VideoSources.direct(
+                    videoUrl,
+                    localVideo.contentType.takeUnless { it == "application/octet-stream" }.orEmpty(),
                   )
-              }
-              .build()
+                )
+                .setPreferences(
+                  request.preferences
+                    .toBuilder()
+                    .setDelivery(castor.v1.StreamOuterClass.Delivery.DELIVERY_SERVE)
+                )
+                .setMediaInfo(MediaInfo.newBuilder().setTitle(localVideo.name.take(256)))
+                .build()
+          }
+          val device =
+            uiState.value.devices.firstOrNull {
+              if (target.hasDeviceId()) it.id == target.deviceId
+              else it.address == target.pinned.address && it.type == target.pinned.type
+            }
+              ?: Device.newBuilder()
+                .apply {
+                  if (target.hasPinned()) {
+                    name = receiverName.ifBlank { target.pinned.address }
+                    address = target.pinned.address
+                    type = target.pinned.type
+                  } else {
+                    id = target.deviceId
+                    name = receiverName
+                  }
+                }
+                .build()
+          check(
+            uiState.value.sessions.none {
+              val other = it.cast.device
+              (device.id.isNotBlank() && other.id == device.id) ||
+                (device.address.isNotBlank() &&
+                  other.type == device.type &&
+                  other.address == device.address)
+            }
+          ) {
+            "This TV is already casting. Select its transmission to restart or stop it."
+          }
+          val pending = Cast.newBuilder().setSource(request.source).setDevice(device).build()
+          uiState.value =
+            uiState.value.copy(
+              failure = null,
+              idleNativeIncompatible = false,
+              submitting = true,
+              selectedCastId = null,
+              pendingCast = pending,
+            )
+          if (localVideo == null && automatic && page) {
+            val source = VideoSources.automatic(url)
+            request =
+              request
+                .toBuilder()
+                .setSource(source)
+                .apply {
+                  if (source.hasStream())
+                    setPreferences(
+                      request.preferences
+                        .toBuilder()
+                        .setDelivery(castor.v1.StreamOuterClass.Delivery.DELIVERY_SERVE)
+                    )
+                }
+                .build()
+          }
+          val cast = pending.toBuilder().setSource(request.source).setId(data.cast(request)).build()
+          composing = false
+          follow(cast)
+          uiState.value = uiState.value.copy(selectedCastId = cast.id)
         }
-        val cast = pending.toBuilder().setSource(request.source).setId(data.cast(request)).build()
-        composing = false
-        follow(cast)
-        uiState.value = uiState.value.copy(selectedCastId = cast.id)
       } catch (error: Exception) {
         if (error is CancellationException) throw error
         fail(error)
-        recover(data)
+        repository?.let(::recover)
       } finally {
         uiState.value = uiState.value.copy(submitting = false, pendingCast = null)
       }
@@ -536,7 +671,9 @@ class MainScreenViewModel : ViewModel() {
           sessions = uiState.value.sessions + CastSessionUiState(cast, phase(cast.status))
         )
     val data = repository ?: return
-    work.watch = viewModelScope.launch {
+    // A followed cast keeps the engine until it is no longer watched.
+    val held = engine?.hold()
+    val watch = viewModelScope.launch {
       try {
         data.watch(cast.id) { event ->
           if (repository !== data || session(cast.id) == null) return@watch
@@ -586,6 +723,8 @@ class MainScreenViewModel : ViewModel() {
           }
       }
     }
+    work.watch = watch
+    watch.invokeOnCompletion { held?.close() }
   }
 
   private fun ended(error: Exception) = (error.cause as? ConnectException)?.code == Code.NOT_FOUND

@@ -1,12 +1,9 @@
 package io.github.stupside.castor.ui.main
 
 import android.app.Activity
-import android.content.ComponentName
 import android.content.Intent
-import android.content.ServiceConnection
 import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import androidx.compose.ui.test.*
@@ -18,13 +15,13 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import io.github.stupside.castor.CastorService
+import io.github.stupside.castor.EngineHost
+import io.github.stupside.castor.EngineLifecycle
 import io.github.stupside.castor.MainActivity
 import io.github.stupside.castor.R
 import io.github.stupside.castor.theme.AppTheme
 import java.io.File
 import java.util.Locale
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -210,21 +207,11 @@ class AppLanguageTest {
     compose.waitUntil(20_000) {
       compose.onAllNodesWithText("Ready").fetchSemanticsNodes().isNotEmpty()
     }
-    val connected = CountDownLatch(1)
-    var service: CastorService? = null
-    val connection =
-      object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-          service = (binder as CastorService.LocalBinder).service
-          connected.countDown()
-        }
-
-        override fun onServiceDisconnected(name: ComponentName) {}
-      }
-    assertTrue(context.bindService(Intent(context, CastorService::class.java), connection, 0))
+    // The screen starts no engine on its own, so this test asks for one and keeps it while it runs.
+    val hold = EngineHost.hold()
     try {
-      assertTrue(connected.await(5, TimeUnit.SECONDS))
-      val endpoint = service!!.endpoint.value
+      compose.waitUntil(30_000) { EngineHost.endpoint.value != null }
+      val endpoint = EngineHost.endpoint.value
       assertNotNull(endpoint)
       compose.onNodeWithTag("video-url").performTextInput("https://example.org/shared-video")
       Espresso.closeSoftKeyboard()
@@ -270,9 +257,9 @@ class AppLanguageTest {
       assertSame(
         "Changing language must keep the running engine",
         endpoint,
-        service!!.endpoint.value,
+        EngineHost.endpoint.value,
       )
-      assertFalse(service!!.stopped.value)
+      assertEquals(EngineLifecycle.Phase.Running, EngineHost.phase)
       compose.onNodeWithContentDescription("Close").performClick()
       compose.onNodeWithText("https://example.org/shared-video").assertExists()
       capture("home-en")
@@ -281,7 +268,7 @@ class AppLanguageTest {
       compose.onNodeWithText("Paste link").assertExists()
       compose.onNodeWithText("Native · Subtitles: Off").assertExists()
     } finally {
-      context.unbindService(connection)
+      hold.close()
     }
   }
 

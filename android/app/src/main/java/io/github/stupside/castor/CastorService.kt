@@ -48,11 +48,16 @@ class CastorService : Service() {
   private var bridge: BrowserServer? = null
   private var multicast: WifiManager.MulticastLock? = null
   private var wake: PowerManager.WakeLock? = null
-  private var closed = false
+  var generation = 0
+    private set
+  @Volatile private var closed = false
   private var casting = false
+  // Whether work still held may start another engine once this one is gone: not after a failure or a stop by the user.
+  private var restart = true
 
   override fun onCreate() {
     super.onCreate()
+    generation = EngineHost.created(this)
     val notifications = getSystemService(NotificationManager::class.java)
     notifications.createNotificationChannel(
       NotificationChannel("casting", "Casting", NotificationManager.IMPORTANCE_LOW)
@@ -82,7 +87,7 @@ class CastorService : Service() {
         .addAction(Notification.Action.Builder(null, "Stop Castor", stop).build())
         .build(),
     )
-    browser = BrowserResolver(this)
+    browser = BrowserHost.acquire(this, this)
     val scrapingToken = UUID.randomUUID().toString()
     val apiToken = UUID.randomUUID().toString()
     val mediaToken = UUID.randomUUID().toString()
@@ -169,20 +174,28 @@ class CastorService : Service() {
           val line = output.readLine() ?: error("The native engine exited during startup")
           val url = JSONObject(line).getString("url")
           check(url.startsWith("http://127.0.0.1:")) { "Unexpected native engine endpoint" }
-          endpoint.value = Rpc(url, apiToken)
+          val rpc = Rpc(url, apiToken)
+          endpoint.value = rpc
+          EngineHost.ready(this@CastorService, rpc)
           while (true) {
             val event = output.readLine() ?: break
             val active = JSONObject(event).getBoolean("active")
+            EngineHost.active(this@CastorService, active)
             withContext(Dispatchers.Main) { keepAwake(active) }
           }
         }
         val status = child.waitFor()
-        error("The casting engine stopped (exit $status). Open Castor to restart it.")
+        error("The casting engine stopped (exit $status).")
       } catch (error: Exception) {
+        // An engine that was asked to stop has not failed.
         if (
-          currentCoroutineContext().isActive && error !is kotlinx.coroutines.CancellationException
-        )
+          !closed &&
+            currentCoroutineContext().isActive &&
+            error !is kotlinx.coroutines.CancellationException
+        ) {
           failure.value = error.message ?: "Unable to start Castor"
+          restart = false
+        }
       } finally {
         withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) { shutdown() }
       }
@@ -191,12 +204,15 @@ class CastorService : Service() {
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     when (intent?.action) {
-      "STOP" -> {
-        failure.value = "Castor stopped. Reopen the app to restart the engine."
-        shutdown()
-      }
+      "STOP" -> stopByUser()
     }
     return START_NOT_STICKY
+  }
+
+  // The user asked for the engine to stop: work still held does not start it again by itself.
+  fun stopByUser() {
+    restart = false
+    shutdown()
   }
 
   override fun onBind(intent: Intent): IBinder = LocalBinder()
@@ -208,15 +224,18 @@ class CastorService : Service() {
     if (active) wake?.acquire(10 * 60 * 1000L) else if (wake?.isHeld == true) wake?.release()
   }
 
-  private fun shutdown() {
+  internal fun shutdown() {
     if (closed) return
     closed = true
+    EngineHost.closing(this)
     stopped.value = true
     endpoint.value = null
     bridge?.close()
     process?.destroy()
     scope.cancel()
-    browser.close()
+    // The pages kept for this engine's casts are let go; the browser itself stays while the screen uses it.
+    browser.releasePlayers()
+    BrowserHost.release(this)
     if (multicast?.isHeld == true) multicast?.release()
     if (wake?.isHeld == true) wake?.release()
     stopForeground(STOP_FOREGROUND_REMOVE)
@@ -225,6 +244,7 @@ class CastorService : Service() {
 
   override fun onDestroy() {
     shutdown()
+    EngineHost.stopped(this, failure.value, restart)
     super.onDestroy()
   }
 }
