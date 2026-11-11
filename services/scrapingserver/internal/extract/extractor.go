@@ -7,23 +7,26 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/url"
 	"slices"
 	"sync"
 
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
+	"github.com/stupside/castor/internal/browserstream"
 	"github.com/stupside/castor/internal/telemetry"
 	"google.golang.org/protobuf/proto"
 )
 
 // Extractor opens pages in a browser and captures the streams they fetch.
 type Extractor struct {
-	cfg   Config
-	slots chan struct{}
+	cfg       Config
+	slots     chan struct{}
+	Playlists *browserstream.Playlists
 }
 
 func New(cfg Config) *Extractor {
 	cfg.Capture.MaxConcurrency = max(1, cfg.Capture.MaxConcurrency)
-	return &Extractor{cfg: cfg, slots: make(chan struct{}, cfg.Capture.MaxConcurrency)}
+	return &Extractor{cfg: cfg, slots: make(chan struct{}, cfg.Capture.MaxConcurrency), Playlists: browserstream.New()}
 }
 
 func (e *Extractor) extract(ctx context.Context, targetURL string) ([]*castorv1.StreamCandidate, error) {
@@ -35,18 +38,36 @@ func (e *Extractor) extract(ctx context.Context, targetURL string) ([]*castorv1.
 	}
 	select {
 	case e.slots <- struct{}{}:
-		defer func() { <-e.slots }()
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	defer func() { <-e.slots }()
 	ctx, cancel := context.WithTimeout(ctx, pageBudget)
 	defer cancel()
-
-	session, err := newSession(ctx, e.cfg.Browser, targetURL)
+	lifetime, stopLifetime := context.WithCancel(context.WithoutCancel(ctx))
+	stopRequest := context.AfterFunc(ctx, stopLifetime)
+	retained := false
+	var retainedGroup *browserstream.Group
+	var session *session
+	release := sync.OnceFunc(func() {
+		stopLifetime()
+		if session != nil {
+			session.Close()
+		}
+	})
+	defer func() {
+		stopRequest()
+		if ctx.Err() != nil && retainedGroup != nil {
+			retainedGroup.Close()
+		}
+		if !retained {
+			release()
+		}
+	}()
+	session, err := newSession(lifetime, e.cfg.Browser, targetURL)
 	if err != nil {
 		return nil, fmt.Errorf("creating session for %s: %w", targetURL, err)
 	}
-	defer session.Close()
 
 	session.runActions()
 
@@ -57,7 +78,63 @@ func (e *Extractor) extract(ctx context.Context, targetURL string) ([]*castorv1.
 	for _, stream := range streams {
 		stream.SourcePage = targetURL
 	}
+	if browserstream.Base(ctx) != "" && ctx.Err() == nil {
+		documents := session.playerPlaylists(ctx)
+		bySource := make(map[string]playerPlaylist)
+		ambiguous := make(map[string]bool)
+		for _, document := range documents {
+			if previous, found := bySource[document.Source]; found && previous.context != document.context {
+				ambiguous[document.Source] = true
+			}
+			bySource[document.Source] = document
+		}
+		documents = slices.DeleteFunc(documents, func(document playerPlaylist) bool { return ambiguous[document.Source] })
+		selected := make(map[int]playerPlaylist)
+		for index, stream := range streams {
+			if document, found := matchPlayer(stream.Stream.Url, documents); found {
+				selected[index] = document
+			}
+		}
+		if len(selected) > 0 {
+			group, groupErr := e.Playlists.Retain(browserstream.Base(ctx), func(readCtx context.Context, source, address string) (browserstream.Document, error) {
+				var document *browserstream.Document
+				err := session.player(readCtx, bySource[source].context, map[string]string{"operation": "read", "source": source, "url": address}, &document)
+				if err == nil && document == nil {
+					err = errors.New("player playlist unavailable")
+				}
+				if err != nil {
+					return browserstream.Document{}, err
+				}
+				return *document, nil
+			}, release)
+			if groupErr != nil {
+				return nil, groupErr
+			}
+			retainedGroup = group
+			for index, document := range selected {
+				streams[index].Stream.Url, err = group.Register(document.Source, document.URL)
+				if err != nil {
+					group.Close()
+					return nil, err
+				}
+			}
+			retained = true
+			for _, document := range bySource {
+				var result any
+				_ = session.player(ctx, document.context, map[string]string{"operation": "suspend"}, &result)
+			}
+		}
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	return streams, nil
+}
+
+func samePath(left, right string) bool {
+	a, errA := url.Parse(left)
+	b, errB := url.Parse(right)
+	return errA == nil && errB == nil && a.Scheme == b.Scheme && a.Host == b.Host && a.EscapedPath() == b.EscapedPath()
 }
 
 // Resolve captures unranked candidates from pages within the browser concurrency budget.

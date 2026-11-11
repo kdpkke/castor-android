@@ -3,6 +3,7 @@ package media
 import (
 	"fmt"
 	"maps"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -231,7 +232,20 @@ func (p Program) SelfFetchable() bool {
 		return false
 	}
 	input := p.Inputs[0]
-	return len(input.Headers) == 0 && !input.RequiresRelaxedInput
+	return len(input.Headers) == 0 && !input.RequiresRelaxedInput && hasRemoteHost(input.URL)
+}
+
+func hasRemoteHost(address *url.URL) bool {
+	if address == nil {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(address.Hostname()), ".")
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return false
+	}
+	ip, err := netip.ParseAddr(host)
+	ip = ip.Unmap()
+	return err != nil || !ip.IsLoopback() && !ip.IsUnspecified()
 }
 
 // Forwardable reports whether castor can forward the program's one finished file byte for byte, its headers and all, for the device to seek within.

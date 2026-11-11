@@ -1,0 +1,44 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Player playlist fixture</title>
+<script>
+const instanceId = Math.random().toString(36).slice(2);
+let activeLoads = 0;
+class DefaultLoader {}
+class PlaylistLoader {
+  constructor() { this.controller = new AbortController(); }
+  load(context, config, callbacks) {
+    if (activeLoads) { callbacks.onError({code: 409}); return; }
+    activeLoads++;
+    const signal = this.controller.signal;
+    fetch('/access', {signal}).then(response => response.json()).then(access => {
+      const address = new URL(context.url);
+      address.searchParams.set('access', access.token);
+      return fetch(address, {signal}).then(response => {
+        if (!response.ok) throw new Error('access refused');
+        return response.text();
+      }).then(body => {
+        const segment = new URL(`/segments/${instanceId}/${access.token}.ts`, location.href).href;
+        callbacks.onSuccess({url: context.url, data: body.replaceAll('opaque-reference', segment)});
+      });
+    }).catch(() => callbacks.onError({code: 403})).finally(() => activeLoads--);
+  }
+  abort() { this.controller.abort(); }
+  destroy() {}
+}
+class Player {
+  static DefaultConfig = {loader: DefaultLoader};
+  constructor(url, body) {
+    this.url = url;
+    this.config = {loader: PlaylistLoader};
+    this.levels = [{details: {url, m3u8: body}}];
+    this.media = {pause() { document.documentElement.dataset.paused = 'true'; }};
+  }
+  stopLoad() {}
+}
+const address = new URL('/manifest', location.href).href;
+new PlaylistLoader().load({url: address}, {}, {
+  onSuccess(response) { window.activeMediaInstance = new Player(address, response.data); },
+  onError() {},
+});
+</script>

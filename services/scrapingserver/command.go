@@ -3,6 +3,7 @@ package scrapingserver
 import (
 	"context"
 	"log/slog"
+	"net"
 
 	"github.com/stupside/castor/internal/settings"
 	"github.com/stupside/castor/internal/transport"
@@ -43,7 +44,7 @@ func Command() *cli.Command {
 		}
 		srv := New(newExtractor(cfg.Servers.Scraping.Config))
 		slog.InfoContext(ctx, "scraping serving", "address", listener.Addr().String())
-		return transport.Serve(ctx, listener, transport.Authorized(srv, cfg.Servers.Scraping.Token), srv.Shutdown)
+		return transport.Serve(ctx, listener, srv.Authorized(cfg.Servers.Scraping.Token), srv.Shutdown)
 	}}
 }
 
@@ -54,5 +55,10 @@ func Embedded(ctx context.Context, cmd *cli.Command) (transport.Endpoint, func()
 		return transport.Endpoint{}, nil, err
 	}
 	srv := New(newExtractor(cfg.Servers.Scraping.Config))
-	return transport.Loopback(ctx, srv, cfg.Servers.Scraping.Token, srv.Shutdown)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return transport.Endpoint{}, nil, err
+	}
+	stop := transport.Background(ctx, listener, srv.Authorized(cfg.Servers.Scraping.Token), srv.Shutdown)
+	return transport.Endpoint{URL: "http://" + listener.Addr().String(), Token: cfg.Servers.Scraping.Token}, stop, nil
 }

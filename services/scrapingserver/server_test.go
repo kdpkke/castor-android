@@ -15,10 +15,47 @@ import (
 	scrapingv1 "github.com/stupside/castor/gen/castor/scraping/v1"
 	"github.com/stupside/castor/gen/castor/scraping/v1/scrapingv1connect"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
+	"github.com/stupside/castor/internal/browserstream"
 	"github.com/stupside/castor/internal/transport"
+	"github.com/stupside/castor/services/scrapingserver/internal/extract"
 )
 
 type resolveFunc func(context.Context, []string) ([]*castorv1.StreamCandidate, error)
+
+func TestPlayerCapabilityDoesNotAuthorizeScraping(t *testing.T) {
+	extractor := extract.New(extract.Config{})
+	s := New(extractor)
+	defer s.Shutdown(t.Context())
+	ts := httptest.NewServer(s.Authorized("scraping-secret"))
+	defer ts.Close()
+	group, err := extractor.Playlists.Retain(ts.URL, func(context.Context, string, string) (browserstream.Document, error) {
+		return browserstream.Document{URL: "https://media.example/live", Body: "#EXTM3U\n#EXT-X-ENDLIST\n"}, nil
+	}, func() {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	address, err := group.Register("https://media.example/live", "https://media.example/live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		address string
+		status  int
+	}{{address, 200}, {ts.URL + browserstream.Prefix + "unknown.m3u8", 404}} {
+		response, err := http.Get(tc.address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != tc.status {
+			t.Errorf("capability status=%d, want %d", response.StatusCode, tc.status)
+		}
+	}
+	client := scrapingv1connect.NewScrapingServiceClient(ts.Client(), ts.URL)
+	if _, err := client.Resolve(t.Context(), &scrapingv1.ResolveRequest{Urls: []string{"https://site.example/watch"}}); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Fatalf("unauthorized scraping: %v", err)
+	}
+}
 
 func (f resolveFunc) Resolve(ctx context.Context, urls []string) ([]*castorv1.StreamCandidate, error) {
 	return f(ctx, urls)
