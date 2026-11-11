@@ -55,9 +55,9 @@ Android 9+; arm64-v8a phones and x86_64 emulators. Previous casting builds were 
   - The first cast asks for the PIN the TV shows; the pairing is kept on the phone.
   - The TV gets HLS, or the original MP4 file. In Native, Dolby Vision is kept both for MP4 files and for MKV files Castor converts to HLS.
   - Tested on an LG C2. Apple TVs are supported but not yet tested on hardware; old Apple TVs that need the legacy PIN pairing are not supported.
-- **FCast**: the FUTO receiver app and desktop receiver.
+- **FCast v3**: the FUTO receiver app and desktop receiver.
   - HLS or MP4 with H.264 video and AAC or MP3 audio; subtitles are burnt into the picture.
-  - Not yet tested on hardware.
+  - Tested on an LG C2 with the FCast Receiver app, found on the network and speaking version 3 of the protocol (the version of the app itself was not recorded). Other FCast receivers and pairing by QR code are not yet tested on hardware; a receiver that asks for the encrypted version 4 is refused.
 - **Roku** (experimental): Castor's developer channel plays HLS, MP4 and MKV with H.264. It needs upstream's developer-channel setup and is not yet tested on hardware.
 
 ### What you can cast

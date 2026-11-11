@@ -47,6 +47,9 @@ English one.
 - Automatic detects extensionless video downloads from server headers and starts progressive delivery through the phone.
 - Removed the retired external browser extension settings and pairing gateway. Embedded webpage extraction and ad blocking remain available.
 - Updated the shared casting engine to Castor 2.5.0.
+- Every TV in the picker offers FCast. A receiver that announces itself on the network is used directly; otherwise scan the QR code shown by FCast Receiver with the camera. The pairing belongs to that TV, and a code that asks for the encrypted version 4 of the protocol is refused instead of being used unencrypted.
+- The casting engine and its notification run only while something needs them: a cast, a TV search or a pairing. With nothing to do they stop by themselves, also with Castor open, and the next request starts them again.
+- FCast receivers now get HLS under the name their player accepts, so the picture starts instead of the receiver staying on its idle screen while the cast gives up after 30 seconds.
 
 ### Italiano
 
@@ -92,6 +95,9 @@ English one.
 - Automatico riconosce i download video senza estensione dagli header del server e usa la trasmissione progressiva dal telefono.
 - Rimossi le impostazioni e il collegamento per l’estensione esterna del browser, ormai ritirata. Restano disponibili l’estrazione dalle pagine e il blocco della pubblicità.
 - Motore di trasmissione aggiornato a Castor 2.5.0.
+- Ogni TV del selettore offre FCast. Un ricevitore che si annuncia in rete viene usato direttamente; altrimenti si inquadra con la fotocamera il codice QR mostrato da FCast Receiver. L’associazione appartiene a quella TV, e un codice che chiede la versione 4 cifrata del protocollo viene rifiutato invece di essere usato in chiaro.
+- Il motore di trasmissione e la sua notifica restano attivi solo mentre servono: un cast, una ricerca delle TV o un’associazione. Senza nulla da fare si fermano da soli, anche con Castor aperto, e la richiesta successiva li riavvia.
+- I ricevitori FCast ora ricevono l’HLS con il nome che il loro riproduttore accetta: l’immagine parte, invece di restare sulla schermata di attesa mentre il cast rinuncia dopo 30 secondi.
 
 ## 1.3.0 — 2026-10-27
 
