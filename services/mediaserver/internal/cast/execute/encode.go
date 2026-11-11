@@ -41,9 +41,9 @@ func (s *preparation) encode(f feed, burn burnRenderer) (encodePlan, error) {
 		runtime = s.attempt.Runtime()
 	}
 	selections := s.Outputs.Selections(caps, captions, runtime)
-	if runtime > 0 {
-		// A growing, unindexed progressive MP4 is not seekable in Chromium.
-		// HLS indexes complete fragments without waiting for the whole download.
+	if runtime > 0 || f.live() {
+		// Segmented delivery publishes complete fragments while a live stream or
+		// seekable download grows, keeping receivers off an unindexed MP4 tail.
 		slices.SortStableFunc(selections, func(a, b output.Selection) int {
 			priority := func(s output.Selection) int {
 				if s.Plan.Format().ContentType == media.HLS {
