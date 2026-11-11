@@ -166,4 +166,15 @@
     <string name="pair_wrong_pin">Il PIN non corrisponde. Chiedine uno nuovo alla TV.</string>
     <string name="pair_retry">Mostra un nuovo PIN</string>
     <string name="pair_cancel">Annulla</string>
+    <string name="fcast_scan_hint">Nessun ricevitore FCast trovato su questa TV. Inquadra il codice QR mostrato da FCast Receiver.</string>
+    <string name="fcast_paired">Associato con il suo codice QR</string>
+    <string name="fcast_rescan">Inquadra un altro codice QR</string>
+    <string name="fcast_scan_title">Inquadra il codice QR mostrato da FCast Receiver sulla TV</string>
+    <string name="fcast_wrong_code">Questo non è un codice FCast. Inquadra il codice QR mostrato da FCast Receiver.</string>
+    <string name="fcast_other_device">Questo codice è di %1$s, che non è questa TV. Apri FCast Receiver sulla TV che hai scelto.</string>
+    <string name="fcast_encrypted">%1$s richiede una connessione FCast cifrata (versione 4), che Castor non supporta ancora.</string>
+    <string name="fcast_encrypted_blocked">Questo ricevitore FCast richiede una connessione cifrata (versione 4), che Castor non supporta ancora. Scegli un altro protocollo.</string>
+    <string name="fcast_camera_permission">Castor usa la fotocamera solo per leggere il codice QR di FCast Receiver.</string>
+    <string name="fcast_camera_allow">Consenti fotocamera</string>
+    <string name="fcast_no_camera">Questo dispositivo non ha una fotocamera per inquadrare il codice QR.</string>
 </resources>

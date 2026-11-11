@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,6 +84,7 @@ fun MainScreen(
   val snackbar = remember { SnackbarHostState() }
   val clipboardEmpty = stringResource(R.string.clipboard_empty)
   val errorCopied = stringResource(R.string.error_copied)
+  val encryptedReceiver = stringResource(R.string.fcast_encrypted_blocked)
   var url by rememberSaveable(sharedUrl) { mutableStateOf(sharedUrl) }
   var mode by rememberSaveable(sharedUrl) { mutableStateOf(VideoSourceMode.Automatic) }
   var tvName by rememberSaveable { mutableStateOf(options.television()?.name.orEmpty()) }
@@ -90,24 +92,60 @@ fun MainScreen(
   var tvType by rememberSaveable { mutableIntStateOf(options.television()?.type?.number ?: 1) }
   var tvId by rememberSaveable { mutableStateOf(options.television()?.id.orEmpty()) }
   var tvManual by rememberSaveable { mutableStateOf(options.television()?.manual == true) }
+  var tvPairedFor by rememberSaveable { mutableStateOf(options.television()?.pairedFor.orEmpty().joinToString("\n")) }
+  var tvOnce by rememberSaveable { mutableStateOf(false) }
+  var fcastPairings by remember { mutableStateOf(options.fcastPairings()) }
+  // Codes scanned for TVs that have no identity to remember them by: kept for this run of the app only, so a
+  // receiver seen to need encryption stays refused after the picker closes.
+  var fcastSession by
+    rememberSaveable(
+      stateSaver =
+        Saver<List<FCastPairing>, String>(
+          save = { encodePairings(it) },
+          restore = { decodePairings(it, anonymous = true) },
+        )
+    ) {
+      mutableStateOf(emptyList())
+    }
+  val knownPairings = fcastPairings + fcastSession
   val tv =
     if (tvAddress.isBlank()) null
-    else SavedTv(tvName, tvAddress, DeviceType.forNumber(tvType), tvId, tvManual)
+    else
+      SavedTv(
+        tvName,
+        tvAddress,
+        DeviceType.forNumber(tvType),
+        tvId,
+        tvManual,
+        tvPairedFor.split("\n").filter { it.isNotEmpty() }.toSet(),
+        tvOnce,
+      )
   fun saveTv(selected: SavedTv) {
     tvName = selected.name
     tvAddress = selected.address
     tvType = selected.type.number
     tvId = selected.id
     tvManual = selected.manual
+    tvPairedFor = selected.pairedFor.joinToString("\n")
+    tvOnce = selected.once
     options.television(selected)
   }
   // A saved TV is only a hint until the current search finds it again. Manual addresses are used
   // as entered; discovered ones must reappear, and come back with their current address.
   val searched = state.discoveryComplete && !state.discovering
-  val found = tv?.takeUnless { it.manual }?.available(state.devices)?.takeIf { searched }
+  val found =
+    when {
+      tv == null || !searched -> null
+      // An FCast receiver paired by its code is found where its TV answers now, by the TV's identity.
+      tv.pairedFor.isNotEmpty() -> pairedReceiver(tv, state.devices, fcastPairings)
+      tv.manual -> null
+      else -> tv.available(state.devices)
+    }
   val tvMissing = tv != null && !tv.manual && searched && found == null
-  // Receivers saved before identities only have an address that may be stale: wait for a search.
-  val tvUnconfirmed = tv != null && !tv.manual && tv.id.isBlank() && found == null
+  // Receivers saved before identities only have an address that may be stale: wait for a search. A choice anchored
+  // to its TV's identity waits too: its own id proves nothing until that TV is found.
+  val tvUnconfirmed =
+    tv != null && !tv.manual && (tv.id.isBlank() || tv.pairedFor.isNotEmpty()) && found == null
   LaunchedEffect(state.ready, tv?.manual) {
     if (state.ready && tv != null && !tv.manual && !state.discoveryComplete) viewModel.discover()
   }
@@ -249,18 +287,23 @@ fun MainScreen(
                 prominent = true,
                 onClick = {
                   tv?.let {
-                    if (selectedVideo != null || !mode.isPage(url.trim())) browser?.dismissPage()
-                    viewModel.cast(
-                      url.trim(),
-                      mode.isPage(url.trim()),
-                      it.target(),
-                      height,
-                      subtitles,
-                      receiverName = it.name,
-                      subtitleLanguage = options.language().tag,
-                      localVideo = selectedVideo,
-                      automatic = mode == VideoSourceMode.Automatic,
-                    )
+                    // A receiver scanned as needing encryption is never cast to in the clear.
+                    if (fcastBlocked(it, discoveredTvs(state.devices, null), knownPairings))
+                      viewModel.fail(IllegalStateException(encryptedReceiver))
+                    else {
+                      if (selectedVideo != null || !mode.isPage(url.trim())) browser?.dismissPage()
+                      viewModel.cast(
+                        url.trim(),
+                        mode.isPage(url.trim()),
+                        it.target(),
+                        height,
+                        subtitles,
+                        receiverName = it.name,
+                        subtitleLanguage = options.language().tag,
+                        localVideo = selectedVideo,
+                        automatic = mode == VideoSourceMode.Automatic,
+                      )
+                    }
                   }
                 },
                 enabled =
@@ -632,10 +675,21 @@ fun MainScreen(
         viewModel.discover(restart = host != null)
       },
       viewModel::describe,
-    ) { selected ->
-      saveTv(selected)
-      sheet = null
-    }
+      select = { selected ->
+        saveTv(selected)
+        sheet = null
+      },
+      pairings = knownPairings,
+      pair = { made ->
+        if (made.identities.isEmpty()) fcastSession = withPairing(fcastSession, made)
+        else {
+          options.pairFCast(made)
+          fcastPairings = options.fcastPairings()
+          // The new scan settles what this run of the app read at that address before.
+          fcastSession = fcastSession.filterNot { known -> sameHost(known.host, made.host) }
+        }
+      },
+    )
   state.pairing?.let {
     PairingDialog(it, viewModel::startPairing, viewModel::finishPairing, viewModel::cancelPairing)
   }

@@ -166,4 +166,15 @@
     <string name="pair_wrong_pin">That PIN does not match. Ask the TV for a new one.</string>
     <string name="pair_retry">Show a new PIN</string>
     <string name="pair_cancel">Cancel</string>
+    <string name="fcast_scan_hint">No FCast receiver was found on this TV. Scan the QR code shown by FCast Receiver.</string>
+    <string name="fcast_paired">Paired with its QR code</string>
+    <string name="fcast_rescan">Scan another QR code</string>
+    <string name="fcast_scan_title">Point the camera at the QR code shown by FCast Receiver on your TV</string>
+    <string name="fcast_wrong_code">This is not an FCast code. Point at the QR code shown by FCast Receiver.</string>
+    <string name="fcast_other_device">This code belongs to %1$s, which is not this TV. Open FCast Receiver on the TV you chose.</string>
+    <string name="fcast_encrypted">%1$s asks for an encrypted FCast connection (version 4), which Castor does not support yet.</string>
+    <string name="fcast_encrypted_blocked">This FCast receiver asks for an encrypted connection (version 4), which Castor does not support yet. Choose another protocol.</string>
+    <string name="fcast_camera_permission">Castor needs the camera only to read the QR code of FCast Receiver.</string>
+    <string name="fcast_camera_allow">Allow camera</string>
+    <string name="fcast_no_camera">This device has no camera to scan the QR code.</string>
 </resources>

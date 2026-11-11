@@ -20,7 +20,10 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import castor.v1.DeviceOuterClass.DeviceType
+import io.github.stupside.castor.FCastQr
 import io.github.stupside.castor.R
 import io.github.stupside.castor.theme.*
 import java.util.Locale
@@ -159,9 +162,21 @@ internal fun TvPicker(
   refresh: (String?) -> Unit,
   describe: (List<SavedTv>) -> Unit,
   select: (SavedTv) -> Unit,
+  // The FCast receivers paired by their codes, and how a new pairing is kept.
+  pairings: List<FCastPairing> = emptyList(),
+  pair: (FCastPairing) -> Unit = {},
+  // The scanner for the TV at a host; tests put their own in its place.
+  scanner: @Composable (
+    host: String,
+    paired: (FCastQr.Receiver) -> Unit,
+    encrypted: (FCastQr.Receiver) -> Unit,
+    cancel: () -> Unit,
+  ) -> Unit = { host, paired, encrypted, cancel -> FCastScanner(host, paired, encrypted, cancel) },
 ) {
   var manual by rememberSaveable { mutableStateOf(false) }
   var selectedHost by rememberSaveable { mutableStateOf<String?>(null) }
+  // The TV whose FCast code is being scanned. Kept beside the chosen TV so both come back after a rotation.
+  var scanningHost by rememberSaveable { mutableStateOf<String?>(null) }
   var searchedFor by rememberSaveable { mutableStateOf<String?>(null) }
   var address by rememberSaveable { mutableStateOf("") }
   var type by rememberSaveable { mutableStateOf(DeviceType.DEVICE_TYPE_DLNA) }
@@ -244,7 +259,13 @@ internal fun TvPicker(
         }
         selected != null -> {
           LaunchedEffect(selected.host) { describe(selected.protocols) }
-          val ranked = rankedProtocols(selected.protocols, state.verdicts)
+          val scanning = scanningHost == selected.host
+          val choice = fcastChoice(selected, pairings)
+          val pairing = pairingFor(selected, pairings)
+          val protocols =
+            selected.protocols.filter { it.type != DeviceType.DEVICE_TYPE_FCAST } +
+              listOfNotNull((choice as? FCastChoice.Ready)?.tv)
+          val ranked = rankedProtocols(protocols, state.verdicts)
           val recommended = recommendedProtocol(ranked, state.verdicts)
           Text(
             stringResource(R.string.available_protocols),
@@ -261,6 +282,8 @@ internal fun TvPicker(
                 supportingContent = {
                   Column {
                     Text(receiverEndpoint(tv))
+                    if (choice is FCastChoice.Ready && choice.paired && tv == choice.tv)
+                      Text(stringResource(R.string.fcast_paired))
                     state.verdicts[verdictKey(tv)]?.let { Text(stringResource(verdictLabel(it))) }
                     if (tv == recommended)
                       Text(stringResource(R.string.recommended), color = MaterialTheme.colorScheme.primary)
@@ -273,6 +296,33 @@ internal fun TvPicker(
               )
             }
           }
+          if (choice is FCastChoice.Scan || choice is FCastChoice.Unsupported) {
+            GlassPanel(
+              Modifier.fillMaxWidth().testTag("receiver-protocol-${DeviceType.DEVICE_TYPE_FCAST_VALUE}"),
+              onClick = { scanningHost = selected.host },
+            ) {
+              ListItem(
+                headlineContent = { Text(protocolName(DeviceType.DEVICE_TYPE_FCAST)) },
+                supportingContent = {
+                  Text(
+                    if (choice is FCastChoice.Unsupported)
+                      stringResource(R.string.fcast_encrypted, choice.name)
+                    else stringResource(R.string.fcast_scan_hint)
+                  )
+                },
+                leadingContent = { CastIcon(R.drawable.ic_cast) },
+                trailingContent = { CastIcon(R.drawable.ic_next) },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+              )
+            }
+          }
+          if (choice is FCastChoice.Ready && pairing != null)
+            TextButton(
+              onClick = { scanningHost = selected.host },
+              modifier = Modifier.fillMaxWidth().testTag("fcast-rescan"),
+            ) {
+              Text(stringResource(R.string.fcast_rescan))
+            }
           GlassButton(
             onClick = { selectedHost = null },
             modifier = Modifier.fillMaxWidth().testTag("receiver-back"),
@@ -281,6 +331,29 @@ internal fun TvPicker(
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.back))
           }
+          if (scanning)
+            Dialog(
+              onDismissRequest = { scanningHost = null },
+              properties =
+                DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+            ) {
+              scanner(
+                selected.host,
+                { receiver ->
+                  // The code is this TV's: keep it, then choose what FCast means for the TV now, which is its
+                  // announced receiver when it has one and the paired one otherwise.
+                  val made = paired(selected, receiver)
+                  pair(made)
+                  scanningHost = null
+                  (fcastChoice(selected, withPairing(pairings, made)) as? FCastChoice.Ready)?.let { select(it.tv) }
+                },
+                { receiver ->
+                  // Remembered so this TV is never cast to in the clear; the scanner stays open and says why.
+                  pair(paired(selected, receiver))
+                },
+                { scanningHost = null },
+              )
+            }
         }
         else -> {
           if (state.discovering) {

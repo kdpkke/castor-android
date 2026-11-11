@@ -100,4 +100,28 @@ class DiscoveredTvsTest {
       assertNull(typed, bareHost(typed))
     }
   }
+
+  @Test
+  fun oneHostWrittenTwoWaysIsTheSameHost() {
+    assertTrue(sameHost("[2001:DB8::10]", "2001:db8:0:0:0:0:0:10"))
+    assertTrue(sameHost("fe80::1%wlan0", "fe80::1"))
+    assertTrue(sameHost("192.0.2.10", "192.0.2.10"))
+    assertTrue(sameHost("TV.local", "tv.local"))
+    assertFalse(sameHost("192.0.2.10", "192.0.2.100"))
+    assertFalse(sameHost("2001:db8::10", "2001:db8::11"))
+    assertFalse(sameHost("192.0.2.10", "tv.local"))
+  }
+
+  @Test
+  fun aBareIPv6AddressIsItsOwnHost() {
+    assertEquals("2001:db8::10", receiverHost("2001:db8::10"))
+    assertEquals("2001:db8::10", receiverHost("2001:DB8::10"))
+    assertEquals("2001:db8::10", receiverHost("[2001:db8::10]:40000"))
+    assertEquals("192.0.2.10", receiverHost("192.0.2.10"))
+    assertEquals("192.0.2.10", receiverHost("192.0.2.10:8009"))
+    assertEquals(
+      "[2001:db8::10]:46899",
+      receiverEndpoint(SavedTv("TV", "2001:db8::10", DeviceType.DEVICE_TYPE_FCAST)),
+    )
+  }
 }

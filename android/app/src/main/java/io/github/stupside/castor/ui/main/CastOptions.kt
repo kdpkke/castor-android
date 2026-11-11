@@ -52,6 +52,11 @@ data class SavedTv(
   val id: String = "",
   // Entered by hand: used at its exact address and never required to appear in a search.
   val manual: Boolean = false,
+  // The identities of the TV whose code gave this FCast receiver. With them the receiver is found again where
+  // that TV answers now; its address alone is never trusted after the choice.
+  val pairedFor: Set<String> = emptySet(),
+  // Chosen for now only: an FCast receiver scanned for a TV that has no identity to find it by again. Never saved.
+  val once: Boolean = false,
 ) {
   constructor(
     device: Device
@@ -132,10 +137,13 @@ class CastOptions(private val context: Context) {
       // Before identities every receiver was saved without "tv-id"; since then, only addresses
       // entered by hand have none.
       preferences.getBoolean("tv-manual", preferences.contains("tv-id") && id.isBlank()),
+      pairedFor = preferences.getStringSet("tv-paired-for", emptySet()).orEmpty().toSet(),
     )
   }
 
   fun television(tv: SavedTv) {
+    // A TV chosen for now only is never written, so the next start does not find it.
+    if (tv.once) return
     preferences
       .edit()
       .putString("tv-name", tv.name)
@@ -143,6 +151,7 @@ class CastOptions(private val context: Context) {
       .putString("tv-id", tv.id)
       .putBoolean("tv-manual", tv.manual)
       .putInt("tv-type", tv.type.number)
+      .putStringSet("tv-paired-for", tv.pairedFor)
       .apply()
   }
 
@@ -151,6 +160,19 @@ class CastOptions(private val context: Context) {
 
   fun searchedHost(host: String) {
     preferences.edit().putString("searched-host", host).apply()
+  }
+
+  // The FCast receivers paired by their codes, each for the one TV it was scanned on.
+  internal fun fcastPairings(): List<FCastPairing> =
+    decodePairings(preferences.getString("fcast-pairings", null))
+
+  internal fun pairFCast(pairing: FCastPairing) {
+    // A TV without identity is never remembered on disk; it is only used where it was scanned, for now.
+    if (pairing.identities.isEmpty()) return
+    preferences
+      .edit()
+      .putString("fcast-pairings", encodePairings(withPairing(fcastPairings(), pairing)))
+      .apply()
   }
 
   // Existing numeric ceilings belong to Optimized; Native now forbids any re-encoding.

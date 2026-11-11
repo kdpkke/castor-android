@@ -5,16 +5,38 @@ import castor.v1.DeviceOuterClass.DeviceType
 import castor.v1.DeviceOuterClass.Fidelity
 import io.github.stupside.castor.R
 import io.github.stupside.castor.ReceiverAnnouncements
+import io.github.stupside.castor.ipLiteralBytes
 import java.net.URI
 import java.util.Locale
 
-internal fun receiverHost(address: String): String? = runCatching {
-  URI(if ("://" in address) address else "http://$address")
-    .host
-    ?.trim('[', ']')
-    ?.lowercase(Locale.ROOT)
+// A bare IP literal is its own host. A bare IPv6 address, which is how a receiver on its protocol's default port is
+// saved, is not a URI authority and would read as no host at all. Its brackets are dropped; an IPv6 zone stays, and
+// sameHost ignores it.
+internal fun receiverHost(address: String): String? {
+  val bare = address.trim().trim('[', ']')
+  if (ipLiteralBytes(bare.substringBefore('%')) != null) return bare.lowercase(Locale.ROOT)
+  return runCatching {
+    URI(if ("://" in address) address else "http://$address")
+      .host
+      ?.trim('[', ']')
+      ?.lowercase(Locale.ROOT)
+  }
+    .getOrNull()
 }
-  .getOrNull()
+
+// Whether two hosts are the same place: IP literals compare as numbers, so one address written two ways is one host;
+// anything else compares as text without case. Brackets and an IPv6 zone are not part of the address.
+internal fun sameHost(a: String, b: String): Boolean {
+  val left = hostText(a)
+  val right = hostText(b)
+  val leftBytes = ipLiteralBytes(left)
+  val rightBytes = ipLiteralBytes(right)
+  if (leftBytes != null && rightBytes != null) return leftBytes.contentEquals(rightBytes)
+  return left == right
+}
+
+private fun hostText(host: String): String =
+  host.trim().trim('[', ']').substringBefore('%').lowercase(Locale.ROOT)
 
 // A typed IPv4 address alone, which Castor can ask on every protocol's own port.
 internal fun bareHost(input: String): String? =

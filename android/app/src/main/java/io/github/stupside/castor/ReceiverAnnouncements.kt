@@ -47,9 +47,13 @@ internal object ReceiverAnnouncements {
       .build()
   }
 
+  // A receiver's address as the engine names it: the host alone on FCast's own port.
+  fun fCastAddress(host: String, port: Int): String =
+    if (port > 0 && port != FCAST_PORT) authority(host, port) else host
+
   // FCast announces no stable identity, so its ID adds where it answers, as the engine names it.
   fun fCast(name: String, host: String, port: Int): Device {
-    val address = if (port > 0 && port != FCAST_PORT) authority(host, port) else host
+    val address = fCastAddress(host, port)
     return Device.newBuilder()
       .setId("$name@$address")
       .setName(name)
