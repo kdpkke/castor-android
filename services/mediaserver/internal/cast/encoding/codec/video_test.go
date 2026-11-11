@@ -5,6 +5,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/container"
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
@@ -254,4 +255,49 @@ func TestAThinRateIsSpentOnASmallerPicture(t *testing.T) {
 			t.Errorf("under %s: %dp at %v fps, want %dp at %v", tt.ceiling, v.MaxHeight, v.MaxFrameRate, tt.wantHeight, tt.wantFPS)
 		}
 	}
+}
+
+// A segmented delivery with out-of-band configuration is entered at its segments, which an encoder that keys only its first frame there cannot open.
+func TestASegmentedDeliveryIsEncodedWhereEverySegmentOpensOnAnEntryPoint(t *testing.T) {
+	h264 := media.Capabilities{Formats: []media.FormatSupport{{Transport: media.TransportMP4, Video: media.VideoSupport{Codec: media.CodecH264}}}}
+	software := func(context.Context, media.Codec) (ffmpeg.Encoder, bool) {
+		return ffmpeg.Encoder{Name: "libx264", Codec: media.CodecH264}, true
+	}
+	segmented := container.Format{ContentType: media.HLS, Muxer: ffmpeg.FormatHLS, Delivery: container.DeliverSegmented, Framing: media.FramingOutOfBand}
+	inBandSegments := container.Format{ContentType: media.HLS, Muxer: ffmpeg.FormatHLS, Delivery: container.DeliverSegmented, Framing: media.FramingInBand}
+	live := media.ProbeInfo{VideoCodec: media.CodecH264, VideoHeight: 1080, VideoFrameRate: 50}
+	for _, tt := range []struct {
+		name    string
+		encoder ffmpeg.Encoder
+		into    container.Format
+		want    string
+	}{
+		{name: "out-of-band segments are encoded in software", encoder: ffmpeg.Encoder{Name: "h264_mediacodec", Codec: media.CodecH264, Hardware: true, GOPKeyframes: true, EntryInBandOnly: true}, into: segmented, want: "libx264"},
+		{name: "in-band segments keep the hardware", encoder: ffmpeg.Encoder{Name: "h264_mediacodec", Codec: media.CodecH264, Hardware: true, GOPKeyframes: true, EntryInBandOnly: true}, into: inBandSegments, want: "h264_mediacodec"},
+		{name: "an in-band stream keeps the hardware", encoder: ffmpeg.Encoder{Name: "h264_mediacodec", Codec: media.CodecH264, Hardware: true, GOPKeyframes: true, EntryInBandOnly: true}, into: testFormat(t, media.MPEGTS), want: "h264_mediacodec"},
+		{name: "an out-of-band stream keeps the hardware", encoder: ffmpeg.Encoder{Name: "h264_mediacodec", Codec: media.CodecH264, Hardware: true, GOPKeyframes: true, EntryInBandOnly: true}, into: testFormat(t, media.MP4), want: "h264_mediacodec"},
+		{name: "an encoder that keys every segment keeps the hardware", encoder: ffmpeg.Encoder{Name: "h264_nvenc", Codec: media.CodecH264, Hardware: true}, into: segmented, want: "h264_nvenc"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			hardware := func(context.Context, media.Codec) (ffmpeg.Encoder, bool) { return tt.encoder, true }
+			// A live source is spliced, so its picture is always encoded.
+			in := Inputs{Caps: h264, Probe: live, Measured: true, Into: tt.into, MaxHeight: 1080, Spliced: true, Encoders: hardware, Software: software}
+			track, _, err := decideVideo(t.Context(), in, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if enc, _ := track.Encode(); enc.Encoder.Name != tt.want {
+				t.Fatalf("encoded with %s, want %s", enc.Encoder.Name, tt.want)
+			}
+		})
+	}
+	t.Run("without a software encoder the plan is refused, not handed segments no device can enter", func(t *testing.T) {
+		hardware := func(context.Context, media.Codec) (ffmpeg.Encoder, bool) {
+			return ffmpeg.Encoder{Name: "h264_mediacodec", Codec: media.CodecH264, Hardware: true, GOPKeyframes: true, EntryInBandOnly: true}, true
+		}
+		in := Inputs{Caps: h264, Probe: live, Measured: true, Into: segmented, MaxHeight: 1080, Spliced: true, Encoders: hardware}
+		if _, _, err := decideVideo(t.Context(), in, 0); err == nil {
+			t.Fatal("a hardware encode was planned into segments it cannot open")
+		}
+	})
 }

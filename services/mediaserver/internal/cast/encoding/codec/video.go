@@ -64,19 +64,36 @@ func encodesVideo(in Inputs) bool {
 	return hasPicture(in) && len(refuse(videoRefusals, in)) > 0
 }
 
-// decideVideo plans the picture within what the ceiling leaves after sound, in software where a clock-cut delivery needs keyframes the chosen encoder cannot place.
+// decideVideo plans the picture within what the ceiling leaves after sound, in software where the delivery needs keyframes the chosen encoder cannot give it:
+// placed on the clock for a clock-cut delivery, or entry points for a segmented one.
 func decideVideo(ctx context.Context, in Inputs, sound media.Bitrate) (Track[VideoEncode], []Reason, error) {
 	track, refused, err := planVideo(ctx, in, sound)
 	venc, encodes := track.Encode()
-	if err != nil || !encodes || !in.KeyframesOnClock || !venc.Encoder.GOPKeyframes || wholeRate(in.Probe.VideoFrameRate, venc.MaxFrameRate) {
+	if err != nil || !encodes {
 		return track, refused, err
 	}
-	if in.Software == nil {
-		return Track[VideoEncode]{}, refused, fmt.Errorf("%s cannot key this delivery's clock at %v fps, and no software encoder can stand in", venc.Encoder.Name, in.Probe.VideoFrameRate)
+	switch {
+	case in.KeyframesOnClock && venc.Encoder.GOPKeyframes && !wholeRate(in.Probe.VideoFrameRate, venc.MaxFrameRate):
+		if in.Software == nil {
+			return Track[VideoEncode]{}, refused, fmt.Errorf("%s cannot key this delivery's clock at %v fps, and no software encoder can stand in", venc.Encoder.Name, in.Probe.VideoFrameRate)
+		}
+		slog.DebugContext(ctx, "encoder skipped: this delivery cuts on the clock", "encoder", venc.Encoder.Name, "source_frame_rate", in.Probe.VideoFrameRate)
+	case venc.Encoder.EntryInBandOnly && enteredAtSegments(in.Into):
+		if in.Software == nil {
+			return Track[VideoEncode]{}, refused, fmt.Errorf("%s gives a device no frame to enter this delivery's segments at, and no software encoder can stand in", venc.Encoder.Name)
+		}
+		slog.DebugContext(ctx, "encoder skipped: this delivery is entered at its segments", "encoder", venc.Encoder.Name, "content_type", in.Into.ContentType)
+	default:
+		return track, refused, err
 	}
-	slog.DebugContext(ctx, "encoder skipped: this delivery cuts on the clock", "encoder", venc.Encoder.Name, "source_frame_rate", in.Probe.VideoFrameRate)
 	in.Encoders, in.Software = in.Software, nil
 	return planVideo(ctx, in, sound)
+}
+
+// enteredAtSegments is a delivery a device starts decoding at any segment of, with the decoder configuration kept out of band:
+// each segment must then open on a frame a decoder can start at.
+func enteredAtSegments(into container.Format) bool {
+	return into.Delivery == container.DeliverSegmented && into.Framing == media.FramingOutOfBand
 }
 
 // wholeRate is frames reaching the encoder at a whole number a second: the source's own rate under the cap, the fps filter's cap at or above it; an unmeasured source promises neither.

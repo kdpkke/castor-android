@@ -26,6 +26,9 @@ type Encoder struct {
 	// GOPKeyframes ignores forced keyframes: only the -g length places them, counted in frames of the rate truncated
 	// to a whole number, so a fractional rate (23.976) drifts them off the clock.
 	GOPKeyframes bool
+	// EntryInBandOnly makes every keyframe an entry point (IDR) only while the decoder configuration travels in band:
+	// asked to keep it out of band, the first frame is the only one, and later keyframes are frames no decoder can start at.
+	EntryInBandOnly bool
 	// AverageRate honors -b:v alone: no VBV ceiling and no constant-quality target.
 	AverageRate bool
 	// Level spells castor's dotted level (e.g. "4.0") as -level:v expects it; nil passes it as is.
@@ -34,9 +37,13 @@ type Encoder struct {
 
 const vaapiRenderNode = "/dev/dri/renderD128"
 
+// handheldPreset is the software preset of a host that declares a handheld's encoders: its cores hold veryfast only just
+// ahead of a 1080p50 read and fall behind it once they warm, which starves a live cast, while this one keeps about twice realtime.
+const handheldPreset = "superfast"
+
 // pix_fmt is fixed on CPU encoders; VA-API converts on the GPU instead.
 var (
-	// veryfast keeps the software encoders ahead of realtime in the live pipeline.
+	// veryfast keeps the software encoders ahead of realtime in the live pipeline on a desktop's cores; a handheld takes handheldPreset.
 	softwareFlags     = []string{"-preset", "veryfast", "-pix_fmt", "yuv420p"}
 	videotoolboxFlags = []string{"-pix_fmt", "yuv420p", "-g", "600"}
 	vaapiFilters      = []string{"format=nv12", "hwupload"}
@@ -86,21 +93,46 @@ func mediacodecEncoder(name string, codec media.Codec, tier string) Encoder {
 	return Encoder{
 		Name: name, Codec: codec, Hardware: true,
 		Flags:        []string{"-pix_fmt", "nv12", "-bitrate_mode", "vbr"},
-		GOPKeyframes: true, AverageRate: true,
+		GOPKeyframes: true, AverageRate: true, EntryInBandOnly: true,
 		// Its levels are named constants: "4.0" would parse as the number 4, which is level 1.1.
 		Level: func(level string) string { return tier + strings.TrimSuffix(level, ".0") },
 	}
 }
 
-// candidates is the declared encoders, then encoders plus VA-API on every other render node this host has.
+// candidates is the declared encoders, then encoders plus VA-API on every other render node this host has; a handheld's software encoders take its preset.
 func candidates(declared []Encoder) []Encoder {
-	out := slices.Concat(declared, encoders)
+	known := encoders
+	if handheld(declared) {
+		known = lightened(encoders)
+	}
+	out := slices.Concat(declared, known)
 	nodes, _ := filepath.Glob("/dev/dri/renderD*")
 	for _, node := range nodes {
 		if node == vaapiRenderNode {
 			continue
 		}
 		out = append(out, vaapiEncoder("h264_vaapi", media.CodecH264, node), vaapiEncoder("hevc_vaapi", media.CodecHEVC, node))
+	}
+	return out
+}
+
+// handheld reports a host that declares MediaCodec encoders, which only a handheld's build offers.
+func handheld(declared []Encoder) bool {
+	return slices.ContainsFunc(declared, func(e Encoder) bool { return strings.HasSuffix(e.Name, "_mediacodec") })
+}
+
+// lightened is list with every software encoder on handheldPreset; list itself is not edited.
+func lightened(list []Encoder) []Encoder {
+	out := slices.Clone(list)
+	for i, e := range out {
+		if e.Hardware {
+			continue
+		}
+		flags := slices.Clone(e.Flags)
+		if at := slices.Index(flags, "-preset"); at >= 0 && at+1 < len(flags) {
+			flags[at+1] = handheldPreset
+		}
+		out[i].Flags = flags
 	}
 	return out
 }
