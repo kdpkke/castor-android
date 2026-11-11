@@ -97,7 +97,8 @@ class BrowserServer(
           else reply(document.status, "application/vnd.apple.mpegurl", document.body.toByteArray())
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
           throw cancelled
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
+          android.util.Log.w("CastorBrowser", "Playlist read failed", failure)
           error(502, "unavailable", "The page could not renew or read the playlist")
         } finally {
           socket.close()
@@ -143,7 +144,10 @@ class BrowserServer(
               .build()
           } else
             withTimeout(60_000) {
-              playlists.retain(resolver.resolve(ResolveRequest.parseFrom(bytes)), url)
+              resolver.resolve(
+                ResolveRequest.parseFrom(bytes),
+                decorate = { playlists.retain(it, url) },
+              )
             }
         reply(200, "application/proto", response.toByteArray())
       } catch (error: kotlinx.coroutines.CancellationException) {

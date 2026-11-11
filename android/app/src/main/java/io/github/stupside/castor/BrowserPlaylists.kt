@@ -24,26 +24,33 @@ import kotlinx.coroutines.withContext
 
 // Captured HLS stays on a capability URL; only the original page can renew its access.
 internal class BrowserPlaylists(private val resolver: BrowserResolver) {
-  private class Session(var candidate: StreamCandidate) {
+  private class Session(var candidate: StreamCandidate, val player: PlayerSource?) {
     val mutex = Mutex()
     var refused: Document? = null
+    @Volatile var revoked = false
   }
 
   internal data class Document(val status: Int, val body: String, val from: String = "")
 
   private val sessions = mutableMapOf<String, Session>()
-  private val routes = mutableMapOf<Pair<String, String>, String>()
+  private val routes = mutableMapOf<Triple<String, String, String>, String>()
   private val uriAttribute = Regex("([:,]\\s*URI=\")([^\"]*)(\")")
 
   @Synchronized
-  private fun register(candidate: StreamCandidate, base: String): String {
-    val key = candidate.sourcePage to candidate.stream.url
+  private fun register(
+    candidate: StreamCandidate,
+    base: String,
+    player: PlayerSource? = resolver.playerSource(candidate),
+    parent: Session? = null,
+  ): String {
+    check(parent?.revoked != true) { "The captured playlist was released" }
+    val key = Triple(candidate.sourcePage, candidate.stream.url, player?.owner.orEmpty())
     routes[key]?.let {
       return base + it
     }
     check(sessions.size < 1600) { "Too many captured playlists" }
     val path = "/playlists/${UUID.randomUUID()}.m3u8"
-    sessions[path] = Session(candidate)
+    sessions[path] = Session(candidate, player)
     routes[key] = path
     return base + path
   }
@@ -70,7 +77,8 @@ internal class BrowserPlaylists(private val resolver: BrowserResolver) {
       session.refused?.let {
         return@withLock it
       }
-      var document = fetch(session.candidate)
+      check(!session.revoked) { "The captured playlist was released" }
+      var document = if (session.player != null) fromPlayer(session) else fetch(session.candidate)
       if (document.status == 401 || document.status == 403) {
         val old = URI(session.candidate.stream.url)
         val fresh =
@@ -108,20 +116,21 @@ internal class BrowserPlaylists(private val resolver: BrowserResolver) {
         "The captured source returned an invalid HLS playlist"
       }
       val origin = URI(document.from)
-      fun reference(value: String): String {
+      fun reference(value: String, playlist: Boolean): String {
         val absolute = origin.resolve(value).toASCIIString()
         check(absolute.length <= 8192 && BrowserResolver.isHttp(absolute)) {
           "Unsupported playlist resource URL"
         }
-        if (!hls(absolute)) return absolute
+        if (!playlist) return absolute
         val candidate =
           session.candidate
             .toBuilder()
             .setStream(session.candidate.stream.toBuilder().setUrl(absolute))
             .build()
-        return register(candidate, base)
+        return register(candidate, base, session.player?.copy(url = absolute), session)
       }
       var renderedBytes = 0
+      var nextPlaylist = false
       val body = buildString {
         for (line in document.body.removePrefix("\uFEFF").lineSequence()) {
           val text = line.trim()
@@ -129,16 +138,22 @@ internal class BrowserPlaylists(private val resolver: BrowserResolver) {
           val rewritten =
             when {
               text.isEmpty() -> text
-              !text.startsWith('#') -> reference(text)
-              else ->
+              !text.startsWith('#') -> reference(text, nextPlaylist).also { nextPlaylist = false }
+              else -> {
+                val playlist =
+                  text.startsWith("#EXT-X-MEDIA:") ||
+                    text.startsWith("#EXT-X-I-FRAME-STREAM-INF:") ||
+                    text.startsWith("#EXT-X-RENDITION-REPORT:")
+                if (text.startsWith("#EXT-X-STREAM-INF:")) nextPlaylist = true
                 uriAttribute.replace(text) {
-                  val absolute = reference(it.groupValues[2])
+                  val absolute = reference(it.groupValues[2], playlist)
                   expanded += absolute.length - it.groupValues[2].length
                   check(length + expanded + 1 <= DOCUMENT_LIMIT) {
                     "Expanded playlist exceeds the document limit"
                   }
                   it.groupValues[1] + absolute + it.groupValues[3]
                 }
+              }
             }
           check(length + rewritten.length + 1 <= DOCUMENT_LIMIT) {
             "Expanded playlist exceeds the document limit"
@@ -150,6 +165,13 @@ internal class BrowserPlaylists(private val resolver: BrowserResolver) {
       }
       Document(200, body)
     }
+  }
+
+  private suspend fun fromPlayer(session: Session): Document {
+    synchronized(this) {
+      check(!session.revoked) { "The captured playlist was released" }
+    }
+    return resolver.readPlayer(session.player!!)
   }
 
   private suspend fun fetch(candidate: StreamCandidate): Document =
@@ -199,10 +221,9 @@ internal class BrowserPlaylists(private val resolver: BrowserResolver) {
         val next = URI(address).resolve(document.body)
         val previous = URI(address)
         if (previous.scheme != next.scheme || previous.rawAuthority != next.rawAuthority) {
-          headers =
-            headers.filterKeys {
-              it.lowercase() !in setOf("authorization", "cookie", "proxy-authorization")
-            }
+          headers = headers.filterKeys {
+            it.lowercase() !in setOf("authorization", "cookie", "proxy-authorization")
+          }
         }
         address = next.toString()
       }
@@ -211,8 +232,10 @@ internal class BrowserPlaylists(private val resolver: BrowserResolver) {
 
   @Synchronized
   fun clear() {
+    sessions.values.forEach { it.revoked = true }
     sessions.clear()
     routes.clear()
+    resolver.releasePlayers()
   }
 
   // The browser names HLS by MIME type even when the URL has no .m3u8 suffix; both need renewal.

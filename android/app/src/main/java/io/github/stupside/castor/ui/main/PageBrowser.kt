@@ -70,14 +70,16 @@ internal fun PageBrowser(
       color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     page.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-    AndroidView(
-      factory = { browser.attachView(it) },
-      modifier =
-        Modifier.fillMaxWidth()
-          .height(if (compact) 220.dp else 360.dp)
-          .bringIntoViewRequester(bringIntoView)
-          .testTag("page-browser"),
-      onRelease = { browser.detachView() },
-    )
+    key(browser.view) {
+      AndroidView(
+        factory = { browser.attachView(it) },
+        modifier =
+          Modifier.fillMaxWidth()
+            .height(if (compact) 220.dp else 360.dp)
+            .bringIntoViewRequester(bringIntoView)
+            .testTag("page-browser"),
+        onRelease = { browser.detachView(it) },
+      )
+    }
   }
 }

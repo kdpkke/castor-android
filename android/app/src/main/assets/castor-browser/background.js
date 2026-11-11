@@ -84,4 +84,22 @@ browser.runtime.onMessage.addListener((message, sender) => {
   if (message.type === 'evaluate' && sender.frameId === 0 && typeof message.code === 'string') {
     return browser.tabs.executeScript(tabId, {frameId: 0, code: message.code}).then(values => values[0]);
   }
+  if (message.type === 'player' && sender.frameId === 0 && ['discover', 'read', 'suspend'].includes(message.operation)) {
+    const request = {operation: message.operation, source: message.source, url: message.url};
+    const code = `typeof castorPlayer === 'function' ? castorPlayer(window.wrappedJSObject, value => cloneInto(value, window, {cloneFunctions: true}), ${JSON.stringify(request)}) : []`;
+    return browser.tabs.executeScript(tabId, {allFrames: true, code}).then(values => {
+      const documents = values.flat().filter(Boolean);
+      if (message.operation !== 'discover') return documents;
+      // A page-owned player becomes a source only after its manifest actually reached the browser.
+      return documents.filter(document => [...page.responses.keys()].some(value => {
+        try {
+          const seen = new URL(value);
+          return [document.source, document.url].some(value => {
+            const target = new URL(value);
+            return seen.origin === target.origin && seen.pathname === target.pathname;
+          });
+        } catch (_) { return false; }
+      }));
+    });
+  }
 });

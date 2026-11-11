@@ -26,6 +26,137 @@ import org.junit.Before
 import org.junit.Test
 
 class BrowserSessionTest {
+  @Test
+  fun playerPreparedPlaylistsReloadThroughTheirIframeLoader() = runBlocking {
+    val instrumentation = InstrumentationRegistry.getInstrumentation()
+    val context = instrumentation.targetContext
+    val fixture =
+      instrumentation.context.assets.open("player.html").bufferedReader().use { it.readText() }
+    val page = MockWebServer()
+    val frame = MockWebServer()
+    val pages = AtomicInteger()
+    val access = AtomicInteger()
+    val refused = AtomicBoolean()
+    frame.dispatcher =
+      object : Dispatcher() {
+        override fun dispatch(request: RecordedRequest): MockResponse =
+          when (request.requestUrl!!.encodedPath) {
+            "/player" -> {
+              pages.incrementAndGet()
+              MockResponse().setHeader("Content-Type", "text/html").setBody(fixture)
+            }
+            "/access" ->
+              MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"token\":${access.incrementAndGet()}}")
+            "/manifest" ->
+              if (refused.get()) MockResponse().setResponseCode(403)
+              else
+                MockResponse()
+                  .setHeader("Content-Type", "application/vnd.apple.mpegurl")
+                  .setBody(
+                    "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\"\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:6,\nopaque-reference\n"
+                  )
+            else -> MockResponse().setResponseCode(404)
+          }
+      }
+    frame.start()
+    page.dispatcher =
+      object : Dispatcher() {
+        override fun dispatch(request: RecordedRequest): MockResponse =
+          MockResponse()
+            .setHeader("Content-Type", "text/html")
+            .setBody("<iframe src='${frame.url("/player")}'></iframe>")
+      }
+    page.start()
+    val resolver = withContext(Dispatchers.Main) { BrowserResolver(context) }
+    val bridge = BrowserServer(resolver, { emptyList() }, "fixture-token")
+    try {
+      val api = Rpc(bridge.url, "fixture-token")
+      val response = api.result {
+        api.scraping.resolve(
+          ResolveRequest.newBuilder().addUrls(page.url("/page").toString()).build()
+        )
+      }
+      val url = response.streamsList.single().stream.url
+      suspend fun read(): String = withContext(Dispatchers.IO) { URL(url).readText() }
+      val first = read()
+      assertTrue(
+        "The page's processed segment must reach the reader: $first",
+        first.contains(frame.url("/segments/").toString()),
+      )
+      assertFalse(first, first.contains("opaque-reference"))
+      assertTrue(first, first.contains("URI=\"${frame.url("/key.bin")}\""))
+      assertTrue(first, first.contains("URI=\"${frame.url("/init.mp4")}\""))
+      val second = read()
+      assertNotEquals("Reload must invoke the player again", first, second)
+      assertEquals("The original player page must survive extraction", 1, pages.get())
+      val instance = Regex("/segments/([^/]+)/").find(first)!!.groupValues[1]
+      repeat(5) {
+        val retried = api.result {
+          api.scraping.resolve(
+            ResolveRequest.newBuilder().addUrls(page.url("/page").toString()).build()
+          )
+        }
+        assertEquals(
+          "A retry must retain the same reader capability",
+          url,
+          retried.streamsList.single().stream.url,
+        )
+        assertTrue(read().contains("/segments/$instance/"))
+      }
+      assertEquals("Retries must keep the original player page", 1, pages.get())
+      resolver.showPage(page.url("/another-page").toString())
+      withContext(Dispatchers.Main) { resolver.dismissPage() }
+      assertTrue(
+        "Viewer navigation must preserve the retained player's state",
+        read().contains("/segments/$instance/"),
+      )
+      val other =
+        api
+          .result {
+            api.scraping.resolve(
+              ResolveRequest.newBuilder().addUrls(page.url("/second-source").toString()).build()
+            )
+          }
+          .streamsList
+          .single()
+          .stream
+          .url
+      val otherBody = withContext(Dispatchers.IO) { URL(other).readText() }
+      assertFalse(
+        "Independent sources must own independent player state",
+        otherBody.contains("/segments/$instance/"),
+      )
+      assertTrue(read().contains("/segments/$instance/"))
+      refused.set(true)
+      withContext(Dispatchers.IO) {
+        val failed = URL(url).openConnection() as HttpURLConnection
+        try {
+          assertEquals(502, failed.responseCode)
+        } finally {
+          failed.disconnect()
+        }
+      }
+      refused.set(false)
+      assertTrue(read().contains("/segments/"))
+      bridge.playbackEnded()
+      withContext(Dispatchers.IO) {
+        val expired = URL(url).openConnection() as HttpURLConnection
+        try {
+          assertEquals(404, expired.responseCode)
+        } finally {
+          expired.disconnect()
+        }
+      }
+    } finally {
+      bridge.close()
+      withContext(Dispatchers.Main) { resolver.close() }
+      page.shutdown()
+      frame.shutdown()
+    }
+  }
+
   @Before
   fun prepareBrowserProtection() =
     runBlocking<Unit> {
@@ -35,6 +166,112 @@ class BrowserSessionTest {
           .await()
       }
     }
+
+  @Test
+  fun cancellingPlayerReadWaitsForItsLoaderBeforeStartingAnother() = runBlocking {
+    val instrumentation = InstrumentationRegistry.getInstrumentation()
+    val fixture =
+      instrumentation.context.assets.open("player.html").bufferedReader().use { it.readText() }
+    val slow = AtomicBoolean()
+    val requested = java.util.concurrent.CountDownLatch(1)
+    val origin = MockWebServer()
+    origin.dispatcher =
+      object : Dispatcher() {
+        override fun dispatch(request: RecordedRequest): MockResponse =
+          when (request.requestUrl!!.encodedPath) {
+            "/page" -> MockResponse().setHeader("Content-Type", "text/html").setBody(fixture)
+            "/access" ->
+              MockResponse().setBody("{\"token\":1}").apply {
+                if (slow.getAndSet(false)) {
+                  requested.countDown()
+                  setBodyDelay(1, java.util.concurrent.TimeUnit.SECONDS)
+                }
+              }
+            else ->
+              MockResponse()
+                .setHeader("Content-Type", BrowserResolver.HLS)
+                .setBody("#EXTM3U\n#EXTINF:6,\nopaque-reference\n")
+          }
+      }
+    origin.start()
+    val resolver = withContext(Dispatchers.Main) { BrowserResolver(instrumentation.targetContext) }
+    val playlists = BrowserPlaylists(resolver)
+    try {
+      val base = "http://127.0.0.1:1"
+      val response =
+        resolver.resolve(
+          ResolveRequest.newBuilder().addUrls(origin.url("/page").toString()).build()
+        )
+      val retained = playlists.retain(response, base)
+      val path = java.net.URI(retained.getStreams(0).stream.url).path
+      slow.set(true)
+      val pending = async { playlists.read(path, base) }
+      assertTrue(
+        withContext(Dispatchers.IO) { requested.await(5, java.util.concurrent.TimeUnit.SECONDS) }
+      )
+      withTimeout(5000) { pending.cancelAndJoin() }
+      assertTrue(playlists.read(path, base)!!.body.contains("/segments/"))
+    } finally {
+      playlists.clear()
+      withContext(Dispatchers.Main) { resolver.close() }
+      origin.shutdown()
+    }
+  }
+
+  @Test
+  fun extensionlessChildPlaylistsStayManagedAndKeysStayMediaReferences() = runBlocking {
+    val resolver =
+      withContext(Dispatchers.Main) {
+        BrowserResolver(InstrumentationRegistry.getInstrumentation().targetContext)
+      }
+    val origin = MockWebServer()
+    origin.dispatcher =
+      object : Dispatcher() {
+        override fun dispatch(request: RecordedRequest): MockResponse =
+          MockResponse()
+            .setBody(
+              if (request.path == "/master")
+                "\uFEFF#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,URI=\"audio\"\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nvideo\n"
+              else
+                "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.m3u8\"\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:6,\nsegment.ts\n"
+            )
+      }
+    origin.start()
+    val playlists = BrowserPlaylists(resolver)
+    val base = "http://127.0.0.1:1"
+    try {
+      val retained =
+        playlists.retain(
+          ResolveResponse.newBuilder()
+            .addStreams(
+              StreamCandidate.newBuilder()
+                .setSourcePage(origin.url("/page").toString())
+                .setStream(
+                  Stream.newBuilder()
+                    .setUrl(origin.url("/master").toString())
+                    .setContentType(BrowserResolver.HLS)
+                )
+            )
+            .build(),
+          base,
+        )
+      suspend fun read(address: String) = playlists.read(java.net.URI(address).path, base)!!.body
+      val master = read(retained.getStreams(0).stream.url)
+      val audio = Regex("URI=\"([^\"]+)\"").find(master)!!.groupValues[1]
+      val video = master.lineSequence().filter { it.isNotBlank() && !it.startsWith('#') }.single()
+      for (address in listOf(audio, video)) {
+        assertTrue(address, address.startsWith("$base/playlists/"))
+        val body = read(address)
+        assertTrue(body, body.contains("URI=\"${origin.url("/key.m3u8")}\""))
+        assertTrue(body, body.contains("URI=\"${origin.url("/init.mp4")}\""))
+        assertTrue(body, body.contains(origin.url("/segment.ts").toString()))
+      }
+    } finally {
+      playlists.clear()
+      origin.shutdown()
+      withContext(Dispatchers.Main) { resolver.close() }
+    }
+  }
 
   @Test
   fun playlistRedirectDoesNotForwardCredentialsToAnotherOrigin() = runBlocking {
@@ -155,12 +392,11 @@ class BrowserSessionTest {
     val bridge = BrowserServer(resolver, { emptyList() }, "fixture-token")
     try {
       val api = Rpc(bridge.url, "fixture-token")
-      val response =
-        api.result {
-          api.scraping.resolve(
-            ResolveRequest.newBuilder().addUrls(origin.url("/page").toString()).build()
-          )
-        }
+      val response = api.result {
+        api.scraping.resolve(
+          ResolveRequest.newBuilder().addUrls(origin.url("/page").toString()).build()
+        )
+      }
       assertEquals("application/x-mpegURL", response.streamsList.single().stream.contentType)
       val playlist = response.streamsList.single().stream.url
       ticket.set(2)

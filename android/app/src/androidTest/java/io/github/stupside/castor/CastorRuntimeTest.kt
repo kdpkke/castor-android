@@ -121,6 +121,10 @@ class CastorRuntimeTest {
   fun livePageRenewsExpiredPlaylistWhileThePhoneKeepsServing() = castFixture(true, renewing = true)
 
   @Test
+  fun playerPreparedLivePlaylistCastsAndRenewsThroughTheOriginalPage() =
+    castFixture(true, renewing = true, playerPrepared = true)
+
+  @Test
   fun failedPlaylistRenewalIsAnErrorInsteadOfCompletion() =
     castFixture(true, renewing = true, denyRenewal = true)
 
@@ -146,6 +150,7 @@ class CastorRuntimeTest {
     download: Boolean = false,
     restart: Boolean = false,
     stalledLive: Boolean = false,
+    playerPrepared: Boolean = false,
   ) = runBlocking {
     grantPermissions()
     ActivityScenario.launch(MainActivity::class.java).use { activity ->
@@ -190,7 +195,11 @@ class CastorRuntimeTest {
             "-f",
             "lavfi",
             "-i",
-            if (nativeQuality) "testsrc2=size=256x1440:rate=2" else "testsrc2=size=320x180:rate=25",
+            when {
+              nativeQuality -> "testsrc2=size=256x1440:rate=2"
+              playerPrepared || stalledLive -> "testsrc2=size=320x192:rate=25"
+              else -> "testsrc2=size=320x180:rate=25"
+            },
             "-f",
             "lavfi",
             "-i",
@@ -230,6 +239,13 @@ class CastorRuntimeTest {
         val server = MockWebServer()
         var uri = ""
         val tickets = java.util.concurrent.atomic.AtomicInteger()
+        val playerPages = java.util.concurrent.atomic.AtomicInteger()
+        val playerFixture =
+          if (playerPrepared)
+            instrumentation.context.assets.open("player.html").bufferedReader().use {
+              it.readText()
+            }
+          else ""
         val issued = java.util.concurrent.atomic.AtomicLong()
         val blocked = java.util.concurrent.atomic.AtomicBoolean()
         val began = android.os.SystemClock.elapsedRealtime()
@@ -245,6 +261,31 @@ class CastorRuntimeTest {
         server.dispatcher =
           object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
+              if (playerPrepared) {
+                when (request.requestUrl!!.encodedPath) {
+                  "/watch" ->
+                    return MockResponse()
+                      .setHeader("Content-Type", "text/html")
+                      .setBody("<iframe src='/player'></iframe>")
+                  "/player" -> {
+                    playerPages.incrementAndGet()
+                    return MockResponse()
+                      .setHeader("Content-Type", "text/html")
+                      .setBody(playerFixture)
+                  }
+                  "/access" -> {
+                    val ticket = tickets.incrementAndGet()
+                    issued.set(android.os.SystemClock.elapsedRealtime())
+                    return MockResponse()
+                      .setHeader("Content-Type", "application/json")
+                      .setBody("{\"token\":$ticket}")
+                  }
+                }
+                if (request.requestUrl!!.encodedPath.startsWith("/segments/"))
+                  return MockResponse()
+                    .setHeader("Content-Type", "image/png")
+                    .setBody(Buffer().write(wrapped!!))
+              }
               if (renewing && request.path == "/watch") {
                 val ticket = tickets.incrementAndGet()
                 issued.set(android.os.SystemClock.elapsedRealtime())
@@ -252,10 +293,16 @@ class CastorRuntimeTest {
                   .setHeader("Content-Type", "text/html")
                   .setBody("<script>fetch('/video.m3u8?ticket=$ticket');</script>")
               }
-              if (renewing && request.requestUrl!!.encodedPath == "/video.m3u8") {
+              if (
+                renewing &&
+                  request.requestUrl!!.encodedPath ==
+                    if (playerPrepared) "/manifest" else "/video.m3u8"
+              ) {
                 if (
                   blocked.get() ||
-                    request.requestUrl!!.queryParameter("ticket") != tickets.get().toString() ||
+                    request.requestUrl!!.queryParameter(
+                      if (playerPrepared) "access" else "ticket"
+                    ) != tickets.get().toString() ||
                     android.os.SystemClock.elapsedRealtime() - issued.get() >= 8000
                 )
                   return MockResponse().setResponseCode(403)
@@ -265,7 +312,7 @@ class CastorRuntimeTest {
                   .setBody(
                     "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:$first\n" +
                       (first..first + 2).joinToString("") {
-                        "#EXT-X-DISCONTINUITY\n#EXTINF:4,\nsegment.png?n=$it\n"
+                        "#EXT-X-DISCONTINUITY\n#EXTINF:4,\n${if (playerPrepared) "opaque-reference" else "segment.png"}?n=$it\n"
                       }
                   )
               }
@@ -427,7 +474,9 @@ class CastorRuntimeTest {
                   else setStream(Stream.newBuilder().setUrl(server.url("/video.mp4").toString()))
                 }
               )
-              .setPreferences(Preferences.newBuilder().setMaxHeight(90))
+              .setPreferences(
+                Preferences.newBuilder().setMaxHeight(if (playerPrepared || stalledLive) 192 else 90)
+              )
               .build()
           val chosenRequest =
             if (nativeQuality)
@@ -472,9 +521,14 @@ class CastorRuntimeTest {
               if (update.hasEnded()) ended = update.ended
             }
           }
+          val mediaReceived =
+            withTimeoutOrNull(90_000) {
+              while (received.count > 0 && ended == null) delay(100)
+              received.count == 0L
+            } == true
           assertTrue(
-            "Receiver did not receive transcoded media; ${service.failure.value}",
-            withContext(Dispatchers.IO) { received.await(90, TimeUnit.SECONDS) },
+            "Receiver did not receive transcoded media; $ended; ${service.failure.value}",
+            mediaReceived,
           )
           assertTrue("DLNA must fetch the phone's media route", uri.contains("/media/"))
           if (download) {
@@ -569,6 +623,8 @@ class CastorRuntimeTest {
               val before = receivedBytes.get()
               withTimeout(15_000) { while (receivedBytes.get() <= before) delay(100) }
               assertNull("The live cast ended after renewed access", ended)
+              if (playerPrepared)
+                assertEquals("Casting must keep the original player instance", 1, playerPages.get())
               if (denyRenewal) {
                 blocked.set(true)
                 withTimeout(45_000) { watcher.await() }

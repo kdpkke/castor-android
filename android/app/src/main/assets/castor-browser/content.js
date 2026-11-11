@@ -31,10 +31,11 @@ native?.onMessage.addListener(async message => {
     browser.runtime.sendMessage({type: 'extracting', value: message.value === true}).catch(() => {});
     return;
   }
-  if (message.type !== 'evaluate') return;
+  if (!['evaluate', 'player'].includes(message.type)) return;
   try {
     const value = await browser.runtime.sendMessage(message);
-    native.postMessage({type: 'evaluation', id: message.id, value: JSON.stringify(value) ?? 'null'});
+    const encoded = JSON.stringify(value) ?? 'null';
+    native.postMessage({type: 'evaluation', id: message.id, value: new TextEncoder().encode(encoded).length <= 4 * 1024 * 1024 ? encoded : 'null'});
   } catch (_) { native.postMessage({type: 'evaluation', id: message.id, value: 'null'}); }
 });
 native?.onDisconnect.addListener(() => clearInterval(timer));

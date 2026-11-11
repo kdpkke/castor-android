@@ -66,6 +66,24 @@ android.sourceSets {
   }
 }
 
+val playerAssets = tasks.register<Sync>("playerAssets") {
+  from(rootProject.file("../internal/browserstream/assets"))
+  into(layout.buildDirectory.dir("generated/playerAssets"))
+}
+android.sourceSets.named("main") {
+  assets.directories.add(layout.buildDirectory.dir("generated/playerAssets").get().asFile.path)
+}
+tasks.named("preBuild") { dependsOn(playerAssets) }
+
+val playerFixtures = tasks.register<Sync>("playerFixtures") {
+  from(rootProject.file("../internal/browserstream/testdata"))
+  into(layout.buildDirectory.dir("generated/playerFixtures"))
+}
+android.sourceSets.named("androidTest") {
+  assets.directories.add(layout.buildDirectory.dir("generated/playerFixtures").get().asFile.path)
+}
+tasks.named("preBuild") { dependsOn(playerFixtures) }
+
 tasks.named("preBuild") { dependsOn(":client:bufGenerate") }
 
 protobuf {
