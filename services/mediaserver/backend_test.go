@@ -4,13 +4,38 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"strings"
 	"testing"
 
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
+	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
+
+func TestSoftwareRetryDoesNotChangeOtherCastsEncoderSelection(t *testing.T) {
+	bin, err := exec.LookPath("true")
+	if err != nil {
+		t.Skip("no true binary")
+	}
+	cfg := defaults()
+	cfg.Servers.Media.FFmpeg.Path = bin
+	cfg.Servers.Media.FFmpeg.HardwareEncoders = []string{"h264_mediacodec"}
+	create := cfg.backend()
+	for _, software := range []bool{false, true, false} {
+		asked := &mediav1.PlaybackSettings{SoftwareVideo: software}
+		cast := create(asked).(caster)
+		encoder, ok := cast.machinery.Encoders(t.Context(), media.CodecH264)
+		want := "h264_mediacodec"
+		if software {
+			want = "libx264"
+		}
+		if !ok || encoder.Name != want {
+			t.Errorf("software=%v selected %s, want %s", software, encoder.Name, want)
+		}
+	}
+}
 
 func TestSourceCaptionSelectionDoesNotEnableTranscription(t *testing.T) {
 	selection := &castorv1.SubtitleSelection{Mode: &castorv1.SubtitleSelection_Preferences{Preferences: &castorv1.SubtitlePreferences{Languages: []string{"en"}}}}

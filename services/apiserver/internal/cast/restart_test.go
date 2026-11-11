@@ -16,11 +16,126 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+type lostPositionDevice struct {
+	*restartDevice
+	queries atomic.Int32
+}
+
+func TestLiveRecoveryWaitsForReceiverObservationsToConfirmAStall(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		c := newCast("position-pending", &castorv1.Device{}, &castorv1.CastRequest{}, func(error) {})
+		d := &restartDevice{head: &device.Playhead{At: time.Second}}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration, _ bool) (*castorv1.Ended, error) {
+				_ = w.Play(ctx, live)
+				ticker := time.NewTicker(5 * time.Second)
+				defer ticker.Stop()
+				for observations := 0; ; observations++ {
+					if observations < 2 {
+						_, _ = w.Position(ctx)
+					}
+					select {
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					case <-ticker.C:
+					}
+				}
+			}, noPause)
+		}()
+		time.Sleep(13 * time.Second)
+		synctest.Wait()
+		if got := c.automaticRestarts.Load(); got != 0 {
+			t.Errorf("two receiver observations five seconds apart caused %d restarts", got)
+		}
+		cancel()
+		<-done
+	})
+}
+
+func (d *lostPositionDevice) Position(context.Context) (device.Playhead, error) {
+	if d.queries.Add(1) == 1 {
+		return device.Playhead{At: time.Second}, nil
+	}
+	return device.Playhead{}, device.ErrNoPosition
+}
+
+func TestLiveRecoveryDoesNotTreatAnOldPositionAsFreshStallEvidence(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		c := newCast("position-lost", &castorv1.Device{}, &castorv1.CastRequest{}, func(error) {})
+		d := &lostPositionDevice{restartDevice: &restartDevice{}}
+		var starts atomic.Int32
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration, _ bool) (*castorv1.Ended, error) {
+				starts.Add(1)
+				_ = w.Play(ctx, live)
+				tick := time.NewTicker(5 * time.Second)
+				defer tick.Stop()
+				for {
+					if head, err := w.Position(ctx); err == nil {
+						heard(c, head.At, head.Paused)
+					}
+					select {
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					case <-tick.C:
+					}
+				}
+			}, noPause)
+		}()
+		time.Sleep(25 * time.Second)
+		synctest.Wait()
+		if starts.Load() != 1 || d.stops.Load() != 0 {
+			t.Errorf("position reads failed, but recovery started %d pipelines and sent %d STOPs", starts.Load(), d.stops.Load())
+		}
+		cancel()
+		<-done
+	})
+}
+
+func TestReceiverPositionExpiresAndBelongsToItsPlayback(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := &watched{Device: &restartDevice{head: &device.Playhead{At: time.Second}}}
+		_ = w.Play(t.Context(), live)
+		_, _ = w.Position(t.Context())
+		_, fresh := w.reportedHead(time.Now())
+		if fresh == nil {
+			t.Fatal("a fresh position was lost")
+		}
+		time.Sleep(liveStallTimeout + time.Second)
+		_, expired := w.reportedHead(time.Now())
+		if expired != nil {
+			t.Fatal("an expired position remained usable for live recovery")
+		}
+		_, _ = w.Position(t.Context())
+		_ = w.Play(t.Context(), live)
+		_, replaced := w.reportedHead(time.Now())
+		if replaced != nil {
+			t.Fatal("a replacement playback inherited the previous position")
+		}
+	})
+}
+
 type restartDevice struct {
 	device.Device
 	stops  atomic.Int32
 	onStop func()
 	ended  chan struct{}
+	head   *device.Playhead
+}
+
+func (d *restartDevice) Position(context.Context) (device.Playhead, error) {
+	if d.head == nil {
+		return device.Playhead{}, device.ErrNoPosition
+	}
+	return *d.head, nil
 }
 
 func (d *restartDevice) Stop(context.Context) error {
@@ -75,7 +190,7 @@ func TestManagedHandoffEndsWhenTheReceiverAlreadyReportedTheEnd(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
 		began := time.Now()
-		ended, err := runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration) (*castorv1.Ended, error) {
+		ended, err := runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration, _ bool) (*castorv1.Ended, error) {
 			if err := w.Play(ctx, source); err != nil {
 				return nil, err
 			}
@@ -137,7 +252,7 @@ func TestRestartJoinsOldPipelineBeforeStopAndKeepsTheCastIdentity(t *testing.T) 
 		go func() {
 			defer close(finished)
 			defer close(c.done)
-			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, id string, start time.Duration) (*castorv1.Ended, error) {
+			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, id string, start time.Duration, _ bool) (*castorv1.Ended, error) {
 				if running.Add(1) != 1 {
 					t.Error("replacement raced old cleanup")
 				}
@@ -188,7 +303,7 @@ func TestARestartOfAPausedVideoPausesTheNewRunThroughTheMediaServer(t *testing.T
 		go func() {
 			defer close(finished)
 			defer close(c.done)
-			_, _ = runRestartable(ctx, c, &restartDevice{}, func(ctx context.Context, w *watched, id string, _ time.Duration) (*castorv1.Ended, error) {
+			_, _ = runRestartable(ctx, c, &restartDevice{}, func(ctx context.Context, w *watched, id string, _ time.Duration, _ bool) (*castorv1.Ended, error) {
 				_ = w.Play(ctx, finite)
 				heard(c, time.Minute, true)
 				ids <- id
@@ -272,26 +387,38 @@ func TestOnlyLiveStallsRestartInTheBackgroundAndRetriesAreBounded(t *testing.T) 
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				c := newCast("live", &castorv1.Device{}, &castorv1.CastRequest{}, func(error) {})
-				d := &restartDevice{}
+				d := &restartDevice{head: &device.Playhead{At: time.Second, Paused: tc.paused}}
 				var starts atomic.Int32
 				done := make(chan struct{})
 				go func() {
 					defer close(done)
-					_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration) (*castorv1.Ended, error) {
+					_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration, software bool) (*castorv1.Ended, error) {
 						played := finite
 						if tc.live {
 							played = live
 						}
 						_ = w.Play(ctx, played)
-						if tc.heard {
-							heard(c, time.Second, tc.paused)
+						attempt := starts.Add(1)
+						if software != (attempt > 1) {
+							t.Errorf("attempt %d software=%v, want %v", attempt, software, attempt > 1)
 						}
-						starts.Add(1)
-						<-ctx.Done()
-						return nil, ctx.Err()
+						tick := time.NewTicker(5 * time.Second)
+						defer tick.Stop()
+						for {
+							if tc.heard {
+								if head, err := w.Position(ctx); err == nil {
+									heard(c, head.At, head.Paused)
+								}
+							}
+							select {
+							case <-ctx.Done():
+								return nil, ctx.Err()
+							case <-tick.C:
+							}
+						}
 					}, noPause)
 				}()
-				time.Sleep(13 * time.Second)
+				time.Sleep(18 * time.Second)
 				synctest.Wait()
 				if starts.Load() != tc.want {
 					t.Fatalf("started %d, want %d", starts.Load(), tc.want)
@@ -326,7 +453,7 @@ func TestStopDuringRestartCannotLaunchAnotherPipeline(t *testing.T) {
 		go func() {
 			defer close(finished)
 			defer close(c.done)
-			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration) (*castorv1.Ended, error) {
+			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration, _ bool) (*castorv1.Ended, error) {
 				if starts.Add(1) > 1 {
 					t.Error("Stop resurrected playback")
 					return nil, ctx.Err()
@@ -376,7 +503,7 @@ func TestManagedHandoffKeepsControlsAndRestartUntilTheReceiverEnds(t *testing.T)
 		go func() {
 			defer close(finished)
 			defer close(c.done)
-			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration) (*castorv1.Ended, error) {
+			_, _ = runRestartable(ctx, c, d, func(ctx context.Context, w *watched, _ string, _ time.Duration, _ bool) (*castorv1.Ended, error) {
 				starts.Add(1)
 				if err := w.Play(ctx, source); err != nil {
 					return nil, err

@@ -55,6 +55,10 @@ func (c *Config) backend() func(*mediav1.PlaybackSettings) cast.Caster {
 	}
 	resolverConfig, whisperConfig := c.Servers.Media.Resolver.Config, c.Servers.Media.Whisper
 	return func(asked *mediav1.PlaybackSettings) cast.Caster {
+		playbackMachinery := machinery
+		if asked.GetSoftwareVideo() {
+			playbackMachinery.Encoders = machinery.Software
+		}
 		client := web.New(fetchTimeout)
 		timelines := follow.New(client, formats, follow.Repackager(ffmpegBinary))
 		resolver := resolverWithProbe(client, media.HeightCap(asked.GetMaxHeight()), asked.GetAudio().GetLanguages(), machinery.Probes)
@@ -62,7 +66,7 @@ func (c *Config) backend() func(*mediav1.PlaybackSettings) cast.Caster {
 			Ranker: rank.New(resolverConfig, media.HeightCap(asked.GetMaxHeight()), asked.GetAudio().GetLanguages(), func(ctx context.Context, s *source.Stream) (source.Inspection, error) {
 				return (candidateProbe{stream: s, client: client, resolver: resolver, timelines: timelines, binary: machinery.Probes}).Inspect(ctx)
 			}),
-			machinery:     machinery,
+			machinery:     playbackMachinery,
 			client:        client,
 			resolver:      resolver,
 			timelines:     timelines,

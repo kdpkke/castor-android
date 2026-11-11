@@ -44,6 +44,9 @@ message PlaybackSettings {
   // preserve_source keeps finite sources original; live sources may be optimized after a native refusal.
   // Android extension; keep low field numbers available to upstream.
   bool preserve_source = 1000;
+  // software_video retries an unresponsive live receiver without hardware encoding.
+  // Upstream proposal; keep low field numbers available to upstream.
+  bool software_video = 1001;
 }
 
 message StartResponse {}

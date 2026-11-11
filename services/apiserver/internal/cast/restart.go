@@ -11,6 +11,7 @@ import (
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
@@ -57,8 +58,13 @@ func (s *Service) Restart(ctx context.Context, req *castorv1.RestartRequest) (*c
 }
 
 func (s *Service) runConnected(ctx context.Context, c *cast, lent device.Device, asked *mediav1.PlaybackSettings) (*castorv1.Ended, error) {
-	return runRestartable(ctx, c, lent, func(ctx context.Context, w *watched, id string, start time.Duration) (*castorv1.Ended, error) {
-		return s.runPlayback(ctx, c, w, asked, id, start)
+	return runRestartable(ctx, c, lent, func(ctx context.Context, w *watched, id string, start time.Duration, software bool) (*castorv1.Ended, error) {
+		settings := asked
+		if software {
+			settings = proto.CloneOf(asked)
+			settings.SoftwareVideo = true
+		}
+		return s.runPlayback(ctx, c, w, settings, id, start)
 	}, func(ctx context.Context, id string) error {
 		_, err := s.media.Casts.Pause(ctx, &castorv1.PauseRequest{CastId: id})
 		return err
@@ -73,10 +79,11 @@ func (c *cast) mediaID() string {
 	return c.id
 }
 
-func runRestartable(ctx context.Context, c *cast, lent device.Device, run func(context.Context, *watched, string, time.Duration) (*castorv1.Ended, error), pause func(context.Context, string) error) (*castorv1.Ended, error) {
+func runRestartable(ctx context.Context, c *cast, lent device.Device, run func(context.Context, *watched, string, time.Duration, bool) (*castorv1.Ended, error), pause func(context.Context, string) error) (*castorv1.Ended, error) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	start, paused := c.start, false
+	softwareVideo := false
 	key := c.id
 	var stall liveStall
 	consecutive := 0
@@ -89,7 +96,10 @@ func runRestartable(ctx context.Context, c *cast, lent device.Device, run func(c
 		}
 		c.media.Store(&key)
 		done := make(chan playbackResult, 1)
-		go func() { ended, err := run(life, w, key, start); done <- playbackResult{ended, err} }()
+		go func(software bool) {
+			ended, err := run(life, w, key, start, software)
+			done <- playbackResult{ended, err}
+		}(softwareVideo)
 		var request *restartRequest
 		automatic := false
 		handedOff := false
@@ -131,7 +141,9 @@ func runRestartable(ctx context.Context, c *cast, lent device.Device, run func(c
 				break wait
 			case now := <-ticker.C:
 				loaded := w.loaded.Load()
-				if stall.sample(now, loaded, playhead(c)) {
+				reportedAt, head := w.reportedHead(now)
+				if stall.sample(reportedAt, loaded, head) {
+					slog.WarnContext(ctx, "live playhead has not changed", "at", stall.at, "unchanged_for", reportedAt.Sub(stall.since))
 					if consecutive >= maxStalledLiveRestarts {
 						cancel()
 						<-done
@@ -167,8 +179,9 @@ func runRestartable(ctx context.Context, c *cast, lent device.Device, run func(c
 			}
 			return nil, fmt.Errorf("stopping playback for restart: %w", err)
 		}
+		softwareVideo = softwareVideo || automatic
 		c.show(&castorv1.CastStatus{State: &castorv1.CastStatus_Restarting{Restarting: &castorv1.RestartingStatus{Automatic: automatic}}})
-		slog.InfoContext(ctx, "restarting cast on its leased receiver", "automatic", automatic, "at", start)
+		slog.InfoContext(ctx, "restarting cast on its leased receiver", "automatic", automatic, "at", start, "software_video", softwareVideo)
 		if request != nil && !automatic {
 			request.done <- nil
 		}
@@ -184,11 +197,40 @@ type playbackResult struct {
 // watched is the leased device as one run plays it: what it was handed last, and whether it said that ended.
 type watched struct {
 	device.Device
-	loaded atomic.Pointer[device.Playback]
+	loaded   atomic.Pointer[device.Playback]
+	position atomic.Pointer[receiverHead]
 	// ended is the receiver's own report that what was handed last has finished.
 	ended atomic.Bool
 	// pauseOnLoad holds a restarted run paused, as its viewer had it, once it plays.
 	pauseOnLoad func()
+}
+
+type receiverHead struct {
+	play     *device.Playback
+	head     *castorv1.Playhead
+	received time.Time
+}
+
+// Position keeps the receiver's observations separate from public status, which
+// deliberately retains the last known position when subsequent reads fail.
+func (w *watched) Position(ctx context.Context) (device.Playhead, error) {
+	play := w.loaded.Load()
+	head, err := w.Device.Position(ctx)
+	observed := &receiverHead{play: play, received: time.Now()}
+	if err == nil {
+		observed.head = &castorv1.Playhead{Position: durationpb.New(head.At), Paused: head.Paused}
+	}
+	w.position.Store(observed)
+	return head, err
+}
+
+func (w *watched) reportedHead(now time.Time) (time.Time, *castorv1.Playhead) {
+	observed := w.position.Load()
+	if observed == nil || observed.play != w.loaded.Load() || now.Sub(observed.received) > liveStallTimeout {
+		return now, nil
+	}
+	// Re-reading a cached observation cannot extend a receiver-confirmed stall.
+	return observed.received, observed.head
 }
 
 func (w *watched) Play(ctx context.Context, p device.Playback) error {
