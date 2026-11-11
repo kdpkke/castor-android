@@ -101,7 +101,7 @@ func buildDIDLMetadata(entry sinkEntry, playback device.Playback) (string, error
 			Res: []didlRes{{
 				ProtocolInfo: fmt.Sprintf("http-get:*:%s:%s", entry.mime, stated(entry, playback.Play)),
 				Value:        playback.URL.String(),
-				Duration:     clock(playback.Duration()),
+				Duration:     clock(announcedLength(playback)),
 			}},
 		},
 	}
@@ -122,4 +122,16 @@ func clock(d time.Duration) string {
 	}
 	s := int(d.Round(time.Second).Seconds())
 	return fmt.Sprintf("%d:%02d:%02d", s/3600, s/60%60, s%60)
+}
+
+// liveLength is the length a live stream is announced with. A renderer told none reports no position for the stream
+// and may read the next such stream without ever playing it; it stops at the length it is told, so a live one is told a day.
+const liveLength = 24*time.Hour - time.Second
+
+// announcedLength is the duration a renderer is told: the stream's own, or a live stream's stand-in.
+func announcedLength(playback device.Playback) time.Duration {
+	if d := playback.Duration(); d > 0 || !playback.Play.GetLive() {
+		return d
+	}
+	return liveLength
 }
