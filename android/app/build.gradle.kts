@@ -33,7 +33,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            versionNameSuffix = "-test.33"
+            versionNameSuffix = "-test.34"
             manifestPlaceholders["appLabel"] = "Castor (test)"
         }
         release {

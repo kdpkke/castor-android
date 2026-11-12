@@ -23,6 +23,8 @@ internal fun CastSessions(
   videoName: (String) -> String?,
   select: (String) -> Unit,
   newCast: () -> Unit,
+  // The name of the TV a cast goes to, the same whichever protocol it uses.
+  receiverName: (castor.v1.DeviceOuterClass.Device) -> String = { it.name },
 ) {
   Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -73,7 +75,7 @@ internal fun CastSessions(
           CastIcon(R.drawable.ic_tv)
           Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-              cast.device.name
+              receiverName(cast.device)
                 .ifBlank { cast.device.address }
                 .ifBlank { stringResource(R.string.need_tv) },
               style = MaterialTheme.typography.titleMedium,

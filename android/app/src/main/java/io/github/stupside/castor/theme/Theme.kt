@@ -4,6 +4,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
@@ -77,10 +79,26 @@ private val dark =
     onErrorContainer = Color(0xFFFFDAD5),
   )
 
+// Amber for a warning that stays on screen until it is dealt with: a role the Material scheme does not have.
+data class WarningColors(val container: Color, val content: Color)
+
+private val lightWarning = WarningColors(container = Color(0xFFFFE08A), content = Color(0xFF3B2D00))
+private val darkWarning = WarningColors(container = Color(0xFF5B4500), content = Color(0xFFFFE399))
+
+val LocalWarningColors = staticCompositionLocalOf { darkWarning }
+
 @Composable
 fun CastorTheme(theme: AppTheme = AppTheme.Dark, content: @Composable () -> Unit) {
+  val isDark = theme.isDark(isSystemInDarkTheme())
+  CompositionLocalProvider(LocalWarningColors provides if (isDark) darkWarning else lightWarning) {
+    CastorMaterialTheme(isDark, content)
+  }
+}
+
+@Composable
+private fun CastorMaterialTheme(isDark: Boolean, content: @Composable () -> Unit) {
   MaterialTheme(
-    colorScheme = if (theme.isDark(isSystemInDarkTheme())) dark else light,
+    colorScheme = if (isDark) dark else light,
     typography = Typography,
     shapes =
       Shapes(

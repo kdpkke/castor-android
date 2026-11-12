@@ -114,6 +114,8 @@ internal object EngineHost : EngineDemand {
     }
     if (failure != null) this.failure.value = failure
     lifecycle.stopped(service.generation, restart)
+    // An app update that waited for the casts to end can close Castor now.
+    context?.let(AppUpdates::engineStopped)
   }
 
   // The user asked for the engine to stop, with whatever it is casting.

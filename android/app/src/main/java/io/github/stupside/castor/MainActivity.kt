@@ -57,6 +57,7 @@ class MainActivity : ComponentActivity() {
     browser = BrowserHost.acquire(model, this)
     sharedUrl = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
     if (savedInstanceState == null) receiveVideo(intent)
+    AppUpdates.check(applicationContext)
     enableEdgeToEdge()
     setContent {
       val options = remember { CastOptions(this) }
@@ -205,6 +206,7 @@ class MainActivity : ComponentActivity() {
 
   override fun onResume() {
     super.onResume()
+    AppUpdates.shown(true)
     if (
       permissionDenied &&
         Build.VERSION.SDK_INT >= 37 &&
@@ -213,6 +215,11 @@ class MainActivity : ComponentActivity() {
     ) {
       permissionDenied = false
     }
+  }
+
+  override fun onPause() {
+    AppUpdates.shown(false)
+    super.onPause()
   }
 
   override fun onDestroy() {

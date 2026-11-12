@@ -40,6 +40,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import castor.v1.DeviceOuterClass.DeviceType
+import io.github.stupside.castor.AppUpdates
 import io.github.stupside.castor.BrowserResolver
 import io.github.stupside.castor.R
 import io.github.stupside.castor.theme.*
@@ -141,6 +142,19 @@ fun MainScreen(
       tv.manual -> null
       else -> tv.available(state.devices)
     }
+      // Found again under the TV's own name, never the protocol's: the choice keeps the name it was made with.
+      ?.let { it.copy(name = tvNameAt(it.address, state.devices) ?: tv?.name ?: it.name) }
+  // A receiver under the name its TV goes by, as discovery finds the TV, or as the chosen TV is named when it is
+  // the same one.
+  fun tvNameOf(receiver: SavedTv): String =
+    tvNameAt(receiver.address, state.devices)
+      ?: tv
+        ?.takeIf { saved ->
+          val host = receiverHost(saved.address)
+          host != null && receiverHost(receiver.address)?.let { sameHost(it, host) } == true
+        }
+        ?.name
+      ?: receiver.name
   val tvMissing = tv != null && !tv.manual && searched && found == null
   // Receivers saved before identities only have an address that may be stale: wait for a search. A choice anchored
   // to its TV's identity waits too: its own id proves nothing until that TV is found.
@@ -154,6 +168,11 @@ fun MainScreen(
   var subtitles by rememberSaveable { mutableStateOf(options.subtitles()) }
   var sheet by rememberSaveable { mutableStateOf<String?>(null) }
   var menu by remember { mutableStateOf(false) }
+  val release by AppUpdates.release.collectAsStateWithLifecycle()
+  val readNotices by AppUpdates.read.collectAsStateWithLifecycle()
+  val updateStatus by AppUpdates.status.collectAsStateWithLifecycle()
+  val notices = listOfNotNull(release?.let { Notice.Update(it) })
+  var updatePage by rememberSaveable { mutableStateOf(false) }
   val busy = state.castId != null || state.submitting
   val tvOccupied = tv?.let(state::occupying)
   val validUrl =
@@ -171,40 +190,53 @@ fun MainScreen(
     containerColor = Color.Transparent,
     snackbarHost = { SnackbarHost(snackbar) },
     topBar = {
-      TopAppBar(
-        title = {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Image(painterResource(R.drawable.ic_launcher_foreground), null, Modifier.size(40.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Castor", style = MaterialTheme.typography.titleLarge)
-          }
-        },
-        actions = {
-          Text(
-            stringResource(
-              if (state.ready) R.string.engine_ready
-              else if (state.phase == CastPhase.Preparing) R.string.engine_preparing
-              else R.string.engine_unavailable
-            ),
-            modifier =
-              Modifier.widthIn(max = 170.dp)
-                .glassMaterial(RoundedCornerShape(50))
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-          )
-          Box {
-            IconButton(
-              onClick = { menu = true },
-              modifier =
-                Modifier.padding(start = 8.dp, end = 12.dp).glassMaterial(RoundedCornerShape(50)),
-            ) {
-              CastIcon(R.drawable.ic_more, stringResource(R.string.more_options))
+      Column {
+        TopAppBar(
+          title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Image(painterResource(R.drawable.ic_launcher_foreground), null, Modifier.size(40.dp))
+              Spacer(Modifier.width(6.dp))
+              Text("Castor", style = MaterialTheme.typography.titleLarge)
             }
-          }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-      )
+          },
+          actions = {
+            Text(
+              stringResource(
+                if (state.ready) R.string.engine_ready
+                else if (state.phase == CastPhase.Preparing) R.string.engine_preparing
+                else R.string.engine_unavailable
+              ),
+              modifier =
+                Modifier.widthIn(max = 170.dp)
+                  .glassMaterial(RoundedCornerShape(50))
+                  .padding(horizontal = 12.dp, vertical = 8.dp),
+              style = MaterialTheme.typography.labelMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            NoticeBell(
+              unread = notices.count { it.id !in readNotices },
+              onClick = { sheet = "notices" },
+              modifier = Modifier.padding(start = 8.dp),
+            )
+            Box {
+              IconButton(
+                onClick = { menu = true },
+                modifier =
+                  Modifier.padding(start = 8.dp, end = 12.dp).glassMaterial(RoundedCornerShape(50)),
+              ) {
+                CastIcon(R.drawable.ic_more, stringResource(R.string.more_options))
+              }
+            }
+          },
+          colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+        )
+        // Fixed under the header, outside the scrolling content, until battery optimization is off.
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+          BatteryOptimizationBanner(
+            Modifier.widthIn(max = 680.dp).fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 4.dp)
+          )
+        }
+      }
     },
     bottomBar = {
       Surface(color = Color.Transparent) {
@@ -342,7 +374,13 @@ fun MainScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp),
       ) {
         if (state.sessions.isNotEmpty()) {
-          CastSessions(state, viewModel::videoName, viewModel::selectCast, viewModel::newCast)
+          CastSessions(
+            state,
+            viewModel::videoName,
+            viewModel::selectCast,
+            viewModel::newCast,
+            receiverName = { device -> tvNameOf(SavedTv(device)) },
+          )
         }
         if (busy) {
           val active = state.activeCast
@@ -358,6 +396,7 @@ fun MainScreen(
               ?.device
               ?.takeIf { it.address.isNotBlank() && it.type in receiverTypes }
               ?.let { SavedTv(it) }
+              ?.let { it.copy(name = tvNameOf(it)) }
           // The page this cast came from, to check by hand whether it still plays.
           val pageUrl =
             activeUrl.takeIf { browser != null && source?.hasPages() == true && !extracting }
@@ -542,7 +581,7 @@ fun MainScreen(
                 tv == null -> stringResource(R.string.tv_help)
                 tvMissing -> stringResource(R.string.tv_not_found)
                 !tv.manual && found == null && state.ready -> stringResource(R.string.tv_checking)
-                else -> "${protocolName(tv.type)} · ${tv.address}"
+                else -> receiverDetail(tv)
               },
               if (tv == null) R.string.choose_tv else R.string.change_tv,
             ) {
@@ -663,6 +702,28 @@ fun MainScreen(
         }
       }
     }
+  if (sheet == "notices")
+    NoticesSheet(
+      notices,
+      readNotices,
+      open = { notice ->
+        AppUpdates.markRead(context.applicationContext, notice.id)
+        sheet = null
+        when (notice) {
+          is Notice.Update -> updatePage = true
+        }
+      },
+      dismiss = { sheet = null },
+    )
+  val offered = release
+  if (updatePage && offered != null)
+    UpdatePage(
+      offered,
+      updateStatus,
+      remember { AppUpdates.installedVersion(context) },
+      language.tag,
+      dismiss = { updatePage = false },
+    )
   if (sheet == "language") AppLanguagePicker(language, { sheet = null }, selectLanguage)
   if (sheet == "theme") AppThemePicker(theme, { sheet = null }, selectTheme)
   if (sheet == "tv")
@@ -715,6 +776,9 @@ internal fun protocolName(type: DeviceType): String =
     DeviceType.DEVICE_TYPE_FCAST -> "FCast"
     else -> "DLNA"
   }
+
+// Under a TV's name: the protocol it is reached by and where, with the port that protocol uses.
+internal fun receiverDetail(tv: SavedTv): String = "${protocolName(tv.type)} · ${receiverEndpoint(tv)}"
 
 @Composable
 internal fun ActionRow(
@@ -916,7 +980,7 @@ private fun ActiveCast(
           tv?.name ?: stringResource(R.string.current_tv),
           style = MaterialTheme.typography.headlineMedium,
         )
-        tv?.let { Text(protocolName(it.type), style = MaterialTheme.typography.bodyMedium) }
+        tv?.let { Text(receiverDetail(it), style = MaterialTheme.typography.bodyMedium) }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Text(
           sourceName

@@ -44,13 +44,90 @@ native?.onMessage.addListener(async message => {
     browser.runtime.sendMessage({type: 'extracting', value: message.value === true}).catch(() => {});
     return;
   }
-  if (!['evaluate', 'player'].includes(message.type)) return;
+  if (!['evaluate', 'player', 'autoplay'].includes(message.type)) return;
   try {
     const value = await browser.runtime.sendMessage(message);
     const encoded = JSON.stringify(value) ?? 'null';
     native.postMessage({type: 'evaluation', id: message.id, value: new TextEncoder().encode(encoded).length <= 4 * 1024 * 1024 ? encoded : 'null'});
   } catch (_) { native.postMessage({type: 'evaluation', id: message.id, value: 'null'}); }
 });
+// Starting a player that waits for a person. While the app looks for a stream that has not started, it asks each
+// frame whether a video plays, and the top-level document where the largest player is, to tap its middle as a
+// person would. Where it cannot tap, each frame clicks its own play control. A link is never clicked: it would
+// take the page elsewhere.
+const playControls = [
+  '.vjs-big-play-button', '.jw-display-icon-display', '.jw-icon-display', '.plyr__control--overlaid',
+  '.fp-play', '.mejs__overlay-button', '.shaka-play-button', '.bmpui-ui-hugeplaybacktogglebutton',
+  '.play-wrapper', '[data-plyr="play"]', '[aria-label="play" i]', 'button[title="play" i]',
+  '[class*="play-button" i]', '[class*="play_button" i]', '[class*="playbutton" i]', '[class*="btn-play" i]',
+  '[id*="play-button" i]', '[id*="playbutton" i]',
+];
+function shown(element) {
+  const box = element.getBoundingClientRect();
+  if (box.width < 24 || box.height < 24) return null;
+  const style = getComputedStyle(element);
+  if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) return null;
+  return box;
+}
+function linked(element) {
+  return !element || element.closest('a[href]') !== null;
+}
+function largestPlayer() {
+  let best = null;
+  let area = 0;
+  for (const element of document.querySelectorAll('video, iframe, embed, object')) {
+    const box = shown(element);
+    if (!box || box.width < 160 || box.height < 90 || box.width * box.height <= area) continue;
+    best = element;
+    area = box.width * box.height;
+  }
+  return best;
+}
+function press(element) {
+  const box = element.getBoundingClientRect();
+  const at = {bubbles: true, cancelable: true, composed: true, clientX: box.left + box.width / 2, clientY: box.top + box.height / 2};
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+    element.dispatchEvent(type.startsWith('pointer') ? new PointerEvent(type, {...at, pointerType: 'touch', isPrimary: true}) : new MouseEvent(type, at));
+  }
+  element.click();
+}
+function castorAutoplay(operation) {
+  const playing = Array.from(document.querySelectorAll('video')).some(video => !video.paused && !video.ended);
+  if (operation === 'probe') {
+    const report = {top: window === window.top, playing};
+    if (!report.top) return report;
+    const player = largestPlayer();
+    if (!player) return report;
+    player.scrollIntoView({block: 'center', inline: 'center'});
+    const box = player.getBoundingClientRect();
+    const x = box.left + box.width / 2;
+    const y = box.top + box.height / 2;
+    if (linked(document.elementFromPoint(x, y))) return report;
+    // From the layout viewport to the view's pixels, through the pinch zoom and the screen density.
+    const view = window.visualViewport;
+    const scale = (view ? view.scale : 1) * window.devicePixelRatio;
+    report.target = {x: (x - (view ? view.offsetLeft : 0)) * scale, y: (y - (view ? view.offsetTop : 0)) * scale};
+    return report;
+  }
+  if (operation !== 'click' || playing) return null;
+  for (const selector of playControls) {
+    for (const control of document.querySelectorAll(selector)) {
+      if (shown(control) && !linked(control)) {
+        press(control);
+        return {clicked: selector};
+      }
+    }
+  }
+  // A frame big enough to be a player: its middle, where its own play control usually sits.
+  if (window !== window.top && innerWidth >= 160 && innerHeight >= 90) {
+    const middle = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+    if (middle && !linked(middle)) {
+      press(middle);
+      return {clicked: 'middle'};
+    }
+  }
+  return null;
+}
 native?.onDisconnect.addListener(() => clearInterval(timer));
 addEventListener('pagehide', () => clearInterval(timer), {once: true});
 // Reports which addresses this document itself finished loading, as the browser's resource list names them. A

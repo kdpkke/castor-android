@@ -70,7 +70,7 @@ class FCastPickerTest {
     assertEquals(46899, pairing.port)
     assertEquals(
       SavedTv(
-        "Receiver",
+        "Living room TV",
         "192.0.2.10",
         DeviceType.DEVICE_TYPE_FCAST,
         pairedFor = setOf("${DeviceType.DEVICE_TYPE_CHROMECAST.number}|chromecast:living"),
@@ -99,7 +99,7 @@ class FCastPickerTest {
     compose.onNodeWithTag(fcastRow).performScrollTo().performClick()
     assertEquals(
       SavedTv(
-        "Receiver",
+        "Living room TV",
         "192.0.2.10",
         DeviceType.DEVICE_TYPE_FCAST,
         pairedFor = setOf("${DeviceType.DEVICE_TYPE_CHROMECAST.number}|chromecast:living"),
@@ -140,7 +140,7 @@ class FCastPickerTest {
     compose.onNodeWithText("Living room TV").performClick()
     compose.onAllNodesWithTag(fcastRow).assertCountEquals(1)
     compose.onNodeWithTag(fcastRow).performScrollTo().performClick()
-    assertEquals(SavedTv(receiver), selected)
+    assertEquals(SavedTv(receiver).copy(name = "Living room TV"), selected)
     compose.onNodeWithTag("fake-scanner").assertDoesNotExist()
   }
 
@@ -191,7 +191,7 @@ class FCastPickerTest {
     compose.runOnIdle {
       paired(FCastQr.Receiver("Receiver", listOf("192.0.2.30"), 46899, null, null))
     }
-    assertEquals(SavedTv("Receiver", "192.0.2.30", DeviceType.DEVICE_TYPE_FCAST, manual = true, once = true), selected)
+    assertEquals(SavedTv("Old renderer", "192.0.2.30", DeviceType.DEVICE_TYPE_FCAST, manual = true, once = true), selected)
     val pairing = pairs.single()
     assertTrue(pairing.identities.isEmpty())
     assertEquals(emptyList<FCastPairing>(), decodePairings(encodePairings(listOf(pairing))))
@@ -262,7 +262,8 @@ class FCastPickerTest {
     assertEquals(46899, pairing.port)
     assertEquals(setOf("${DeviceType.DEVICE_TYPE_CHROMECAST.number}|chromecast:living"), pairing.identities)
     assertEquals(
-      SavedTv(receiver).copy(pairedFor = setOf("${DeviceType.DEVICE_TYPE_CHROMECAST.number}|chromecast:living")),
+      SavedTv(receiver)
+        .copy(name = "Living room TV", pairedFor = setOf("${DeviceType.DEVICE_TYPE_CHROMECAST.number}|chromecast:living")),
       selected,
     )
     compose.onNodeWithTag("fake-scanner").assertDoesNotExist()
@@ -335,7 +336,7 @@ class FCastPickerTest {
     start(listOf(chromecast, receiver), listOf(pairing))
     compose.onNodeWithText("Living room TV").performClick()
     compose.onNodeWithTag(fcastRow).performScrollTo().performClick()
-    assertEquals(SavedTv(receiver).copy(pairedFor = setOf(identity)), selected)
+    assertEquals(SavedTv(receiver).copy(name = "Living room TV", pairedFor = setOf(identity)), selected)
     compose.onNodeWithTag("fake-scanner").assertDoesNotExist()
   }
 

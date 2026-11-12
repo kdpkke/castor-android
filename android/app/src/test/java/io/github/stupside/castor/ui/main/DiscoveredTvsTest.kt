@@ -52,6 +52,24 @@ class DiscoveredTvsTest {
   }
 
   @Test
+  fun aTVKeepsItsOwnNameWhicheverProtocolIsSavedAndFCastNamesOnlyATVWithNothingElse() {
+    val tvName = "[LG] webOS TV OLED42C24LA"
+    val dlna = device("dlna:lg", tvName, "http://192.0.2.10:1676/d.xml", DeviceType.DEVICE_TYPE_DLNA)
+    val airplay = device("AA:BB", tvName, "192.0.2.10:7000", DeviceType.DEVICE_TYPE_AIRPLAY)
+    val fcast = device("FCast LG@192.0.2.10", "FCast LG", "192.0.2.10", DeviceType.DEVICE_TYPE_FCAST)
+    val alone = device("Stick@192.0.2.20", "Stick", "192.0.2.20", DeviceType.DEVICE_TYPE_FCAST)
+    val devices = listOf(fcast, dlna, airplay, alone)
+    val groups = discoveredTvs(devices, SavedTv(fcast))
+    assertEquals(tvName, groups.single { it.host == "192.0.2.10" }.name)
+    assertEquals("Stick", groups.single { it.host == "192.0.2.20" }.name)
+    assertEquals(tvName, tvNameAt(fcast.address, devices))
+    assertEquals(tvName, tvNameAt("192.0.2.10:46899", devices))
+    assertNull(tvNameAt(alone.address, devices))
+    assertEquals("FCast · 192.0.2.10:46899", receiverDetail(SavedTv(fcast)))
+    assertEquals("DLNA · 192.0.2.10:1676", receiverDetail(SavedTv(dlna)))
+  }
+
+  @Test
   fun addressesShowPortsIncludingDefaultsAndIpv6WithoutDescriptionPaths() {
     assertEquals(
       "192.0.2.10:8009",

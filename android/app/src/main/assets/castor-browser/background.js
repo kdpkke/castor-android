@@ -189,6 +189,11 @@ browser.runtime.onMessage.addListener((message, sender) => {
   if (message.type === 'evaluate' && sender.frameId === 0 && typeof message.code === 'string') {
     return browser.tabs.executeScript(tabId, {frameId: 0, code: message.code}).then(values => values[0]);
   }
+  if (message.type === 'autoplay' && sender.frameId === 0 && ['probe', 'click'].includes(message.operation)) {
+    // Every frame answers for itself through content.js; frames without it answer nothing.
+    const code = `typeof castorAutoplay === 'function' ? castorAutoplay(${JSON.stringify(message.operation)}) : null`;
+    return browser.tabs.executeScript(tabId, {allFrames: true, code}).then(values => values.filter(Boolean));
+  }
   if (message.type === 'player' && sender.frameId === 0 && ['discover', 'read', 'suspend'].includes(message.operation)) {
     const request = {operation: message.operation, source: message.source, url: message.url};
     const code = `typeof castorPlayer === 'function' ? castorPlayer(window.wrappedJSObject, value => cloneInto(value, window, {cloneFunctions: true}), ${JSON.stringify(request)}) : []`;

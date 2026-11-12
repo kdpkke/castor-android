@@ -275,7 +275,8 @@ internal fun TvPicker(
           ranked.forEach { tv ->
             GlassPanel(
               Modifier.fillMaxWidth().testTag("receiver-protocol-${tv.type.number}"),
-              onClick = { select(tv) },
+              // Every protocol keeps the TV's own name; the protocol and its address show beneath it.
+              onClick = { select(tv.copy(name = selected.name)) },
             ) {
               ListItem(
                 headlineContent = { Text(protocolName(tv.type)) },
@@ -345,7 +346,9 @@ internal fun TvPicker(
                   val made = paired(selected, receiver)
                   pair(made)
                   scanningHost = null
-                  (fcastChoice(selected, withPairing(pairings, made)) as? FCastChoice.Ready)?.let { select(it.tv) }
+                  (fcastChoice(selected, withPairing(pairings, made)) as? FCastChoice.Ready)?.let {
+                    select(it.tv.copy(name = selected.name))
+                  }
                 },
                 { receiver ->
                   // Remembered so this TV is never cast to in the clear; the scanner stays open and says why.

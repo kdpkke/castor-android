@@ -71,6 +71,9 @@ internal class BrowserPageSession(
   private var capturedRequest: ResolveRequest? = null
   // When this resolver last started a navigation; earlier requests belong to another document.
   private var navigationStarted = 0L
+  // Until when a navigation of the tab is refused because Castor, not the user, just tapped the page: a tap that
+  // lands on an advertisement's layer must not take the page elsewhere. Read and written on the main thread.
+  private var automaticUntil = 0L
   // Responses become candidates, including after a retained page's late Play.
   private var capturing = false
   // The extension starts and reports page videos only while a resolution is waiting for them.
@@ -110,7 +113,9 @@ internal class BrowserPageSession(
           GeckoResult.fromValue(
             if (
               (isHttp(request.uri) || request.uri == "about:blank" && request.isDirectNavigation) &&
-                request.target != GeckoSession.NavigationDelegate.TARGET_WINDOW_NEW
+                request.target != GeckoSession.NavigationDelegate.TARGET_WINDOW_NEW &&
+                (request.isDirectNavigation ||
+                  android.os.SystemClock.elapsedRealtime() >= automaticUntil)
             )
               AllowOrDeny.ALLOW
             else AllowOrDeny.DENY
@@ -306,7 +311,12 @@ internal class BrowserPageSession(
     return ResolveResponse.newBuilder().addAllStreams(streams).build()
   }
 
-  private suspend fun player(operation: String, source: String = "", url: String = ""): JSONArray =
+  private suspend fun player(
+    operation: String,
+    source: String = "",
+    url: String = "",
+    type: String = "player",
+  ): JSONArray =
     withContext(Dispatchers.Main) {
       val port = mainPort ?: return@withContext JSONArray()
       val raw =
@@ -316,7 +326,7 @@ internal class BrowserPageSession(
             evaluations[id] = { value -> if (pending.isActive) pending.resume(value) }
             port.postMessage(
               JSONObject()
-                .put("type", "player")
+                .put("type", type)
                 .put("id", id)
                 .put("operation", operation)
                 .put("source", source)
@@ -360,6 +370,55 @@ internal class BrowserPageSession(
         if (selected.isNotEmpty()) break
       }
     }
+  }
+
+  // Starts a player that waits for a person's tap, as that person would: a tap in the middle of the page's largest
+  // player while the page is on screen, otherwise a click on each frame's play control. Attempts alternate, since a
+  // page may take a tap and ignore a click or the other way round. False once a video plays: another tap could
+  // pause it.
+  private suspend fun startPlayer(attempt: Int): Boolean {
+    // A page that does not answer in time is left as it is; the search goes on.
+    val frames =
+      try {
+        player("probe", type = "autoplay")
+      } catch (_: TimeoutCancellationException) {
+        return true
+      }
+    val reports = (0 until frames.length()).mapNotNull(frames::optJSONObject)
+    if (reports.any { it.optBoolean("playing") }) return false
+    val target = reports.firstOrNull { it.optBoolean("top") }?.optJSONObject("target")
+    withContext(Dispatchers.Main) {
+      automaticUntil = android.os.SystemClock.elapsedRealtime() + AUTOMATIC_GUARD
+    }
+    // The page has just scrolled the player into view; the tap waits for the screen to follow.
+    delay(300)
+    val tapped =
+      attempt % 2 == 1 &&
+        target != null &&
+        withContext(Dispatchers.Main) {
+          tap(target.optDouble("x", -1.0).toFloat(), target.optDouble("y", -1.0).toFloat())
+        }
+    if (!tapped)
+      try {
+        player("click", type = "autoplay")
+      } catch (_: TimeoutCancellationException) {}
+    return true
+  }
+
+  // A touch where the page shows, given to Gecko as a person's tap. Only while the page is on screen.
+  private fun tap(x: Float, y: Float): Boolean {
+    if (!view.isAttachedToWindow || !view.isShown || view.windowVisibility != android.view.View.VISIBLE)
+      return false
+    if (x < 0 || y < 0 || x >= view.width || y >= view.height) return false
+    val down = android.os.SystemClock.uptimeMillis()
+    for ((action, time) in
+      listOf(android.view.MotionEvent.ACTION_DOWN to down, android.view.MotionEvent.ACTION_UP to down + 60)) {
+      val event = android.view.MotionEvent.obtain(down, time, action, x, y, 0)
+      event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+      view.dispatchTouchEvent(event)
+      event.recycle()
+    }
+    return true
   }
 
   internal suspend fun readPlayer(source: PlayerSource): BrowserPlaylists.Document =
@@ -469,13 +528,20 @@ internal class BrowserPageSession(
         }
         var firstSeen = 0L
         val started = android.os.SystemClock.elapsedRealtime()
+        // A page whose player waits for a tap gets one after a while without a stream, and again later.
+        var starts = 0
+        var nextStart = started + PLAY_AFTER
         while (android.os.SystemClock.elapsedRealtime() - started < 30_000) {
           delay(500)
           if (loadFailure != null) break
+          val now = android.os.SystemClock.elapsedRealtime()
           if (candidates.isNotEmpty()) {
-            val now = android.os.SystemClock.elapsedRealtime()
             if (firstSeen == 0L) firstSeen = now
             if (now - firstSeen >= 3000) break
+          } else if (starts < PLAY_ATTEMPTS && now >= nextStart) {
+            starts++
+            nextStart = now + PLAY_EVERY
+            if (!startPlayer(starts)) starts = PLAY_ATTEMPTS
           }
         }
         streams += candidates.values
@@ -590,6 +656,12 @@ internal class BrowserPageSession(
       .getOrDefault(false)
 
     internal const val HLS = "application/x-mpegURL"
+    // A page's own player has this long to start before Castor starts it, then gets a few more attempts.
+    private const val PLAY_AFTER = 4_000L
+    private const val PLAY_EVERY = 6_000L
+    private const val PLAY_ATTEMPTS = 3
+    // How long after an automatic tap the page may not take the tab elsewhere.
+    private const val AUTOMATIC_GUARD = 2_000L
     private val hlsTypes =
       setOf(
         "application/vnd.apple.mpegurl",

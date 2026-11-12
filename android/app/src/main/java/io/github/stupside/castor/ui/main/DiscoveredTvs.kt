@@ -95,6 +95,28 @@ internal data class DiscoveredTv(val host: String, val name: String, val protoco
     get() = "$host · ${protocols.map { protocolName(it.type) }.distinct().joinToString(", ")}"
 }
 
+// The name a TV goes by whichever protocol is chosen: the one the TV announces itself. An FCast receiver is named
+// by the receiver app rather than the TV, so its name never names a TV that answers on another protocol too.
+// Null when the TV answers on FCast alone.
+internal fun tvName(protocols: List<SavedTv>): String? =
+  (protocols.firstOrNull { it.type == DeviceType.DEVICE_TYPE_CHROMECAST }
+      ?: protocols.firstOrNull { it.type != DeviceType.DEVICE_TYPE_FCAST })
+    ?.name
+
+// The name of the TV that discovery finds at a receiver's host now; null when it finds none with a name of its own.
+internal fun tvNameAt(address: String, devices: List<Device>): String? {
+  val host = receiverHost(address) ?: return null
+  return tvName(
+    devices
+      .filter { device ->
+        device.address.isNotBlank() &&
+          device.type in receiverTypes &&
+          receiverHost(device.address)?.let { sameHost(it, host) } == true
+      }
+      .map(::SavedTv)
+  )
+}
+
 // Discovery keeps protocol identities separate. Only the picker groups services at the same host.
 internal fun discoveredTvs(devices: List<Device>, saved: SavedTv?): List<DiscoveredTv> {
   val confirmed = saved?.available(devices)
@@ -103,12 +125,6 @@ internal fun discoveredTvs(devices: List<Device>, saved: SavedTv?): List<Discove
     .map(::SavedTv)
     .distinctBy { it.type to it.address }
     .groupBy { receiverHost(it.address) ?: it.address }
-    .map { (host, protocols) ->
-      val preferred =
-        confirmed?.takeIf { it in protocols }
-          ?: protocols.firstOrNull { it.type == DeviceType.DEVICE_TYPE_CHROMECAST }
-          ?: protocols.first()
-      DiscoveredTv(host, preferred.name, protocols)
-    }
+    .map { (host, protocols) -> DiscoveredTv(host, tvName(protocols) ?: protocols.first().name, protocols) }
     .sortedBy { if (confirmed != null && it.protocols.contains(confirmed)) 0 else 1 }
 }

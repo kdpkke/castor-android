@@ -9,6 +9,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Castor installs its own updates from GitHub releases, and asks to be left out of battery optimization. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <application
@@ -41,6 +44,14 @@
             </intent-filter>
         </activity>
         <service android:name=".CastorService" android:exported="false" android:foregroundServiceType="connectedDevice" />
+        <!-- Exported for the system download manager. It installs only the download Castor itself started,
+             and only a file whose checksum, package and version Castor checks first. -->
+        <receiver android:name=".UpdateReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
+            </intent-filter>
+        </receiver>
+        <receiver android:name=".UpdateInstallReceiver" android:exported="false" />
     </application>
 
 </manifest>
