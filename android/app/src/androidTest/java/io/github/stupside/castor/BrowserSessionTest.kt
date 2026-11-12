@@ -1,5 +1,6 @@
 package io.github.stupside.castor
 
+import android.content.Context
 import androidx.test.platform.app.InstrumentationRegistry
 import castor.scraping.v1.Scraping.ResolveRequest
 import castor.scraping.v1.Scraping.ResolveResponse
@@ -8,14 +9,21 @@ import castor.v1.StreamOuterClass.StreamCandidate
 import io.github.stupside.castor.data.Rpc
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -522,4 +530,452 @@ class BrowserSessionTest {
       origin.shutdown()
     }
   }
+
+  // Streams a page's player loads through a service worker. Synthetic local servers only.
+
+  private fun withWorkerFixture(test: suspend WorkerFixture.() -> Unit) =
+    runBlocking<Unit> {
+      val fixture = WorkerFixture(InstrumentationRegistry.getInstrumentation().targetContext)
+      val outcome = runCatching { fixture.test() }
+      val cleanup = runCatching { fixture.close() }
+      outcome.getOrThrow()
+      cleanup.getOrThrow()
+    }
+
+  private suspend fun waitFor(what: String, condition: () -> Boolean) {
+    if (withTimeoutOrNull(30_000) { while (!condition()) delay(100) } == null) fail(what)
+  }
+
+  @Test
+  fun streamAWorkerFetchesForAPlayerIsCapturedFromThePlayersDocument() = withWorkerFixture {
+    val top = server()
+    val frame = server()
+    val player =
+      player(frame, "ch" to "a", "load" to "/live/a/index.m3u8,/live/a/chunk-1.png", "rounds" to "40")
+    val response = session().resolve(page(top, player), interactive = false)
+    val streams = response.streamsList.associateBy { it.stream.url }
+    val playlist = streams[frame.url("/live/a/index.m3u8").toString()]
+    val segment = streams[frame.url("/live/a/chunk-1.png").toString()]
+    assertNotNull("The playlist the worker fetched for the player must be captured: ${streams.keys}", playlist)
+    assertNotNull("So must its segment, whose name is not a video's: ${streams.keys}", segment)
+    assertEquals(2, streams.size)
+    assertEquals(BrowserPageSession.HLS, playlist!!.stream.contentType)
+    assertEquals("video/mp2t", segment!!.stream.contentType)
+    assertEquals(pageAddress(top, player), playlist.sourcePage)
+    // The request really carried the player's own header; the candidate carries only what follows
+    // from the player's document.
+    val sent = served.first { it.path == "/live/a/index.m3u8" }
+    assertEquals("a", sent.playback)
+    val expected = mapOf("Referer" to player, "User-Agent" to sent.agent)
+    assertEquals(expected, playlist.stream.headersMap)
+    assertEquals(expected, segment.stream.headersMap)
+  }
+
+  @Test
+  fun pagesSharingAWorkerAndAnAddressEachGetACandidateOfTheirOwn() = withWorkerFixture {
+    val top = server()
+    val frame = server()
+    val media = server()
+    val shared = "/live/shared/index.m3u8"
+    val remote = media.url("/live/remote/index.m3u8").toString()
+    val origin = frame.url("/").toString().trimEnd('/')
+    fun playerOf(ch: String) =
+      player(frame, "ch" to ch, "load" to "$shared,$remote,/live/$ch/index.m3u8", "rounds" to "40")
+    val (a, b) =
+      coroutineScope {
+        val first = async { session().resolve(page(top, playerOf("a")), interactive = false) }
+        val second = async { session().resolve(page(top, playerOf("b")), interactive = false) }
+        first.await() to second.await()
+      }
+    // Both players asked for the same addresses, each with its own header, in turns, and the
+    // server answered each with its own representation.
+    val turns = served.filter { it.path == shared }.map { it.playback }
+    assertTrue("Both players must have asked: $turns", turns.containsAll(listOf("a", "b")))
+    assertTrue("Their requests must alternate: $turns", turns.zipWithNext().count { it.first != it.second } >= 2)
+    val agent = served.first { it.path == shared }.agent
+    for ((ch, other, response) in listOf(Triple("a", "b", a), Triple("b", "a", b))) {
+      val streams = response.streamsList.associate { it.stream.url to it.stream.headersMap }
+      assertEquals(
+        "Page $ch must receive its own addresses only",
+        setOf(frame.url(shared).toString(), remote, frame.url("/live/$ch/index.m3u8").toString()),
+        streams.keys,
+      )
+      val own = mapOf("Referer" to playerOf(ch), "User-Agent" to agent)
+      assertEquals(own, streams[frame.url(shared).toString()])
+      assertEquals(own, streams[frame.url("/live/$ch/index.m3u8").toString()])
+      assertEquals(
+        mapOf("Referer" to "$origin/", "Origin" to origin, "User-Agent" to agent),
+        streams[remote],
+      )
+      assertFalse(
+        "Nothing of page $other may reach page $ch: $streams",
+        streams.toString().contains("ch=$other"),
+      )
+    }
+  }
+
+  @Test
+  fun lateWorkerRequestForAReplacedPageBringsNothingOfItToTheNewDocument() = withWorkerFixture {
+    val release = CountDownLatch(1)
+    val top = server()
+    val frame = server(held = release)
+    val shared = "/live/shared/index.m3u8"
+    val old = player(frame, "ch" to "old", "load" to shared, "rounds" to "40", "late" to shared)
+    val new = player(frame, "ch" to "new", "load" to shared, "rounds" to "40")
+    val session = session()
+    session.showPage(pageAddress(top, old))
+    waitFor("The first page's worker must have its own request for the address pending") {
+      served.any { it.path == shared && it.playback == "old" } &&
+        served.any { it.path == shared && it.playback == "late-old" }
+    }
+    val streams =
+      coroutineScope {
+        val resolving = async { session.resolve(page(top, new), interactive = false) }
+        waitFor("The new page must be loading the same address") {
+          served.any { it.path == shared && it.playback == "new" }
+        }
+        // The worker's request made for the page that is gone is answered only now.
+        release.countDown()
+        resolving.await().streamsList
+      }
+    assertTrue(
+      "The late request must have been answered while the new page was searched",
+      served.any { it.path == "$shared#answered" && it.playback == "late-old" },
+    )
+    val agent = served.first { it.path == shared && it.playback == "new" }.agent
+    assertEquals(listOf(frame.url(shared).toString()), streams.map { it.stream.url })
+    assertEquals(mapOf("Referer" to new, "User-Agent" to agent), streams.single().stream.headersMap)
+    assertFalse("Nothing of the replaced page: $streams", streams.toString().contains("old"))
+  }
+
+  @Test
+  fun lateWorkerRequestForAReleasedPageReachesNoOtherPage() = withWorkerFixture {
+    val release = CountDownLatch(1)
+    val top = server()
+    val frame = server(held = release)
+    val shared = "/live/shared/index.m3u8"
+    val gone = player(frame, "ch" to "gone", "load" to shared, "rounds" to "40", "late" to shared)
+    val kept = player(frame, "ch" to "kept", "load" to shared, "rounds" to "40")
+    val released = session()
+    released.showPage(pageAddress(top, gone))
+    waitFor("The first page's worker must have its own request for the address pending") {
+      served.any { it.path == shared && it.playback == "gone" } &&
+        served.any { it.path == shared && it.playback == "late-gone" }
+    }
+    // A released page is a closed browser page: nothing is left of it to receive a candidate.
+    withContext(Dispatchers.Main) { released.close() }
+    val streams =
+      coroutineScope {
+        val resolving = async { session().resolve(page(top, kept), interactive = false) }
+        waitFor("The remaining page must be loading the same address") {
+          served.any { it.path == shared && it.playback == "kept" }
+        }
+        release.countDown()
+        resolving.await().streamsList
+      }
+    assertTrue(
+      "The late request must have been answered while the remaining page was searched",
+      served.any { it.path == "$shared#answered" && it.playback == "late-gone" },
+    )
+    val agent = served.first { it.path == shared && it.playback == "kept" }.agent
+    assertEquals(listOf(frame.url(shared).toString()), streams.map { it.stream.url })
+    assertEquals(mapOf("Referer" to kept, "User-Agent" to agent), streams.single().stream.headersMap)
+    assertFalse("Nothing of the released page: $streams", streams.toString().contains("gone"))
+  }
+
+  @Test
+  fun pageLeftDuringASlowNavigationGivesNothingToTheNextPage() = withWorkerFixture {
+    val release = CountDownLatch(1)
+    val top = server(held = release)
+    val frame = server()
+    val playlist = "/live/old/index.m3u8"
+    val old = player(frame, "ch" to "old", "load" to playlist, "rounds" to "200")
+    val session = session()
+    session.showPage(pageAddress(top, old))
+    waitFor("The first page's player must be loading through its worker") {
+      served.count { it.path == playlist } >= 2
+    }
+    val next = ResolveRequest.newBuilder().addUrls(top.url("/slow").toString()).build()
+    val outcome =
+      coroutineScope {
+        val resolving = async { runCatching { session.resolve(next, interactive = false) } }
+        // The next page's answer is kept back: the first page stays where it is and keeps loading.
+        waitFor("The navigation to the next page must be waiting for its answer") {
+          served.any { it.path == "/slow" }
+        }
+        val asked = served.indexOfFirst { it.path == "/slow" }
+        waitFor("The first page must keep loading while the navigation waits") {
+          served.drop(asked).count { it.path == playlist } >= 3
+        }
+        release.countDown()
+        resolving.await()
+      }
+    assertTrue("The next page must have been answered", served.any { it.path == "/slow#answered" })
+    val found = outcome.getOrNull()?.streamsList?.map { it.stream.url to it.stream.headersMap }
+    assertTrue(
+      "A page without media may find no stream, least of all the one of the page it replaced: $found",
+      outcome.exceptionOrNull() is java.io.IOException,
+    )
+  }
+
+  @Test
+  fun addressesAWorkerRewritesOrRequestsItselfAreNotCaptured() = withWorkerFixture {
+    val top = server()
+    val frame = server()
+    val player =
+      player(
+        frame,
+        "ch" to "a",
+        "load" to "/rewritten/a/index.m3u8",
+        "rounds" to "100",
+        "own" to "/own/a/index.m3u8",
+      )
+    val failure =
+      runCatching { session().resolve(page(top, player), interactive = false) }.exceptionOrNull()
+    assertTrue("No stream may be found: $failure", failure is java.io.IOException)
+    assertTrue(
+      "The worker must have fetched another address than the player asked for",
+      served.any { it.path == "/upstream/a/index.m3u8" } &&
+        served.none { it.path == "/rewritten/a/index.m3u8" },
+    )
+    assertTrue(
+      "The worker must have fetched an address on its own",
+      served.any { it.path == "/own/a/index.m3u8" && it.playback == "own-a" },
+    )
+  }
+
+  @Test
+  fun aWorkerOfAnotherOriginConfirmsNothingForADocument() = withWorkerFixture {
+    val top = server()
+    val media = server()
+    // This origin's worker answers by itself: the address never reaches the network from it.
+    val silent = server(worker = ANSWERING_WORKER)
+    val fetching = server()
+    val remote = media.url("/live/remote/index.m3u8").toString()
+    val origin = fetching.url("/").toString().trimEnd('/')
+    coroutineScope {
+      val starved = async {
+        runCatching {
+            session()
+              .resolve(
+                page(top, player(silent, "ch" to "silent", "load" to remote, "rounds" to "100")),
+                interactive = false,
+              )
+          }
+          .exceptionOrNull()
+      }
+      val fed =
+        session()
+          .resolve(
+            page(top, player(fetching, "ch" to "fetching", "load" to remote, "rounds" to "100")),
+            interactive = false,
+          )
+          .streamsList
+      val agent = served.first { it.path == "/live/remote/index.m3u8" }.agent
+      assertEquals(listOf(remote), fed.map { it.stream.url })
+      assertEquals(
+        mapOf("Referer" to "$origin/", "Origin" to origin, "User-Agent" to agent),
+        fed.single().stream.headersMap,
+      )
+      val failure = starved.await()
+      assertTrue("The other origin's page may find no stream: $failure", failure is java.io.IOException)
+    }
+    assertTrue(
+      "Only the fetching origin's worker may have reached the network",
+      served.any { it.path == "/live/remote/index.m3u8" && it.playback == "fetching" } &&
+        served.none { it.path == "/live/remote/index.m3u8" && it.playback == "silent" },
+    )
+  }
+
+  @Test
+  fun tabAndDedicatedWorkerRequestsKeepTheirRealHeaders() = withWorkerFixture {
+    val top = server()
+    val frame = server()
+    val player =
+      player(
+        frame,
+        "ch" to "a",
+        "direct" to "1",
+        "load" to "/live/direct/index.m3u8",
+        "rounds" to "40",
+        "dedicated" to "/live/dedicated/index.m3u8",
+      )
+    val streams =
+      session().resolve(page(top, player), interactive = false).streamsList.associate {
+        it.stream.url to it.stream.headersMap
+      }
+    val direct = frame.url("/live/direct/index.m3u8").toString()
+    val dedicated = frame.url("/live/dedicated/index.m3u8").toString()
+    assertEquals(setOf(direct, dedicated), streams.keys)
+    assertEquals("a", streams[direct]!!["X-Synthetic-Playback"])
+    assertEquals("dedicated-a", streams[dedicated]!!["X-Synthetic-Playback"])
+  }
 }
+
+private class Served(val path: String, val playback: String?, val agent: String?)
+
+// Local servers of synthetic players whose media goes through a service worker, and the browser pages
+// that open them. Playlists are served as text/html and name the requester's X-Synthetic-Playback
+// header, so two requesters of one address receive different representations.
+private class WorkerFixture(private val context: Context) {
+  val served = CopyOnWriteArrayList<Served>()
+  private val servers = mutableListOf<MockWebServer>()
+  private val sessions = mutableListOf<BrowserPageSession>()
+
+  // `held` keeps back the answers to the requests a worker makes later on its own ("late-…") and
+  // the answer to the page "/slow".
+  fun server(worker: String = FORWARDING_WORKER, held: CountDownLatch? = null): MockWebServer {
+    val server = MockWebServer()
+    server.dispatcher =
+      object : Dispatcher() {
+        override fun dispatch(request: RecordedRequest): MockResponse {
+          val url = request.requestUrl!!
+          val path = url.encodedPath
+          val playback = request.getHeader("X-Synthetic-Playback")
+          if (request.method != "OPTIONS")
+            served += Served(path, playback, request.getHeader("User-Agent"))
+          fun html(body: String) =
+            MockResponse().setHeader("Content-Type", "text/html").setBody(body)
+          fun script(body: String) =
+            MockResponse().setHeader("Content-Type", "text/javascript").setBody(body)
+          val response =
+            when {
+              request.method == "OPTIONS" -> MockResponse().setResponseCode(204)
+              path == "/page" -> {
+                val frame = url.queryParameter("frame")!!.replace("&", "&amp;")
+                html("<iframe src=\"$frame\" width=\"320\" height=\"180\"></iframe>")
+              }
+              path == "/player" -> html(PLAYER)
+              path == "/sw.js" -> script(worker)
+              path == "/dedicated.js" -> script(DEDICATED_WORKER)
+              path == "/cleanup" -> html(CLEANUP)
+              path == "/slow" -> {
+                held?.await(40, TimeUnit.SECONDS)
+                served += Served("$path#answered", playback, null)
+                html("<!doctype html><title>no media</title><p>Nothing to play here.</p>")
+              }
+              path.endsWith(".m3u8") -> {
+                if (playback?.startsWith("late-") == true) {
+                  held?.await(40, TimeUnit.SECONDS)
+                  served += Served("$path#answered", playback, null)
+                }
+                html("#EXTM3U\n#EXT-X-TARGETDURATION:3\n#EXTINF:3,\nchunk-for-$playback.png\n")
+                  .setHeader("Cache-Control", "no-store")
+              }
+              path.contains("/chunk-") ->
+                MockResponse()
+                  .setHeader("Content-Type", "video/mp2t")
+                  .setHeader("Cache-Control", "no-store")
+                  .setBody("synthetic segment")
+              else -> MockResponse().setBody("ok")
+            }
+          return response
+            .setHeader("Access-Control-Allow-Origin", "*")
+            .setHeader("Access-Control-Allow-Headers", "x-synthetic-playback")
+        }
+      }
+    server.start()
+    servers += server
+    return server
+  }
+
+  suspend fun session(): BrowserPageSession =
+    withContext(Dispatchers.Main) {
+        BrowserPageSession(context, MutableStateFlow(false), MutableStateFlow<BrowserPage?>(null))
+      }
+      .also { sessions += it }
+
+  // The address of a player on `frame`, steered by its query: see PLAYER.
+  fun player(frame: MockWebServer, vararg query: Pair<String, String>): String =
+    frame
+      .url("/player")
+      .newBuilder()
+      .apply { query.forEach { (name, value) -> addQueryParameter(name, value) } }
+      .build()
+      .toString()
+
+  // A page of another origin that embeds that player in a frame.
+  fun pageAddress(top: MockWebServer, player: String): String =
+    top.url("/page").newBuilder().addQueryParameter("frame", player).build().toString()
+
+  fun page(top: MockWebServer, player: String): ResolveRequest =
+    ResolveRequest.newBuilder().addUrls(pageAddress(top, player)).build()
+
+  // Leaves no service worker registration of these origins in the app's browser, then stops everything.
+  suspend fun close() {
+    try {
+      val janitor = session()
+      for (server in servers) {
+        val before = served.count { it.path == "/cleaned" }
+        janitor.showPage(server.url("/cleanup").toString())
+        withTimeout(20_000) { while (served.count { it.path == "/cleaned" } == before) delay(100) }
+        withContext(Dispatchers.Main) { janitor.dismissPage() }
+      }
+    } finally {
+      withContext(Dispatchers.Main) { sessions.forEach { it.close() } }
+      servers.forEach { it.shutdown() }
+    }
+  }
+}
+
+// A player steered by its query:
+//   ch         the name it sends in its X-Synthetic-Playback header
+//   load       comma-separated addresses it loads again and again, each with that header
+//   rounds     how many times
+//   late, own  an address its service worker requests on its own, with the header "late-<ch>" or "own-<ch>"
+//   dedicated  an address a dedicated worker requests, with the header "dedicated-<ch>"
+//   direct     "1": no service worker, the frame's own requests reach the network
+private const val PLAYER =
+  """<!doctype html><title>player</title><script>
+const query = new URLSearchParams(location.search);
+const ch = query.get('ch');
+const load = address => fetch(address, {headers: {'X-Synthetic-Playback': ch}}).then(response => response.text());
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+(async () => {
+  try {
+    if (query.get('dedicated')) new Worker('/dedicated.js').postMessage({address: query.get('dedicated'), playback: 'dedicated-' + ch});
+    if (!query.get('direct')) {
+      await navigator.serviceWorker.register('/sw.js', {scope: '/player'});
+      await navigator.serviceWorker.ready;
+      if (!navigator.serviceWorker.controller) await new Promise(resolve => navigator.serviceWorker.addEventListener('controllerchange', resolve, {once: true}));
+      for (const name of ['late', 'own']) if (query.get(name)) navigator.serviceWorker.controller.postMessage({address: query.get(name), playback: name + '-' + ch});
+    }
+    const addresses = (query.get('load') || '').split(',').filter(Boolean);
+    for (let round = 0; round < +query.get('rounds'); round++) {
+      for (const address of addresses) await load(address).catch(() => {});
+      await sleep(300);
+    }
+  } catch (error) { fetch('/failed', {method: 'POST', body: String(error)}); }
+})();
+</script>"""
+
+// Forwards the player's media requests, rewrites one family of addresses, and requests an address on its
+// own when told to.
+private const val FORWARDING_WORKER =
+  """self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/rewritten/')) event.respondWith(fetch(url.pathname.replace('/rewritten/', '/upstream/')));
+  else if (url.pathname.endsWith('.m3u8') || url.pathname.includes('/chunk-')) event.respondWith(fetch(event.request));
+});
+self.addEventListener('message', event => event.waitUntil(fetch(event.data.address, {headers: {'X-Synthetic-Playback': event.data.playback}}).then(response => response.text()).catch(() => {})));
+"""
+
+// Answers the player's playlist requests by itself, without the network.
+private const val ANSWERING_WORKER =
+  """self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
+self.addEventListener('fetch', event => {
+  if (new URL(event.request.url).pathname.endsWith('.m3u8')) event.respondWith(new Response('#EXTM3U\n#EXT-X-TARGETDURATION:3\n#EXTINF:3,\nchunk-from-worker.png\n', {headers: {'Content-Type': 'text/html'}}));
+});
+"""
+
+private const val DEDICATED_WORKER =
+  """onmessage = event => fetch(event.data.address, {headers: {'X-Synthetic-Playback': event.data.playback}}).then(response => response.text());
+"""
+
+private const val CLEANUP =
+  """<!doctype html><title>cleanup</title><script>
+navigator.serviceWorker.getRegistrations().then(all => Promise.all(all.map(one => one.unregister()))).then(() => fetch('/cleaned', {method: 'POST'}));
+</script>"""

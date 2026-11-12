@@ -1,10 +1,23 @@
 /* Runs in the extension's isolated world; no window messaging or page-callable bridge. */
 const native = window === window.top ? browser.runtime.connectNative('castor') : null;
+// When the browser created this document.
+const created = performance.timeOrigin;
+// How often this document came back from the back/forward cache.
+let returns = 0;
+// The name of this document while it is the one in its frame. A document that leaves and comes back has
+// another name afterwards, so the same name seen twice means it was there all the time in between.
+function identity() {
+  return created + '/' + returns;
+}
 // Videos are started and reported only while the app is extracting; otherwise the user controls
 // playback and paused videos stay paused.
 let extracting = false;
 browser.runtime.onMessage.addListener(message => {
+  // The background asks which document is in this frame before it offers a stream on a document's behalf.
+  if (message.type === 'document') return Promise.resolve(identity());
   if (message.type === 'extracting') extracting = message.value === true;
+  // A candidate built from a document is for the top-level document that was above it then, and no other.
+  if (message.top !== undefined && message.top !== identity()) return;
   if (native && ['candidate', 'page', 'requestError'].includes(message.type)) native.postMessage(message);
 });
 browser.runtime.sendMessage({type: 'extracting?'}).then(value => { extracting = value === true; }).catch(() => {});
@@ -40,3 +53,36 @@ native?.onMessage.addListener(async message => {
 });
 native?.onDisconnect.addListener(() => clearInterval(timer));
 addEventListener('pagehide', () => clearInterval(timer), {once: true});
+// Reports which addresses this document itself finished loading, as the browser's resource list names them. A
+// page can neither write to that list nor reach this script. The background uses the report to recognise a
+// stream that a service worker fetched for this document: such a request carries no tab.
+const loaded = [];
+let reporting = null;
+const resources = new PerformanceObserver(list => {
+  for (const entry of list.getEntries()) {
+    if (loaded.length < 400 && /^https?:\/\//.test(entry.name) && entry.name.length <= 8192) {
+      loaded.push({url: entry.name, started: entry.startTime, status: entry.responseStatus, mime: entry.contentType});
+    }
+  }
+  if (reporting === null && loaded.length) {
+    reporting = setTimeout(() => {
+      reporting = null;
+      browser.runtime.sendMessage({type: 'loaded', created, document: identity(), resources: loaded.splice(0)}).catch(() => {});
+    }, 0);
+  }
+});
+resources.observe({type: 'resource', buffered: true});
+// A document that leaves stops reporting at once, so nothing it loaded is offered after it.
+addEventListener('pagehide', () => {
+  resources.disconnect();
+  clearTimeout(reporting);
+  reporting = null;
+  loaded.length = 0;
+  browser.runtime.sendMessage({type: 'unloaded', document: identity()}).catch(() => {});
+});
+// A document restored from the back/forward cache is alive again, under another name.
+addEventListener('pageshow', event => {
+  if (!event.persisted) return;
+  returns++;
+  resources.observe({type: 'resource'});
+});
