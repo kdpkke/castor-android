@@ -7,6 +7,7 @@ import castor.v1.CastOuterClass.*
 import castor.v1.DeviceOuterClass.*
 import castor.v1.StreamOuterClass.Stream
 import com.google.protobuf.Duration
+import io.github.stupside.castor.R
 import io.github.stupside.castor.data.Rpc
 import io.github.stupside.castor.theme.CastorTheme
 import java.util.concurrent.ConcurrentHashMap
@@ -125,6 +126,67 @@ class MultipleCastsTest {
       assertEquals(listOf("living-room", "living-room"), fixture.restarts.toList())
       assertEquals(2, fixture.model.uiState.value.sessions.size)
     }
+  }
+
+  // One row is chosen at a time, the buttons name the TV they act on, and preparing a cast to another TV is a row
+  // of its own whose cast is added to the others.
+  @Test
+  fun theChosenRowIsTheOneTheControlsActOnAndANewCastIsAnAddition() {
+    val resources = compose.activity
+    Fixture().use { fixture ->
+      fixture.open()
+      compose.onNodeWithTag("session-living-room").assertIsSelected()
+      compose.onNodeWithTag("session-bedroom").assertIsNotSelected()
+      compose.onNodeWithTag("new-cast").assertIsNotSelected()
+      compose
+        .onNodeWithTag("controls-for")
+        .assertTextEquals(resources.getString(R.string.controls_for, "Living room TV"))
+      compose.onNodeWithTag("session-bedroom").performClick()
+      compose.onNodeWithTag("session-bedroom").assertIsSelected()
+      compose.onNodeWithTag("session-living-room").assertIsNotSelected()
+      compose
+        .onNodeWithTag("controls-for")
+        .assertTextEquals(resources.getString(R.string.controls_for, "Bedroom TV"))
+      compose.onNodeWithTag("new-cast").performScrollTo().performClick()
+      compose.onNodeWithTag("new-cast").assertIsSelected()
+      compose.onNodeWithTag("session-bedroom").assertIsNotSelected()
+      compose.onNodeWithTag("controls-for").assertDoesNotExist()
+      compose
+        .onNodeWithTag("cast-action")
+        .assert(hasText(resources.getString(R.string.cast_video_too)))
+      assertEquals(2, fixture.model.uiState.value.sessions.size)
+      assertTrue(fixture.stops.isEmpty())
+    }
+  }
+
+  // The TV list marks a TV that is already showing a cast, whichever of its protocols the cast came by.
+  @Test
+  fun theTvListMarksATvAlreadyCasting() {
+    fun device(id: String, type: DeviceType, address: String) =
+      Device.newBuilder().setId(id).setName("TV $id").setType(type).setAddress(address).build()
+    val busy = device("busy", DeviceType.DEVICE_TYPE_DLNA, "http://192.0.2.10:1400/description.xml")
+    val free = device("free", DeviceType.DEVICE_TYPE_CHROMECAST, "192.0.2.40:8009")
+    val cast =
+      Cast.newBuilder()
+        .setId("running")
+        .setDevice(device("running", DeviceType.DEVICE_TYPE_CHROMECAST, "192.0.2.10:8009"))
+        .build()
+    val state =
+      MainScreenUiState(
+        ready = true,
+        discoveryComplete = true,
+        devices = listOf(busy, free),
+        sessions = listOf(CastSessionUiState(cast, CastPhase.Casting)),
+        selectedCastId = "running",
+      )
+    compose.setContent { CastorTheme { TvPicker(state, null, {}, {}, {}, {}) } }
+    val inUse = compose.activity.getString(R.string.tv_in_use)
+    compose
+      .onNode(hasTestTag("receiver-tv-192.0.2.10") and hasAnyDescendant(hasText(inUse)))
+      .assertExists()
+    compose
+      .onNode(hasTestTag("receiver-tv-192.0.2.40") and hasAnyDescendant(hasText(inUse)))
+      .assertDoesNotExist()
   }
 
   @Test

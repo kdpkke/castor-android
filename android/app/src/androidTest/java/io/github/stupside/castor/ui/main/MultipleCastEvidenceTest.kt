@@ -168,8 +168,13 @@ class MultipleCastEvidenceTest {
       fontScale = 1f
       model.selectCast(live.id)
     }
+    // The screen is in English here, whatever language the device is in.
+    val english =
+      context.createConfigurationContext(
+        Configuration(context.resources.configuration).apply { setLocale(Locale.ENGLISH) }
+      )
     compose
-      .onNodeWithText(context.getString(R.string.live_restarted_automatically))
+      .onNodeWithText(english.getString(R.string.live_restarted_automatically))
       .performScrollTo()
       .assertIsDisplayed()
     capture("live-recovery")

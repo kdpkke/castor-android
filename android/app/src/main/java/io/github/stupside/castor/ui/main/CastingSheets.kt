@@ -370,7 +370,18 @@ internal fun TvPicker(
             ) {
               ListItem(
                 headlineContent = { Text(tv.name) },
-                supportingContent = { Text(tv.summary) },
+                supportingContent = {
+                  Column {
+                    Text(tv.summary)
+                    // A TV already showing a cast, whichever protocol it came by: pick another for a new one.
+                    if (
+                      state.sessions.any { session ->
+                        receiverHost(session.cast.device.address)?.let { sameHost(it, tv.host) } == true
+                      }
+                    )
+                      Text(stringResource(R.string.tv_in_use), color = MaterialTheme.colorScheme.primary)
+                  }
+                },
                 leadingContent = { CastIcon(R.drawable.ic_tv) },
                 trailingContent = { CastIcon(R.drawable.ic_next) },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),

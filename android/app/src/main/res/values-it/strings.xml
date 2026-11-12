@@ -4,7 +4,7 @@
     <string name="language_help">Scegli la lingua. La modifica viene applicata subito.</string>
     <string name="language_default">Predefinita</string>
     <string name="app_tagline">Il tuo video.\nSulla tua TV.</string>
-    <string name="app_intro">Incolla un link o scegli un video sul telefono. Castor lo porta sulla tua TV.</string>
+    <string name="app_intro">Incolla un link o scegli un video sul telefono. Castor lo porta sulla tua TV e può riprodurre video diversi su più TV insieme.</string>
     <string name="video_heading">Video</string>
     <string name="video_url">Link del video o della pagina</string>
     <string name="video_hint">Incolla il link di un video o di una pagina</string>
@@ -145,8 +145,13 @@
     <string name="playback_hold_hint">Tieni premuta una freccia per continuare a spostarti.</string>
     <string name="playback_error">Comando di riproduzione non riuscito</string>
     <string name="playback_error_help">Il cast è ancora attivo. Puoi riprovare il comando.</string>
-    <string name="active_transmissions">Trasmissioni</string>
-    <string name="new_cast">Nuovo cast</string>
+    <string name="active_transmissions">Trasmissioni in corso</string>
+    <string name="transmissions_help_one">Questa trasmissione continua mentre mandi un altro video su un’altra TV.</string>
+    <string name="transmissions_help_many">Ogni TV riproduce il suo video. Toccane una per controllarla.</string>
+    <string name="cast_to_another_tv">Trasmetti su un’altra TV</string>
+    <string name="cast_to_another_tv_help">Scegli un video e una TV libera. Le trasmissioni qui sopra continuano.</string>
+    <string name="cast_video_too">Trasmetti anche su questa TV</string>
+    <string name="controls_for">Comandi per %1$s</string>
     <string name="restart_casting">Riavvia trasmissione</string>
     <string name="restarting_casting">Riavvio…</string>
     <string name="phase_restarting_help">Ricaricamento del video sulla stessa TV. I video riprendono dall’ultima posizione; le dirette tornano al punto live.</string>

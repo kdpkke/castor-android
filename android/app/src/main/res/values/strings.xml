@@ -4,7 +4,7 @@
     <string name="language_help">Choose your language. The change is applied immediately.</string>
     <string name="language_default">Default</string>
     <string name="app_tagline">Your video.\nOn your TV.</string>
-    <string name="app_intro">Paste a video link or choose a video on your phone. Castor takes it to your TV.</string>
+    <string name="app_intro">Paste a video link or choose a video on your phone. Castor takes it to your TV, and can play different videos on several TVs at once.</string>
     <string name="video_heading">Video</string>
     <string name="video_url">Video or page link</string>
     <string name="video_hint">Paste a video or page link</string>
@@ -145,8 +145,13 @@
     <string name="playback_hold_hint">Hold either arrow to keep seeking.</string>
     <string name="playback_error">Playback control failed</string>
     <string name="playback_error_help">The cast is still active. You can try the control again.</string>
-    <string name="active_transmissions">Transmissions</string>
-    <string name="new_cast">New cast</string>
+    <string name="active_transmissions">Casts in progress</string>
+    <string name="transmissions_help_one">This cast keeps playing while you send another video to another TV.</string>
+    <string name="transmissions_help_many">Each TV plays its own video. Tap one to control it.</string>
+    <string name="cast_to_another_tv">Cast to another TV</string>
+    <string name="cast_to_another_tv_help">Choose a video and a free TV. The casts above keep playing.</string>
+    <string name="cast_video_too">Cast to this TV too</string>
+    <string name="controls_for">Controls for %1$s</string>
     <string name="restart_casting">Restart casting</string>
     <string name="restarting_casting">Restarting…</string>
     <string name="phase_restarting_help">Reloading this video on the same TV. Videos resume from their last position; live streams return to live.</string>

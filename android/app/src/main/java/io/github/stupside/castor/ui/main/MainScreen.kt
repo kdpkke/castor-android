@@ -274,6 +274,22 @@ fun MainScreen(
                 modifier = Modifier.padding(bottom = 8.dp),
               )
             }
+            // With several casts, the buttons say which TV they act on.
+            val controlled =
+              state.activeCast?.device?.takeIf { state.castId != null && state.sessions.size > 1 }
+            if (controlled != null) {
+              Text(
+                stringResource(
+                  R.string.controls_for,
+                  tvNameOf(SavedTv(controlled)).ifBlank { controlled.address },
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(bottom = 8.dp).testTag("controls-for"),
+              )
+            }
             if (state.castId != null) {
               FlowRow(
                 Modifier.fillMaxWidth(),
@@ -363,7 +379,14 @@ fun MainScreen(
                 else CastIcon(R.drawable.ic_cast)
                 Spacer(Modifier.width(10.dp))
                 Text(
-                  stringResource(if (state.submitting) R.string.connecting else R.string.cast_video)
+                  stringResource(
+                    when {
+                      state.submitting -> R.string.connecting
+                      // Beside casts already running: this one is added, the others go on.
+                      state.sessions.isNotEmpty() -> R.string.cast_video_too
+                      else -> R.string.cast_video
+                    }
+                  )
                 )
               }
             }
