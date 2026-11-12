@@ -7,7 +7,7 @@ English one.
 
 - The TV picker lists each TV once with its IP address and the protocols it answers on. Selecting a TV opens those protocols with their ports, with Back below the choices.
 
-- Cast different videos to different TVs at the same time. Switch transmissions to control one, or choose New cast to prepare another without stopping the others.
+- Cast different videos to different TVs at the same time. **Casts in progress** lists one row per TV and a last row, **Cast to another TV**, that prepares a new cast while the others keep playing. The chosen row is highlighted; the controls below it and the buttons at the bottom act on it, and with several casts the buttons say which TV they control. The TV list marks the TVs already casting.
 - Restart casting reloads the same source on the same TV. Videos resume from their last reported position, while live streams return to live.
 - Live streams with a receiver playhead stuck for more than ten seconds restart automatically, including with the screen off. Paused streams, unknown positions and normal videos are excluded; consecutive unsuccessful recovery attempts are bounded.
 - Conversions use the phone's hardware video encoder when it works. If it fails to start, dies or stops producing during a cast, Castor continues in software: on DLNA TVs fed MPEG-TS in the same stream, without the TV reloading; elsewhere from where the viewer was. A failed hardware encoder is not used again until Castor restarts.
@@ -15,7 +15,7 @@ English one.
 - The playback position stays right after a restart or an automatic recovery, and is no longer reported as zero when the TV stops. Seeking before where a restarted stream begins, or on a TV that refuses its own seek, prepares the stream again from that point; a Native original is never converted to seek.
 - Cast to AirPlay TVs: Apple TVs and TVs with AirPlay built in, such as LG webOS models, are found on the network. The first cast to a TV that asks for pairing shows a PIN dialog; enter the PIN the TV displays, or ask it for a new one. Castor keeps the pairing on the phone.
 - Cast to FCast receivers, found on the network or added by address.
-- The protocol list of a TV says what a Native cast keeps on each one (the original file, its tracks, or a conversion) and recommends the one keeping the most.
+- The protocol list of a TV says what a Native cast keeps on each one (the original file, its tracks, or a conversion) and recommends the one keeping the most. The engine judges this while it runs for a cast, and Castor remembers it, so a TV's verdicts appear once its protocols have been opened in the TV list during a cast.
 - In Native, HDR and Dolby Vision files a Chromecast or AirPlay TV can fetch itself are handed to it unchanged: AirPlay TVs such as LG now show Dolby Vision. A TV that refuses the file gets Castor's stream instead.
 - AirPlay TVs such as LG also keep Dolby Vision from MKV files, which Castor converts to HLS for them.
 - A Native file the TV plays unchanged ends the cast as soon as the TV finishes it, instead of about 30 seconds later on DLNA TVs.
@@ -48,7 +48,7 @@ English one.
 - Removed the retired external browser extension settings and pairing gateway. Embedded webpage extraction and ad blocking remain available.
 - Updated the shared casting engine to Castor 2.5.0.
 - Every TV in the picker offers FCast. A receiver that announces itself on the network is used directly; otherwise scan the QR code shown by FCast Receiver with the camera. The pairing belongs to that TV, and a code that asks for the encrypted version 4 of the protocol is refused instead of being used unencrypted.
-- The casting engine and its notification run only while something needs them: a cast, a TV search or a pairing. With nothing to do they stop by themselves, also with Castor open, and the next request starts them again.
+- The casting engine and its notification run only while a cast does: from the moment a cast is asked, through its pairing, until the last cast ends, and stop by themselves about 15 seconds after. Finding TVs, at start or in the TV list, no longer starts the engine: Castor searches the network itself.
 - FCast receivers now get HLS under the name their player accepts, so the picture starts instead of the receiver staying on its idle screen while the cast gives up after 30 seconds.
 - An AirPlay receiver that answers pairing with a malformed key is now refused with an error. Before, such an answer could stop the casting engine and end the casts in progress.
 - Casting a web page now also finds a video the page's player loads through a service worker, as some live players do. For such a video Castor repeats where the request comes from, but not cookies or headers the page adds by itself: a stream that depends on those still cannot be cast.
@@ -56,12 +56,13 @@ English one.
 - While Android optimizes Castor's battery use, a yellow warning under the header says that the stream can freeze or lose quality in the background. Tapping it opens Android's question to stop the optimization for Castor; the warning goes away once it is stopped.
 - When a web page's player waits for a tap, Castor starts it: after a few seconds without a stream it taps the middle of the page's largest player, as you would, or clicks the player's play control when the page is not on screen, and tries again a couple of times. A video that already plays is left alone, a link is never tapped, and the page cannot be taken elsewhere just after the tap.
 - A TV keeps its own name whichever protocol you choose, FCast included, and the protocol with its address and port shows beneath it, also during a cast.
+- An AirPlay TV already playing a live stream that asks Castor for a playlist it could not fetch no longer ends the cast at once: the cast ends only if the TV itself gives up with an error. Before, an LG could stop after a few seconds with "the receiver could not fetch … itself".
 
 ### Italiano
 
 - La ricerca mostra ogni TV una sola volta con il suo IP e i protocolli su cui risponde. Selezionandola si apre la pagina dei protocolli con le loro porte, con Indietro sotto le opzioni.
 
-- Trasmetti video diversi su TV diverse contemporaneamente. Seleziona una trasmissione per controllarla oppure usa Nuovo cast senza fermare le altre.
+- Trasmetti video diversi su TV diverse contemporaneamente. **Trasmissioni in corso** elenca una riga per ogni TV e un’ultima riga, **Trasmetti su un’altra TV**, che prepara una nuova trasmissione mentre le altre continuano. La riga scelta è evidenziata; i comandi sotto e i pulsanti in basso agiscono su quella, e con più trasmissioni i pulsanti dicono quale TV comandano. L’elenco delle TV segna quelle che stanno già trasmettendo.
 - Riavvia trasmissione ricarica la stessa sorgente sulla stessa TV. I video riprendono dall’ultima posizione rilevata; le dirette tornano al punto live.
 - Le dirette con posizione ferma sulla TV per oltre dieci secondi vengono riavviate automaticamente, anche a schermo spento. Sono esclusi pausa, posizione sconosciuta e video normali; i recuperi consecutivi senza successo sono limitati.
 - Le conversioni usano l'encoder video hardware del telefono quando funziona. Se non parte, si interrompe o smette di produrre durante una trasmissione, Castor continua in software: sulle TV DLNA che ricevono MPEG-TS nello stesso flusso, senza ricaricare la TV; altrove dal punto in cui si trovava lo spettatore. Un encoder hardware fallito non viene riusato fino al riavvio di Castor.
@@ -69,7 +70,7 @@ English one.
 - La posizione resta corretta dopo un riavvio o un recupero automatico e non viene più indicata come zero quando la TV si ferma. Uno spostamento prima dell'inizio di un flusso riavviato, o su una TV che rifiuta il proprio seek, prepara di nuovo il flusso da quel punto; un originale in Nativa non viene mai convertito per spostarsi.
 - Trasmetti alle TV AirPlay: le Apple TV e le TV con AirPlay integrato, come i modelli LG webOS, vengono trovate in rete. Il primo cast verso una TV che chiede l'abbinamento apre una finestra per il PIN: inserisci quello mostrato dalla TV, oppure chiedine uno nuovo. Castor conserva l'abbinamento sul telefono.
 - Trasmetti ai ricevitori FCast, trovati in rete o aggiunti per indirizzo.
-- L'elenco dei protocolli di una TV indica cosa mantiene una trasmissione Nativa su ciascuno (il file originale, le sue tracce o una conversione) e consiglia quello che mantiene di più.
+- L'elenco dei protocolli di una TV indica cosa mantiene una trasmissione Nativa su ciascuno (il file originale, le sue tracce o una conversione) e consiglia quello che mantiene di più. Lo valuta il motore mentre è attivo per una trasmissione e Castor lo ricorda, quindi le valutazioni di una TV compaiono dopo averne aperto i protocolli nell’elenco delle TV durante una trasmissione.
 - In Nativa i file HDR e Dolby Vision che una TV Chromecast o AirPlay può scaricare da sé le arrivano senza modifiche: le TV AirPlay come le LG ora mostrano il Dolby Vision. Se la TV rifiuta il file, riceve il flusso di Castor.
 - Le TV AirPlay come le LG mantengono il Dolby Vision anche dai file MKV, che Castor converte in HLS per loro.
 - Un file Nativo che la TV riproduce senza modifiche chiude la trasmissione appena la TV lo finisce, invece di circa 30 secondi dopo sulle TV DLNA.
@@ -102,7 +103,7 @@ English one.
 - Rimossi le impostazioni e il collegamento per l’estensione esterna del browser, ormai ritirata. Restano disponibili l’estrazione dalle pagine e il blocco della pubblicità.
 - Motore di trasmissione aggiornato a Castor 2.5.0.
 - Ogni TV del selettore offre FCast. Un ricevitore che si annuncia in rete viene usato direttamente; altrimenti si inquadra con la fotocamera il codice QR mostrato da FCast Receiver. L’associazione appartiene a quella TV, e un codice che chiede la versione 4 cifrata del protocollo viene rifiutato invece di essere usato in chiaro.
-- Il motore di trasmissione e la sua notifica restano attivi solo mentre servono: un cast, una ricerca delle TV o un’associazione. Senza nulla da fare si fermano da soli, anche con Castor aperto, e la richiesta successiva li riavvia.
+- Il motore di trasmissione e la sua notifica restano attivi solo mentre c’è una trasmissione: da quando la chiedi, durante l’associazione, fino alla fine dell’ultima, e si fermano da soli circa 15 secondi dopo. Cercare le TV, all’avvio o nell’elenco delle TV, non avvia più il motore: Castor cerca da solo nella rete.
 - I ricevitori FCast ora ricevono l’HLS con il nome che il loro riproduttore accetta: l’immagine parte, invece di restare sulla schermata di attesa mentre il cast rinuncia dopo 30 secondi.
 - Un ricevitore AirPlay che risponde all’abbinamento con una chiave malformata ora viene rifiutato con un errore. Prima una risposta del genere poteva fermare il motore di trasmissione e chiudere i cast in corso.
 - Il cast di una pagina web ora trova anche il video che il player della pagina scarica tramite un service worker, come fanno alcuni player di dirette. Per questi video Castor ripete la provenienza della richiesta, ma non i cookie né le intestazioni che la pagina aggiunge da sé: uno stream che ne dipende continua a non poter essere trasmesso.
@@ -110,6 +111,7 @@ English one.
 - Finché Android ottimizza l’uso della batteria di Castor, un avviso giallo sotto l’intestazione dice che lo stream può bloccarsi o perdere qualità in background. Toccandolo si apre la richiesta di Android per disattivare l’ottimizzazione per Castor; disattivata quella, l’avviso sparisce.
 - Quando il player di una pagina web aspetta un tocco, Castor lo avvia: dopo qualche secondo senza stream tocca il centro del player più grande della pagina, come faresti tu, oppure fa clic sul pulsante play del player se la pagina non è sullo schermo, e riprova un paio di volte. Un video che sta già andando non viene toccato, un link non viene mai toccato e subito dopo il tocco la pagina non può portare altrove.
 - Una TV mantiene il proprio nome qualunque protocollo si scelga, FCast compreso, e sotto compaiono il protocollo con indirizzo e porta, anche durante una trasmissione.
+- Una TV AirPlay che sta già riproducendo una diretta e chiede a Castor una playlist che non è riuscita a scaricare non fa più chiudere subito la trasmissione: finisce solo se la TV stessa rinuncia con un errore. Prima una LG poteva fermarsi dopo pochi secondi con «the receiver could not fetch … itself».
 
 ## 1.3.0 — 2026-10-27
 
