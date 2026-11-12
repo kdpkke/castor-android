@@ -4,10 +4,12 @@ import android.content.Context
 import android.content.res.Configuration
 import castor.v1.DeviceOuterClass.Device
 import castor.v1.DeviceOuterClass.DeviceType
+import castor.v1.DeviceOuterClass.Fidelity
 import castor.v1.DeviceOuterClass.Target
 import io.github.stupside.castor.theme.AppTheme
 import java.net.URI
 import java.util.Locale
+import org.json.JSONObject
 
 internal const val NATIVE_QUALITY = "native"
 internal const val NATIVE_HEIGHT_CEILING = Int.MAX_VALUE
@@ -160,6 +162,32 @@ class CastOptions(private val context: Context) {
 
   fun searchedHost(host: String) {
     preferences.edit().putString("searched-host", host).apply()
+  }
+
+  // What a Native cast keeps on each protocol of a TV, by verdictKey, as an engine last judged it. The engine runs
+  // only for casts, so the TV picker shows what was learned then.
+  internal fun verdicts(): Map<String, Fidelity> {
+    val saved =
+      runCatching { JSONObject(preferences.getString("verdicts", null) ?: return emptyMap()) }.getOrNull()
+        ?: return emptyMap()
+    return saved
+      .keys()
+      .asSequence()
+      .mapNotNull { key ->
+        Fidelity.values()
+          .firstOrNull {
+            it != Fidelity.UNRECOGNIZED &&
+              it != Fidelity.FIDELITY_UNSPECIFIED &&
+              it.name == saved.optString(key)
+          }
+          ?.let { key to it }
+      }
+      .toMap()
+  }
+
+  internal fun verdicts(learned: Map<String, Fidelity>) {
+    val all = verdicts() + learned
+    preferences.edit().putString("verdicts", JSONObject(all.mapValues { it.value.name }).toString()).apply()
   }
 
   // The FCast receivers paired by their codes, each for the one TV it was scanned on.

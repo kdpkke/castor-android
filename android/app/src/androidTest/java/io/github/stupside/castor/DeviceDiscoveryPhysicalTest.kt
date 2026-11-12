@@ -3,9 +3,13 @@ package io.github.stupside.castor
 import androidx.test.platform.app.InstrumentationRegistry
 import castor.v1.DeviceOuterClass.Device
 import castor.v1.DeviceOuterClass.DeviceType
+import io.github.stupside.castor.data.DataRepository
 import io.github.stupside.castor.ui.main.CastOptions
 import java.io.File
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
@@ -34,5 +38,31 @@ class DeviceDiscoveryPhysicalTest {
       JSONObject().put("name", confirmed.name).put("address", confirmed.address)
         .put("id", confirmed.id).put("uuid_verified", true).toString()
     )
+  }
+
+  // The app's own search, run without the engine, lists every TV it shares with the engine's search exactly as
+  // the engine lists it: same id, name, type and address.
+  @Test
+  fun theAppListsTheTvsItFindsAsTheEngineListsThem() = runBlocking {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    EngineHost.attach(context)
+    val hold = EngineHost.hold()
+    try {
+      val api = withTimeout(30_000) { EngineHost.endpoint.filterNotNull().first() }
+      val engine = DataRepository(api).devices()
+      val app = DeviceDiscovery(context).search(CastOptions(context))
+      val shared = engine.map { it.id }.toSet().intersect(app.map { it.id }.toSet())
+      assertTrue("Both searches must find a TV: engine=$engine app=$app", shared.isNotEmpty())
+      for (id in shared) assertEquals(engine.first { it.id == id }, app.first { it.id == id })
+      File(context.getExternalFilesDir(null), "discovery-parity.json").writeText(
+        JSONObject()
+          .put("engine", engine.map { "${it.id}|${it.name}|${it.address}" })
+          .put("app", app.map { "${it.id}|${it.name}|${it.address}" })
+          .put("shared", shared.size)
+          .toString()
+      )
+    } finally {
+      hold.close()
+    }
   }
 }

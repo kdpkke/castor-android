@@ -276,9 +276,9 @@ class EngineOnDemandTest {
     }
   }
 
-  // The screen searches for its saved TV by itself, so the engine runs only for that search and then stops.
+  // The screen searches for its saved TV by itself, without the engine: that runs only for casts.
   @Test
-  fun theScreenStartsTheEngineForItsSearchAndLetsItStop() = runBlocking<Unit> {
+  fun theScreenSearchesForItsTvWithoutTheEngine() = runBlocking<Unit> {
     CastOptions(context)
       .television(
         SavedTv(
@@ -290,11 +290,16 @@ class EngineOnDemandTest {
       )
     ActivityScenario.launch(MainActivity::class.java).use { scenario ->
       val screen = model(scenario)
-      until(30_000, "No engine started for the search") { enginePids().isNotEmpty() }
+      until(30_000, "The screen did not search for its TV") {
+        screen.uiState.value.let { it.discovering || it.discoveryComplete }
+      }
+      // No engine at any moment of the search, nor after it.
       until(90_000, "The search neither ended nor failed") {
+        assertNoEngine()
         screen.uiState.value.let { it.discoveryComplete || it.discoveryError != null }
       }
-      awaitNoEngine(20_000)
+      delay(3_000)
+      assertNoEngine()
       screen.uiState.value.let {
         assertTrue(it.ready)
         assertNull(it.failure)

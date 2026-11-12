@@ -17,6 +17,7 @@ import io.github.stupside.castor.data.DataRepository
 import io.github.stupside.castor.data.PlaybackObservation
 import io.github.stupside.castor.data.Rpc
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -152,6 +153,9 @@ class MainScreenViewModel : ViewModel() {
   private var endpoint: Rpc? = null
   // How the screen asks for the engine. Absent where a test hands the model an endpoint itself: then nothing is asked.
   private var engine: EngineDemand? = null
+  // How the screen finds TVs without the engine, which runs only for casts. Absent where a test hands the model
+  // an endpoint itself: then the search asks that endpoint, and never asks for an engine.
+  private var search: (suspend () -> List<Device>)? = null
   // The engine hold of the pairing on screen, with the TV it is for: the engine remembers a pairing only while it
   // runs. Each pairing has its own, so the late end of one never lets go of the engine the next one needs.
   private class PairingHold(val target: Target, val hold: AutoCloseable?)
@@ -191,6 +195,10 @@ class MainScreenViewModel : ViewModel() {
             if (it.cast.id == id) change(it) else it
           }
       )
+  }
+
+  internal fun searchWith(find: suspend () -> List<Device>) {
+    search = find
   }
 
   // With an engine that starts when asked, the screen is ready before any engine runs.
@@ -402,16 +410,17 @@ class MainScreenViewModel : ViewModel() {
       }
       .build()
 
-  // Asks each protocol of a TV what a Native cast keeps there, once per protocol.
+  // Asks each protocol of a TV what a Native cast keeps there, once per protocol, and only of an engine that
+  // already runs for a cast: a verdict is never worth starting the engine for. The screen keeps what it learns.
   fun describe(tvs: List<SavedTv>) {
-    if (engine == null && repository == null) return
+    val data = repository ?: return
     for (tv in tvs) {
       val key = verdictKey(tv)
       if (key in uiState.value.verdicts) continue
       viewModelScope.launch {
         val fidelity =
           try {
-            engaged { data -> data.describe(tv.target()) }
+            data.describe(tv.target())
           } catch (error: Exception) {
             if (error is CancellationException) throw error
             return@launch
@@ -515,12 +524,13 @@ class MainScreenViewModel : ViewModel() {
 
   // restart begins again a search already running, so it also covers an address just typed.
   fun discover(restart: Boolean = false) {
-    if (engine == null && repository == null) return
+    val find = search ?: repository?.let { data -> suspend { data.devices() } } ?: return
     if (discovery?.isActive == true) {
       if (!restart) return
       discovery?.cancel()
     }
-    discovery = viewModelScope.launch {
+    // Known as the running search before it runs: a search that answers at once ends while being launched.
+    val next = viewModelScope.launch(start = CoroutineStart.LAZY) {
       uiState.value =
         uiState.value.copy(
           discovering = true,
@@ -529,7 +539,7 @@ class MainScreenViewModel : ViewModel() {
           discoveryError = null,
         )
       try {
-        val devices = engaged { data -> data.devices() }
+        val devices = find()
         uiState.value = uiState.value.copy(devices = devices)
       } catch (error: Exception) {
         if (error !is CancellationException)
@@ -540,6 +550,8 @@ class MainScreenViewModel : ViewModel() {
           uiState.value = uiState.value.copy(discovering = false, discoveryComplete = true)
       }
     }
+    discovery = next
+    next.start()
   }
 
   fun cast(

@@ -12,7 +12,6 @@ import android.os.IBinder
 import android.os.PowerManager
 import io.github.stupside.castor.data.Rpc
 import io.github.stupside.castor.ui.main.CastOptions
-import castor.v1.DeviceOuterClass.Device
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -96,13 +95,8 @@ class CastorService : Service() {
     bridge =
       BrowserServer(
         browser,
-        {
-          // A TV entered by hand has no identity to confirm, but its host is asked directly too.
-          val remembered = options.television()?.let {
-            Device.newBuilder().setId(it.id).setName(it.name).setAddress(it.address).setType(it.type).build()
-          }
-          discovery.find(remembered, options.searchedHost())
-        },
+        // A TV entered by hand has no identity to confirm, but its host is asked directly too.
+        { discovery.find(options) },
         scrapingToken,
         contentResolver,
       )

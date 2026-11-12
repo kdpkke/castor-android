@@ -52,6 +52,10 @@ class MainActivity : ComponentActivity() {
     model = ViewModelProvider(this)[MainScreenViewModel::class.java]
     EngineHost.attach(applicationContext)
     model.demand(EngineHost)
+    // TVs are found by the app itself: the engine runs only while a cast needs it.
+    val discovery = DeviceDiscovery(applicationContext)
+    val options = CastOptions(applicationContext)
+    model.searchWith { discovery.search(options) }
     // The share of the browser belongs to the view model: a recreated screen keeps it,
     // and each screen open at once has its own.
     browser = BrowserHost.acquire(model, this)

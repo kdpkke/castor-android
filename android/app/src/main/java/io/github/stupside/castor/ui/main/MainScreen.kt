@@ -80,6 +80,14 @@ fun MainScreen(
   val context = LocalContext.current
   val compact = LocalConfiguration.current.screenHeightDp < 480
   val options = remember(context) { CastOptions(context) }
+  // What an engine said of each protocol while it ran for a cast is kept: the picker shows it with no engine.
+  var savedVerdicts by remember(options) { mutableStateOf(options.verdicts()) }
+  LaunchedEffect(state.verdicts) {
+    if (state.verdicts.isNotEmpty()) {
+      options.verdicts(state.verdicts)
+      savedVerdicts = options.verdicts()
+    }
+  }
   val clipboard = LocalClipboard.current
   val scope = rememberCoroutineScope()
   val snackbar = remember { SnackbarHostState() }
@@ -728,7 +736,7 @@ fun MainScreen(
   if (sheet == "theme") AppThemePicker(theme, { sheet = null }, selectTheme)
   if (sheet == "tv")
     TvPicker(
-      state,
+      state.copy(verdicts = savedVerdicts + state.verdicts),
       tv,
       { sheet = null },
       { host ->

@@ -5,6 +5,7 @@ import android.net.TetheringInterface
 import android.net.TetheringManager
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.util.Xml
 import castor.v1.DeviceOuterClass.Device
@@ -35,6 +36,7 @@ import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONObject
 import org.json.JSONException
+import io.github.stupside.castor.ui.main.CastOptions
 import io.github.stupside.castor.ui.main.receiverHost
 
 // Android supplies mDNS and active hotspot interfaces; no restricted netlink enumeration is needed.
@@ -43,6 +45,34 @@ class DeviceDiscovery(private val context: Context) {
   // Before Android 16 an app cannot ask which interfaces tether; try the soft-AP names Android and
   // OEMs use. Each is resolved by name only, never by enumerating every interface.
   private val likelyHotspotNames = listOf("ap0", "swlan0", "softap0", "wlan1")
+
+  // The search the engine asks for: the saved TV and the host last typed are asked directly too.
+  suspend fun find(options: CastOptions): List<Device> =
+    find(
+      options.television()?.let {
+        Device.newBuilder().setId(it.id).setName(it.name).setAddress(it.address).setType(it.type).build()
+      },
+      options.searchedHost(),
+    )
+
+  // The same search run by the app itself, so that finding a TV never starts the engine. Its devices are listed
+  // as the engine lists them, so a TV found here is the one the engine casts to, and it is given the time the
+  // engine gives it (its network timeout, 5 s). Android may hold back multicast replies from an app without a
+  // multicast lock, so the search holds one, as the engine's service does.
+  suspend fun search(options: CastOptions): List<Device> {
+    val lock =
+      context.applicationContext
+        .getSystemService(WifiManager::class.java)
+        .createMulticastLock("castor-search")
+        .apply { setReferenceCounted(false) }
+    lock.acquire()
+    try {
+      return withTimeoutOrNull(5_000) { listed(find(options)) }
+        ?: throw java.io.IOException("The search for TVs took too long.")
+    } finally {
+      lock.release()
+    }
+  }
 
   // Every route is searched independently: one that fails (a cellular default route refusing
   // multicast, a hotspot that just stopped) neither hides receivers found on the others nor the
@@ -364,6 +394,34 @@ class DeviceDiscovery(private val context: Context) {
   }
 
   companion object {
+    // What a search found as the engine lists it (its ExternalDiscovery, Directory.discover and Info.Public): a
+    // device of a type the engine casts to, with an id and an address; its id is the type's name, a colon and the
+    // id the search found; each id once, the first kept.
+    internal fun listed(found: List<Device>): List<Device> =
+      found
+        .mapNotNull { device ->
+          val type = engineTypes[device.type] ?: return@mapNotNull null
+          if (device.id.isEmpty() || device.address.isEmpty()) return@mapNotNull null
+          Device.newBuilder()
+            .setId("$type:${device.id}")
+            .setName(device.name)
+            .setType(device.type)
+            .setAddress(device.address)
+            .build()
+        }
+        .distinctBy { it.id }
+
+    // The engine's name for each type it casts to: the contract's name, lower case, without its prefix.
+    private val engineTypes =
+      listOf(
+          DeviceType.DEVICE_TYPE_DLNA,
+          DeviceType.DEVICE_TYPE_CHROMECAST,
+          DeviceType.DEVICE_TYPE_ROKU,
+          DeviceType.DEVICE_TYPE_FCAST,
+          DeviceType.DEVICE_TYPE_AIRPLAY,
+        )
+        .associateWith { it.name.removePrefix("DEVICE_TYPE_").lowercase(Locale.ROOT) }
+
     // A saved renderer's id is the engine's "dlna:" before the USN the TV announced.
     internal fun rendererUdn(id: String): String? =
       id.removePrefix("dlna:").substringBefore("::").takeIf { it.startsWith("uuid:") }

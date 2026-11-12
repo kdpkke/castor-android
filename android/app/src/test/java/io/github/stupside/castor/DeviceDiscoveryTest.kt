@@ -131,4 +131,44 @@ class DeviceDiscoveryTest {
       assertEquals(0, info.requestCount)
     }
   }
+
+  // The app lists what it finds as the engine lists what its search returns (ExternalDiscovery,
+  // Directory.discover, Info.Public), so a TV saved from the app's search is the TV the engine casts to.
+  @Test
+  fun aSearchIsListedAsTheEngineListsIt() {
+    fun found(id: String, type: DeviceType, address: String = "192.168.1.65:1", name: String = "TV") =
+      Device.newBuilder().setId(id).setName(name).setType(type).setAddress(address).build()
+    val listed =
+      DeviceDiscovery.listed(
+        listOf(
+          found(id, DeviceType.DEVICE_TYPE_CHROMECAST, "192.168.1.65:8009", "[LG] webOS TV OLED42C24LA"),
+          found("uuid:tv::urn:schemas-upnp-org:device:MediaRenderer:1", DeviceType.DEVICE_TYPE_DLNA),
+          found("roku-serial", DeviceType.DEVICE_TYPE_ROKU),
+          found("fcast-id", DeviceType.DEVICE_TYPE_FCAST),
+          found("AA:BB:CC:DD:EE:FF", DeviceType.DEVICE_TYPE_AIRPLAY),
+          // The same id on another protocol is another device.
+          found(id, DeviceType.DEVICE_TYPE_AIRPLAY),
+          // Dropped: no known type, no id, no address, and an id already listed.
+          found("unknown", DeviceType.DEVICE_TYPE_UNSPECIFIED),
+          found("", DeviceType.DEVICE_TYPE_DLNA),
+          found("no-address", DeviceType.DEVICE_TYPE_DLNA, address = ""),
+          found(id, DeviceType.DEVICE_TYPE_CHROMECAST, "192.168.1.99:8009", "Later"),
+        )
+      )
+    assertEquals(
+      listOf(
+        "chromecast:$id",
+        "dlna:uuid:tv::urn:schemas-upnp-org:device:MediaRenderer:1",
+        "roku:roku-serial",
+        "fcast:fcast-id",
+        "airplay:AA:BB:CC:DD:EE:FF",
+        "airplay:$id",
+      ),
+      listed.map { it.id },
+    )
+    val first = listed.first()
+    assertEquals("[LG] webOS TV OLED42C24LA", first.name)
+    assertEquals("192.168.1.65:8009", first.address)
+    assertEquals(DeviceType.DEVICE_TYPE_CHROMECAST, first.type)
+  }
 }

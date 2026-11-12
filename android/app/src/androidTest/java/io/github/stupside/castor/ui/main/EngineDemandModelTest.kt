@@ -43,23 +43,25 @@ class EngineDemandModelTest {
   }
 
   @Test
-  fun aSearchWithNoEngineAsksForOneAndLetsItGoWhenDone() {
-    // A search takes one hold on the engine and gives it back once the engine has answered.
+  fun aSearchNeverAsksForTheEngine() {
+    // TVs are found by the app itself: a search takes no hold, so no engine starts for it.
     val demand = FakeDemand()
     val model = newModel(demand)
     val devices = listOf(device("Test TV", "192.0.2.10:8009"))
-    val api = newEngine(devices)
+    val searches = AtomicInteger()
+    onMain {
+      model.searchWith {
+        searches.incrementAndGet()
+        devices
+      }
+    }
     assertTrue(model.uiState.value.ready)
     assertEquals(CastPhase.Ready, model.uiState.value.phase)
-    assertEquals(0, demand.asked.get())
     onMain { model.discover() }
-    assertEquals(1, demand.asked.get())
-    assertTrue(model.uiState.value.discovering)
-    assertEquals(0, api.server.requestCount)
-    start(demand, model, api)
     until(what = "the search to be answered") { model.uiState.value.discoveryComplete }
     assertEquals(devices, model.uiState.value.devices)
-    assertEquals(0, demand.open.get())
+    assertEquals(1, searches.get())
+    assertEquals(0, demand.asked.get())
   }
 
   @Test
@@ -85,14 +87,14 @@ class EngineDemandModelTest {
 
   @Test
   fun anEngineThatCannotStartEndsTheWaitWithItsReason() {
-    // A failed start ends a waiting search at once with the engine's reason, not at the timeout.
+    // A failed start ends a cast waiting for the engine at once with the engine's reason, not at the timeout.
     val demand = FakeDemand()
     val model = newModel(demand)
-    onMain { model.discover() }
+    onMain { model.cast(video, false, pinned("192.0.2.10:8009"), "1080", "off") }
     demand.failure.value = "No engine for this device"
-    until(2_000, "the search to end with the engine's reason") {
-      model.uiState.value.discoveryError == "No engine for this device" &&
-        !model.uiState.value.discovering
+    until(2_000, "the cast to end with the engine's reason") {
+      model.uiState.value.failure?.contains("No engine for this device") == true &&
+        !model.uiState.value.submitting
     }
     assertEquals(0, demand.open.get())
   }
@@ -117,30 +119,29 @@ class EngineDemandModelTest {
 
   @Test
   fun anEngineBeingStoppedIsNotUsedForNewWork() {
-    // Once the stop is decided, a search does not reach the stopping engine, even before the screen hears it.
+    // Once the stop is decided, a cast does not reach the stopping engine, even before the screen hears it.
     val demand = FakeDemand()
     val model = newModel(demand)
-    val first = newEngine(listOf(device("Test TV one", "192.0.2.10:8009")))
-    val secondDevices = listOf(device("Test TV two", "192.0.2.20:8009"))
-    val second = newEngine(secondDevices)
+    val first = newEngine()
+    val second = newEngine()
     start(demand, model, first)
-    onMain { model.discover() }
-    until(what = "the first search to be answered") { model.uiState.value.discoveryComplete }
-    assertEquals(1, first.listDevices.get())
     demand.endpoint.value = null
-    onMain { model.discover(restart = true) }
+    onMain { model.cast(video, false, pinned("192.0.2.10:8009"), "1080", "off") }
     Thread.sleep(500)
-    assertEquals(1, first.listDevices.get())
+    assertTrue(first.castIds.isEmpty())
     onMain { model.connect(null) }
     start(demand, model, second)
     until(
       what =
-        "the second engine to answer the search asked while the first was stopping " +
-          "(connect(null) cancels that search and nothing re-runs it)",
+        "the second engine to receive the cast asked while the first was stopping " +
+          "(connect(null) cancels that cast and nothing sends it again)",
     ) {
-      model.uiState.value.devices == secondDevices
+      second.castIds.size == 1
     }
-    assertEquals(1, second.listDevices.get())
+    assertTrue(first.castIds.isEmpty())
+    val id = second.castIds.single()
+    until(what = "the cast to be watched") { id in second.watched }
+    second.end(id, completed())
     until(what = "the engine to be let go") { demand.open.get() == 0 }
   }
 
