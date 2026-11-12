@@ -3,7 +3,7 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
-## 1.4.0 — Unreleased
+## 2.0.0 — Unreleased
 
 - The TV picker lists each TV once with its IP address and the protocols it answers on. Selecting a TV opens those protocols with their ports, with Back below the choices.
 

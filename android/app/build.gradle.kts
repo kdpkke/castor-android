@@ -20,8 +20,8 @@ android {
         minSdk = 28
         ndk { abiFilters += targetAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "x86_64") }
         targetSdk = 37
-        versionCode = 51
-        versionName = "1.4.0"
+        versionCode = 53
+        versionName = "2.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["appLabel"] = "@string/app_name"
         // Manual diagnostics need real hardware or an explicitly supplied external URL.
@@ -33,7 +33,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            versionNameSuffix = "-test.34"
+            versionNameSuffix = "-test.35"
             manifestPlaceholders["appLabel"] = "Castor (test)"
         }
         release {
