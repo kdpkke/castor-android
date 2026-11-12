@@ -51,6 +51,7 @@ English one.
 - The casting engine and its notification run only while something needs them: a cast, a TV search or a pairing. With nothing to do they stop by themselves, also with Castor open, and the next request starts them again.
 - FCast receivers now get HLS under the name their player accepts, so the picture starts instead of the receiver staying on its idle screen while the cast gives up after 30 seconds.
 - An AirPlay receiver that answers pairing with a malformed key is now refused with an error. Before, such an answer could stop the casting engine and end the casts in progress.
+- Casting a web page now also finds a video the page's player loads through a service worker, as some live players do. For such a video Castor repeats where the request comes from, but not cookies or headers the page adds by itself: a stream that depends on those still cannot be cast.
 
 ### Italiano
 
@@ -100,6 +101,7 @@ English one.
 - Il motore di trasmissione e la sua notifica restano attivi solo mentre servono: un cast, una ricerca delle TV o un’associazione. Senza nulla da fare si fermano da soli, anche con Castor aperto, e la richiesta successiva li riavvia.
 - I ricevitori FCast ora ricevono l’HLS con il nome che il loro riproduttore accetta: l’immagine parte, invece di restare sulla schermata di attesa mentre il cast rinuncia dopo 30 secondi.
 - Un ricevitore AirPlay che risponde all’abbinamento con una chiave malformata ora viene rifiutato con un errore. Prima una risposta del genere poteva fermare il motore di trasmissione e chiudere i cast in corso.
+- Il cast di una pagina web ora trova anche il video che il player della pagina scarica tramite un service worker, come fanno alcuni player di dirette. Per questi video Castor ripete la provenienza della richiesta, ma non i cookie né le intestazioni che la pagina aggiunge da sé: uno stream che ne dipende continua a non poter essere trasmesso.
 
 ## 1.3.0 — 2026-10-27
 
