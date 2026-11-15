@@ -148,7 +148,7 @@
     <string name="active_transmissions">Trasmissioni in corso</string>
     <string name="transmissions_help_one">Questa trasmissione continua mentre mandi un altro video su un’altra TV.</string>
     <string name="transmissions_help_many">Ogni TV riproduce il suo video. Toccane una per controllarla.</string>
-    <string name="cast_to_another_tv">Trasmetti su un’altra TV</string>
+    <string name="cast_to_another_tv">Esegui nuovo cast in parallelo</string>
     <string name="cast_to_another_tv_help">Scegli un video e una TV libera. Le trasmissioni qui sopra continuano.</string>
     <string name="cast_video_too">Trasmetti anche su questa TV</string>
     <string name="controls_for">Comandi per %1$s</string>

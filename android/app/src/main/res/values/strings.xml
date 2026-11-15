@@ -148,7 +148,7 @@
     <string name="active_transmissions">Casts in progress</string>
     <string name="transmissions_help_one">This cast keeps playing while you send another video to another TV.</string>
     <string name="transmissions_help_many">Each TV plays its own video. Tap one to control it.</string>
-    <string name="cast_to_another_tv">Cast to another TV</string>
+    <string name="cast_to_another_tv">Start a new cast in parallel</string>
     <string name="cast_to_another_tv_help">Choose a video and a free TV. The casts above keep playing.</string>
     <string name="cast_video_too">Cast to this TV too</string>
     <string name="controls_for">Controls for %1$s</string>
