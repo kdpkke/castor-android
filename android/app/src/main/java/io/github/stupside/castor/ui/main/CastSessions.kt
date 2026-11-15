@@ -32,6 +32,21 @@ internal fun CastSessions(
   // The name of the TV a cast goes to, the same whichever protocol it uses.
   receiverName: (castor.v1.DeviceOuterClass.Device) -> String = { it.name },
 ) {
+  // One cast on screen: the panel below already names its TV and holds its controls, which a list above would push
+  // off a phone's screen. Only the way to a second TV stays; choosing it brings back the list, to return.
+  val only = state.sessions.singleOrNull()
+  if (only != null && state.selectedCastId == only.cast.id) {
+    TransmissionRow(
+      false,
+      R.drawable.ic_cast,
+      stringResource(R.string.cast_to_another_tv),
+      stringResource(R.string.transmissions_help_one),
+      Modifier.testTag("new-cast"),
+      enabled = !state.submitting,
+      select = newCast,
+    )
+    return
+  }
   Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     Text(
       stringResource(R.string.active_transmissions),

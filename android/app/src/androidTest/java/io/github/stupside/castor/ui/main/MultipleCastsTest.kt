@@ -189,6 +189,42 @@ class MultipleCastsTest {
       .assertDoesNotExist()
   }
 
+  // With one cast only the way to a second TV stands above its panel, so its controls stay on a phone's screen;
+  // choosing a second TV brings back the list, and the cast's row leads back to it.
+  @Test
+  fun oneCastShowsOnlyTheWayToAnotherTvAndTheListReturnsForIt() {
+    val model = MainScreenViewModel()
+    model.uiState.value =
+      castingScreenState(
+        castId = "living-room",
+        activeCast =
+          Cast.newBuilder()
+            .setId("living-room")
+            .setDevice(
+              Device.newBuilder()
+                .setName("Living room TV")
+                .setAddress("192.0.2.65:8009")
+                .setType(DeviceType.DEVICE_TYPE_CHROMECAST)
+            )
+            .build(),
+        phase = CastPhase.Casting,
+        playback = PlaybackUiState(positionMs = 30_000, durationMs = 600_000, canPause = true, canSeek = true, available = true),
+      )
+    compose.setContent { CastorTheme { MainScreen(model, null, "", {}) } }
+    val heading = compose.activity.getString(R.string.active_transmissions)
+    compose.onNodeWithTag("new-cast").assertIsDisplayed().assertIsNotSelected()
+    compose.onNodeWithTag("session-living-room").assertDoesNotExist()
+    compose.onNodeWithText(heading).assertDoesNotExist()
+    compose.onNodeWithTag("playback-forward").assertExists()
+    compose.onNodeWithTag("new-cast").performClick()
+    compose.onNodeWithText(heading).assertExists()
+    compose.onNodeWithTag("new-cast").assertIsSelected()
+    compose.onNodeWithTag("session-living-room").performScrollTo().performClick()
+    compose.onNodeWithTag("session-living-room").assertDoesNotExist()
+    compose.onNodeWithText(heading).assertDoesNotExist()
+    compose.onNodeWithTag("playback-forward").assertExists()
+  }
+
   @Test
   fun aCompletedCastDoesNotForgetOrStopTheOtherTV() {
     Fixture(endBedroom = true).use { fixture ->

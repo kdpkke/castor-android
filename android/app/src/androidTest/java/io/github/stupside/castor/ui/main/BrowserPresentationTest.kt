@@ -210,11 +210,13 @@ class BrowserPresentationTest {
         delay(500)
         val before = visible()
         val initialY = state.get().optInt("y")
+        // From the middle of the page: the bar at the bottom of the app, above the keyboard, can cover the page's
+        // lower edge (more so with the battery warning under the header), and a touch there is the app's, not the page's.
         browserTouchGesture(
           before.exactCenterX(),
-          before.bottom - 12f,
+          before.exactCenterY(),
           0f,
-          -minOf(before.height() * .5f, 180f),
+          -minOf(before.height() * .3f, 180f),
         )
         delay(500)
         assertTrue(
@@ -230,7 +232,7 @@ class BrowserPresentationTest {
         val initialX = state.get().optInt("x")
         browserTouchGesture(
           horizontal.right - 20f,
-          horizontal.bottom - 15f,
+          horizontal.exactCenterY(),
           -horizontal.width() * .6f,
           0f,
         )
