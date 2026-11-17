@@ -5,6 +5,7 @@ English one.
 
 ## 2.0.0 — 2026-11-17
 
+- **Now compatible with AirPlay and FCast v3.** Besides Chromecast, DLNA and Roku, Castor now casts to AirPlay TVs (Apple TV and TVs with AirPlay built in, such as LG webOS models) and to FCast receivers using version 3 of the FCast protocol.
 - The TV picker lists each TV once with its IP address and the protocols it answers on. Selecting a TV opens those protocols with their ports, with Back below the choices.
 
 - Cast different videos to different TVs at the same time. **Casts in progress** lists one row per TV and a last row, **Start a new cast in parallel**, that prepares a new cast while the others keep playing. With a single cast only that row shows, so the cast's controls stay on screen. The chosen row is highlighted; the controls below it and the buttons at the bottom act on it, and with several casts the buttons say which TV they control. The TV list marks the TVs already casting.
@@ -61,6 +62,7 @@ English one.
 
 ### Italiano
 
+- **Ora compatibile con AirPlay e FCast v3.** Oltre a Chromecast, DLNA e Roku, Castor ora trasmette alle TV AirPlay (Apple TV e TV con AirPlay integrato, come i modelli LG webOS) e ai ricevitori FCast che usano la versione 3 del protocollo FCast.
 - La ricerca mostra ogni TV una sola volta con il suo IP e i protocolli su cui risponde. Selezionandola si apre la pagina dei protocolli con le loro porte, con Indietro sotto le opzioni.
 
 - Trasmetti video diversi su TV diverse contemporaneamente. **Trasmissioni in corso** elenca una riga per ogni TV e un’ultima riga, **Esegui nuovo cast in parallelo**, che prepara una nuova trasmissione mentre le altre continuano. Con una sola trasmissione resta solo quella riga, così i comandi restano sullo schermo. La riga scelta è evidenziata; i comandi sotto e i pulsanti in basso agiscono su quella, e con più trasmissioni i pulsanti dicono quale TV comandano. L’elenco delle TV segna quelle che stanno già trasmettendo.
