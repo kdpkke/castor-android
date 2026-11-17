@@ -10,6 +10,8 @@ English one.
 - Castor's notification is now in Italian too.
 - A download link cast in Native to a DLNA TV now reaches it as the original file, keeping Dolby Vision and letting the TV seek in it; Castor used to convert it.
 - FCast receivers play in Native too: Castor first hands them the original video and, if they cannot play it, serves its tracks itself.
+- An FCast receiver that restarts as it takes a video, as the one for LG's webOS does, keeps Castor's controls: Castor connects to it again and follows the playback. Seeking in an original file now happens on the receiver itself, without Castor converting the video from that point.
+- AirPlay works on older TVs such as an LG C1, which play a video handed as a file but not as a stream: Castor hands it again as a file when the TV cannot play the stream, and keeps doing so on that TV. On a C1 this shows Dolby Vision; newer TVs such as an LG C2 are unchanged.
 - A saved TV that answers only questions asked of the whole network, as an LG C1 does, now shows its AirPlay and FCast receivers too.
 - The FCast code scanner zooms, for a TV across the room: pinch the picture or tap 1×, 2×, 5× or 10× above the X. It also reads the camera in more detail.
 - The casting engine now carries castor's newest core, ahead of its 2.6.0 release:
@@ -26,6 +28,8 @@ English one.
 - La notifica di Castor ora è anche in italiano.
 - Un link di download trasmesso in Nativa a una TV DLNA le arriva ora come file originale, con il Dolby Vision e la possibilità di spostarsi nel video dalla TV; prima Castor lo convertiva.
 - Anche i ricevitori FCast funzionano in Nativa: Castor prima gli passa il video originale e, se non riescono a riprodurlo, serve lui le sue tracce.
+- Un ricevitore FCast che si riavvia quando riceve un video, come quello per webOS delle LG, resta controllabile da Castor: Castor si ricollega e segue la riproduzione. Spostarsi in un file originale ora avviene sul ricevitore stesso, senza che Castor converta il video da quel punto.
+- AirPlay funziona anche sulle TV più vecchie come una LG C1, che riproducono un video passato come file ma non come flusso: se la TV non riesce a riprodurre il flusso, Castor glielo ripassa come file e continua così con quella TV. Su una C1 si vede in Dolby Vision; le TV più recenti come una LG C2 non cambiano.
 - Una TV salvata che risponde solo alle domande rivolte a tutta la rete, come una LG C1, mostra ora anche i suoi ricevitori AirPlay e FCast.
 - Lo scanner del codice FCast fa lo zoom, per una TV dall'altra parte della stanza: allarga l'immagine con due dita o tocca 1×, 2×, 5× o 10× sopra la X. Legge anche la fotocamera con più dettaglio.
 - Il motore di trasmissione porta ora il core più recente di castor, prima della sua versione 2.6.0:
