@@ -23,6 +23,9 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collect
@@ -78,14 +81,30 @@ class DeviceDiscovery(private val context: Context) {
   // multicast, a hotspot that just stopped) neither hides receivers found on the others nor the
   // Chromecasts. The search fails only when nothing was found and some route failed.
   suspend fun find(remembered: Device? = null, typed: String? = null): List<Device> = coroutineScope {
-    val cast = async { attempt { chromecasts() } }
-    val airplay = async { attempt { airPlays() } }
-    val fcast = async { attempt { fCasts() } }
+    // Hosts mDNS announces, as each one resolves, to be asked for a DLNA renderer by unicast.
+    val announced = Channel<String>(Channel.UNLIMITED)
+    val cast = async { attempt { chromecasts(announced) } }
+    val airplay = async { attempt { airPlays(announced) } }
+    val fcast = async { attempt { fCasts(announced) } }
+    launch {
+      listOf(cast, airplay, fcast).awaitAll()
+      announced.close()
+    }
     val known = async { rememberedChromecast(remembered) }
     // Some TVs' Wi-Fi drops multicast while they answer directly: ask the saved and typed hosts too.
     val hosts = listOfNotNull(remembered?.address?.let(::receiverHost), typed?.let(::receiverHost)).distinct()
     val direct =
       async(Dispatchers.IO) { hosts.map { async { attempt { direct(it, remembered) } } }.awaitAll() }
+    // A TV found as Chromecast, AirPlay or FCast is asked for its DLNA renderer too, as soon as mDNS resolves it:
+    // its Wi-Fi may drop the SSDP multicast while it answers a search sent to it alone.
+    val renderers =
+      async(Dispatchers.IO) {
+        askAnnounced(announced, hosts.toSet(), android.os.SystemClock.elapsedRealtime() + ANNOUNCED_WINDOW_MS, {
+          android.os.SystemClock.elapsedRealtime()
+        }) {
+          ssdpAt(InetAddress.getByName(it))
+        }
+      }
     val ssdp =
       async(Dispatchers.IO) {
         // The default route can be cellular while the TV sits on this phone's hotspot, and the
@@ -94,7 +113,7 @@ class DeviceDiscovery(private val context: Context) {
         val routes = listOf<NetworkInterface?>(null) + hotspotInterfaces()
         routes.map { async { attempt { ssdp(it) } } }.awaitAll()
       }
-    val results = ssdp.await() + cast.await() + airplay.await() + fcast.await() + direct.await()
+    val results = ssdp.await() + cast.await() + airplay.await() + fcast.await() + direct.await() + renderers.await()
     val found =
       (results.flatMap { it.getOrNull().orEmpty() } + listOfNotNull(known.await()))
         .distinctBy { "${it.type}:${it.id}" }
@@ -310,8 +329,8 @@ class DeviceDiscovery(private val context: Context) {
     }
   }
 
-  private suspend fun chromecasts(): List<Device> =
-    services("_googlecast._tcp.") { resolved, host ->
+  private suspend fun chromecasts(announced: SendChannel<String>? = null): List<Device> =
+    services("_googlecast._tcp.", announced) { resolved, host ->
       val address = URI("http", null, host, resolved.port, null, null, null).rawAuthority
       val name = resolved.attributes["fn"]?.toString(Charsets.UTF_8) ?: resolved.serviceName
       val id = resolved.attributes["id"]?.toString(Charsets.UTF_8) ?: resolved.serviceName
@@ -324,14 +343,14 @@ class DeviceDiscovery(private val context: Context) {
     }
 
   // AirPlay receivers that play video; audio-only speakers and Macs are left out, as the engine refuses them.
-  private suspend fun airPlays(): List<Device> =
-    services("_airplay._tcp.") { resolved, host ->
+  private suspend fun airPlays(announced: SendChannel<String>? = null): List<Device> =
+    services("_airplay._tcp.", announced) { resolved, host ->
       val txt = resolved.attributes.mapValues { it.value?.toString(Charsets.UTF_8).orEmpty() }
       ReceiverAnnouncements.airPlay(resolved.serviceName, txt, host, resolved.port)
     }
 
-  private suspend fun fCasts(): List<Device> =
-    services("_fcast._tcp.") { resolved, host ->
+  private suspend fun fCasts(announced: SendChannel<String>? = null): List<Device> =
+    services("_fcast._tcp.", announced) { resolved, host ->
       ReceiverAnnouncements.fCast(resolved.serviceName, host, resolved.port)
     }
 
@@ -339,7 +358,11 @@ class DeviceDiscovery(private val context: Context) {
   private val resolving = kotlinx.coroutines.sync.Mutex()
 
   @Suppress("DEPRECATION")
-  private suspend fun services(type: String, device: (NsdServiceInfo, String) -> Device?): List<Device> {
+  private suspend fun services(
+    type: String,
+    announced: SendChannel<String>?,
+    device: (NsdServiceInfo, String) -> Device?,
+  ): List<Device> {
     val found = mutableListOf<Device>()
     val services = callbackFlow {
       val listener =
@@ -386,6 +409,7 @@ class DeviceDiscovery(private val context: Context) {
           }
         if (resolved != null) {
           val host = resolved.host?.hostAddress ?: return@collect
+          announced?.trySend(host)
           device(resolved, host)?.let { found += it }
         }
       }
@@ -394,6 +418,40 @@ class DeviceDiscovery(private val context: Context) {
   }
 
   companion object {
+    // Unicast searches of announced hosts end within the 5 s a search has, which mDNS itself takes 4 s of.
+    internal const val ANNOUNCED_WINDOW_MS = 4_500L
+
+    // Asks each announced host once, skipping those asked otherwise, until the window closes: a host announced too late
+    // for an answer to arrive in time is left to the multicast search. A host that does not answer only loses its own.
+    internal suspend fun askAnnounced(
+      announced: ReceiveChannel<String>,
+      asked: Set<String>,
+      deadline: Long,
+      now: () -> Long,
+      ask: suspend (String) -> List<Device>,
+    ): Result<List<Device>> = coroutineScope {
+      val seen = asked.toMutableSet()
+      val asks = mutableListOf<Deferred<List<Device>>>()
+      for (host in announced) {
+        val left = deadline - now()
+        if (left < UNICAST_ANSWER_MS || !seen.add(host)) continue
+        asks +=
+          async {
+            try {
+              withTimeoutOrNull(left) { ask(host) }.orEmpty()
+            } catch (cancelled: CancellationException) {
+              throw cancelled
+            } catch (_: Exception) {
+              emptyList()
+            }
+          }
+      }
+      Result.success(asks.awaitAll().flatten())
+    }
+
+    // A unicast search waits this long for its answer; a host announced with less time left is not asked.
+    private const val UNICAST_ANSWER_MS = 1_500L
+
     // What a search found as the engine lists it (its ExternalDiscovery, Directory.discover and Info.Public): a
     // device of a type the engine casts to, with an id and an address; its id is the type's name, a colon and the
     // id the search found; each id once, the first kept.

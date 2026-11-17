@@ -171,4 +171,55 @@ class DeviceDiscoveryTest {
     assertEquals("192.168.1.65:8009", first.address)
     assertEquals(DeviceType.DEVICE_TYPE_CHROMECAST, first.type)
   }
+
+  private fun renderer(host: String) =
+    Device.newBuilder()
+      .setId("uuid:$host::urn:schemas-upnp-org:device:MediaRenderer:1")
+      .setName("TV at $host")
+      .setType(DeviceType.DEVICE_TYPE_DLNA)
+      .setAddress("http://$host:1234/description.xml")
+      .build()
+
+  @Test(timeout = 15_000)
+  fun eachAnnouncedHostIsAskedOnceExceptThoseAskedAlreadyOrTooLate() = runBlocking {
+    val announced = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+    var clock = 0L
+    val asked = java.util.Collections.synchronizedList(mutableListOf<String>())
+    // The same TV announced as Chromecast and AirPlay, the saved TV, another TV, and one announced too late.
+    for (host in listOf("192.0.2.10", "192.0.2.10", "192.0.2.20", "192.0.2.30")) announced.send(host)
+    val late = launch {
+      clock = DeviceDiscovery.ANNOUNCED_WINDOW_MS - 1_000
+      announced.send("192.0.2.40")
+      announced.close()
+    }
+    val found =
+      DeviceDiscovery.askAnnounced(announced, setOf("192.0.2.20"), DeviceDiscovery.ANNOUNCED_WINDOW_MS, { clock }) {
+        asked += it
+        listOf(renderer(it))
+      }
+    late.join()
+    assertEquals(listOf("192.0.2.10", "192.0.2.30"), asked.sorted())
+    assertEquals(listOf("192.0.2.10", "192.0.2.30"), found.getOrThrow().map { it.name.removePrefix("TV at ") }.sorted())
+  }
+
+  @Test(timeout = 15_000)
+  fun aHostThatNeverAnswersHidesNoOtherRenderer() = runBlocking {
+    val announced = kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+    announced.send("192.0.2.10")
+    announced.send("192.0.2.20")
+    announced.send("192.0.2.30")
+    announced.close()
+    val started = System.nanoTime()
+    val found =
+      DeviceDiscovery.askAnnounced(announced, emptySet(), 3_000, { 0L }) { host ->
+        when (host) {
+          "192.0.2.10" -> awaitCancellation()
+          "192.0.2.20" -> throw java.net.SocketException("unreachable")
+          else -> listOf(renderer(host))
+        }
+      }
+    assertEquals(listOf("TV at 192.0.2.30"), found.getOrThrow().map { it.name })
+    // The silent host is given up at the window's end, not waited on forever.
+    assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < 5_000)
+  }
 }
