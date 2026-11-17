@@ -8,6 +8,10 @@ English one.
 - **Control a cast from the notification and the lock screen.** While a video plays on a TV, Castor's notification shows the video and the TV with Pause/Resume, the 10-second steps and **Stop casting**, and the lock screen shows the same controls. With several casts they act on the newest one.
 - TVs whose Wi-Fi drops the network's search messages now also appear as DLNA TVs when they announce themselves as Chromecast, AirPlay or FCast: Castor asks each of those TVs directly for its DLNA receiver while it searches.
 - Castor's notification is now in Italian too.
+- A download link cast in Native to a DLNA TV now reaches it as the original file, keeping Dolby Vision and letting the TV seek in it; Castor used to convert it.
+- FCast receivers play in Native too: Castor first hands them the original video and, if they cannot play it, serves its tracks itself.
+- A saved TV that answers only questions asked of the whole network, as an LG C1 does, now shows its AirPlay and FCast receivers too.
+- The FCast code scanner zooms, for a TV across the room: pinch the picture or tap 1×, 2×, 5× or 10× above the X. It also reads the camera in more detail.
 - The casting engine now carries castor's newest core, ahead of its 2.6.0 release:
   - On a network where the phone has only an IPv6 address of its own, TVs are given an address they can reach.
   - Ending a cast on a DLNA TV stops only Castor's video, not something the TV moved on to, and a Roku stays on the channel you switched to.
@@ -20,6 +24,10 @@ English one.
 - **Controlla il cast dalla notifica e dalla schermata di blocco.** Mentre un video va sulla TV, la notifica di Castor mostra il video e la TV con Pausa/Riprendi, i salti di 10 secondi e **Interrompi trasmissione**, e la schermata di blocco mostra gli stessi controlli. Con più cast agiscono sul più recente.
 - Le TV il cui Wi-Fi scarta i messaggi di ricerca della rete compaiono ora anche come TV DLNA quando si annunciano come Chromecast, AirPlay o FCast: durante la ricerca Castor chiede direttamente a ciascuna di quelle TV il suo ricevitore DLNA.
 - La notifica di Castor ora è anche in italiano.
+- Un link di download trasmesso in Nativa a una TV DLNA le arriva ora come file originale, con il Dolby Vision e la possibilità di spostarsi nel video dalla TV; prima Castor lo convertiva.
+- Anche i ricevitori FCast funzionano in Nativa: Castor prima gli passa il video originale e, se non riescono a riprodurlo, serve lui le sue tracce.
+- Una TV salvata che risponde solo alle domande rivolte a tutta la rete, come una LG C1, mostra ora anche i suoi ricevitori AirPlay e FCast.
+- Lo scanner del codice FCast fa lo zoom, per una TV dall'altra parte della stanza: allarga l'immagine con due dita o tocca 1×, 2×, 5× o 10× sopra la X. Legge anche la fotocamera con più dettaglio.
 - Il motore di trasmissione porta ora il core più recente di castor, prima della sua versione 2.6.0:
   - Su una rete in cui il telefono ha solo un indirizzo IPv6 proprio, le TV ricevono un indirizzo che possono raggiungere.
   - Chiudere un cast su una TV DLNA ferma solo il video di Castor, non quello a cui la TV è passata, e un Roku resta sul canale su cui sei passato.
