@@ -5,6 +5,7 @@ import java.io.ByteArrayOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import kotlin.concurrent.thread
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -127,16 +128,45 @@ class UnicastMdnsTest {
         val answer = reply()
         receiver.send(DatagramPacket(answer, answer.size, packet.socketAddress))
       }
-      val found = UnicastMdns.ask(InetAddress.getLoopbackAddress(), service, receiver.localPort, 3000)
+      val found = UnicastMdns.ask(InetAddress.getLoopbackAddress(), service, receiver.localPort, 3000, group = null)
       answered.join()
       assertEquals("AA:BB:CC:DD:EE:01", found.single().txt["deviceid"])
     }
   }
 
   @Test(timeout = 10_000)
+  fun aReceiverThatAnswersOnlyTheGroupIsFoundThroughIt() = runBlocking {
+    val loopback = InetAddress.getLoopbackAddress()
+    // The receiver's own port stays silent, as an LG C1 does; the "group" here is another loopback socket.
+    DatagramSocket(0, loopback).use { silent ->
+      DatagramSocket(0, loopback).use { group ->
+        val answered = thread {
+          val packet = DatagramPacket(ByteArray(512), 512)
+          group.receive(packet)
+          val answer = reply()
+          group.send(DatagramPacket(answer, answer.size, packet.socketAddress))
+        }
+        val found =
+          UnicastMdns.ask(loopback, service, silent.localPort, 3000, InetSocketAddress(loopback, group.localPort))
+        answered.join()
+        assertEquals("AA:BB:CC:DD:EE:01", found.single().txt["deviceid"])
+      }
+    }
+  }
+
+  @Test
+  fun anIpv4ReceiverIsAlsoAskedThroughTheMdnsGroup() {
+    assertEquals(
+      InetSocketAddress(InetAddress.getByName("224.0.0.251"), 5353),
+      UnicastMdns.group(InetAddress.getByName("192.168.1.4")),
+    )
+    assertNull(UnicastMdns.group(InetAddress.getByName("fe80::1")))
+  }
+
+  @Test(timeout = 10_000)
   fun aSilentReceiverNamesNothingWithinTheWait() = runBlocking {
     DatagramSocket(0, InetAddress.getLoopbackAddress()).use { silent ->
-      assertTrue(UnicastMdns.ask(InetAddress.getLoopbackAddress(), service, silent.localPort, 600).isEmpty())
+      assertTrue(UnicastMdns.ask(InetAddress.getLoopbackAddress(), service, silent.localPort, 600, group = null).isEmpty())
     }
   }
 }

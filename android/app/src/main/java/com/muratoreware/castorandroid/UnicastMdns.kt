@@ -2,7 +2,9 @@ package com.muratoreware.castorandroid
 
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.util.Locale
 import kotlinx.coroutines.currentCoroutineContext
@@ -40,12 +42,20 @@ internal object UnicastMdns {
       emptyList()
     }
 
-  // A sender port other than 5353 asks the receiver to answer this socket directly (RFC 6762 §6.7).
+  // The mDNS group an IPv4 receiver listens on.
+  fun group(host: InetAddress): InetSocketAddress? =
+    if (host is Inet4Address) InetSocketAddress(InetAddress.getByAddress(byteArrayOf(224.toByte(), 0, 0, 251.toByte())), PORT)
+    else null
+
+  // A sender port other than 5353 asks the receiver to answer this socket directly (RFC 6762 §6.7). Some receivers
+  // ignore a question sent to them alone and answer only one sent to the mDNS group, as an LG C1 does, still to this
+  // socket: the question goes to both, and only the receiver's own answer is read.
   suspend fun ask(
     host: InetAddress,
     service: String,
     port: Int = PORT,
     waitMillis: Long = 1500,
+    group: InetSocketAddress? = group(host),
   ): List<Announced> {
     DatagramSocket().use { socket ->
       socket.soTimeout = 250
@@ -57,6 +67,8 @@ internal object UnicastMdns {
         // A second question covers one lost on the air.
         if (sent < 2) {
           socket.send(DatagramPacket(question, question.size, host, port))
+          // A route without multicast loses only this way of asking.
+          group?.let { runCatching { socket.send(DatagramPacket(question, question.size, it)) } }
           sent++
         }
         val packet = DatagramPacket(ByteArray(9000), 9000)
