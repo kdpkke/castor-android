@@ -220,6 +220,10 @@ func encoderResult(ctx context.Context, proc *ffmpeg.Process, hardware, buffered
 		return &encoderFailed{err: err, hardware: hardware, lines: evidence.Lines}
 	}
 	return quoting(err, evidence.Lines)
+	// Android extension: over the source, the hardware encoder's own errors still make the exit its own (read_hardware.go).
+	if hardware && evidence.ExitStatus > 0 && hardwareFailedItself(evidence.Lines) {
+		return &encoderFailed{err: err, hardware: hardware, lines: evidence.Lines}
+	}
 }
 
 // quoting is err followed by the encoder's last lines, where no fault quotes them beside it.
