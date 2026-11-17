@@ -232,4 +232,6 @@
     <string name="notification_channel">Trasmissione</string>
     <string name="notification_engine_running">Motore di trasmissione attivo su questo telefono</string>
     <string name="notification_casting_to">In trasmissione su %1$s</string>
+    <string name="privacy_policy">Informativa sulla privacy</string>
+    <string name="privacy_policy_detail">Cosa fa Castor con i tuoi dati</string>
 </resources>

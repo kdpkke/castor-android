@@ -21,7 +21,7 @@ android {
         minSdk = 28
         ndk { abiFilters += targetAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "x86_64") }
         targetSdk = 37
-        versionCode = 56
+        versionCode = 57
         versionName = "2.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["appLabel"] = "@string/app_name"
@@ -39,6 +39,12 @@ android {
         }
         release {
             isMinifyEnabled = false
+        }
+        // The Google Play bundle: the release build without the GitHub updater, which Play does not allow.
+        // src/play/AndroidManifest.xml takes the install permission and the updater's receivers out.
+        create("play") {
+            initWith(getByName("release"))
+            matchingFallbacks += "release"
         }
     }
     compileOptions {
@@ -109,7 +115,7 @@ val checkNativeRuntime by tasks.registering {
   }
 }
 
-tasks.matching { it.name in setOf("packageDebug", "packageRelease") }.configureEach {
+tasks.matching { it.name in setOf("packageDebug", "packageRelease", "packagePlay", "buildPlayPreBundle") }.configureEach {
   dependsOn(checkNativeRuntime)
 }
 

@@ -50,6 +50,8 @@ checksum catches a damaged download, not a compromised release; Android still
 refuses an APK not signed with the installed app's key. The download-complete
 receiver is exported for the system download manager and acts only on the
 download Castor started; installer results go to a receiver no other app can reach.
+The Google Play build has no updater: it leaves out the install permission and both
+receivers, and Play delivers its updates.
 
 ## Debug mode
 

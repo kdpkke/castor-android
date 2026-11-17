@@ -1,5 +1,6 @@
 package com.muratoreware.castorandroid
 
+import android.Manifest
 import android.app.DownloadManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -196,7 +197,7 @@ internal object AppUpdates {
       preferences
         .getString("release", null)
         ?.let(Releases::parse)
-        ?.takeIf { Releases.newer(it.version, installedVersion(context)) }
+        ?.takeIf { Releases.newer(it.version, installedVersion(context)) && installs(context) }
     status.value =
       when {
         release.value == null -> UpdateStatus.Idle
@@ -210,7 +211,7 @@ internal object AppUpdates {
   // it: Play would deliver its own updates. Castor cannot tell from Android that its APK came from GitHub; a release
   // build installed by anything other than Play is the closest Android lets it know.
   fun eligible(context: Context): Boolean {
-    if (context.packageName != RELEASE_PACKAGE) return false
+    if (context.packageName != RELEASE_PACKAGE || !installs(context)) return false
     val manager = context.packageManager
     val installer =
       runCatching {
@@ -226,6 +227,15 @@ internal object AppUpdates {
     if (signing.hasMultipleSigners()) return false
     return signing.signingCertificateHistory.orEmpty().any { sha256(it.toByteArray()) == RELEASE_CERTIFICATE }
   }
+
+  // Whether this build may install apps at all. The Google Play build leaves the permission out of its manifest
+  // (src/play): it never offers a release, not even one an earlier GitHub install of the same app had found.
+  private fun installs(context: Context): Boolean =
+    Manifest.permission.REQUEST_INSTALL_PACKAGES in
+      context.packageManager
+        .getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
+        .requestedPermissions
+        .orEmpty()
 
   // Asks GitHub for the latest release, at most every few hours. A failed check is tried again at the next start.
   fun check(context: Context) {

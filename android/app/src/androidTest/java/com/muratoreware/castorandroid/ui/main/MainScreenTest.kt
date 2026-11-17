@@ -60,6 +60,7 @@ class MainScreenTest {
     compose.onNodeWithTag("video-url").assertIsDisplayed()
     compose.onNodeWithContentDescription("More options").performClick()
     compose.onNodeWithText("Browser extension").assertDoesNotExist()
+    compose.onNodeWithText("Privacy policy").assertExists()
   }
 
   private val context

@@ -232,4 +232,6 @@
     <string name="notification_channel">Casting</string>
     <string name="notification_engine_running">Casting engine running on this phone</string>
     <string name="notification_casting_to">Casting to %1$s</string>
+    <string name="privacy_policy">Privacy policy</string>
+    <string name="privacy_policy_detail">What Castor does with your data</string>
 </resources>

@@ -1,7 +1,9 @@
 package com.muratoreware.castorandroid.ui.main
 
 import android.content.ClipData
+import android.content.Intent
 import android.util.Log
+import androidx.core.net.toUri
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
@@ -51,6 +53,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+// PRIVACY.md at the root of the repository, in English and Italian.
+private const val PRIVACY_POLICY = "https://github.com/kdpkke/castor-android/blob/main/PRIVACY.md"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -725,6 +730,16 @@ fun MainScreen(
         ) {
           menu = false
           sheet = "debug"
+        }
+        // Google Play asks for the privacy policy inside the app as well as on the store listing.
+        ActionRow(
+          R.drawable.ic_shield,
+          stringResource(R.string.privacy_policy),
+          stringResource(R.string.privacy_policy_detail),
+          R.string.privacy_policy,
+        ) {
+          menu = false
+          runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, PRIVACY_POLICY.toUri())) }
         }
         GlassButton(
           onClick = {
