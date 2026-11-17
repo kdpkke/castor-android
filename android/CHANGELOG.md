@@ -3,6 +3,30 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
+## 2.1.0 — 2026-11-17
+
+- **Control a cast from the notification and the lock screen.** While a video plays on a TV, Castor's notification shows the video and the TV with Pause/Resume, the 10-second steps and **Stop casting**, and the lock screen shows the same controls. With several casts they act on the newest one.
+- TVs whose Wi-Fi drops the network's search messages now also appear as DLNA TVs when they announce themselves as Chromecast, AirPlay or FCast: Castor asks each of those TVs directly for its DLNA receiver while it searches.
+- Castor's notification is now in Italian too.
+- The casting engine now carries castor's newest core, ahead of its 2.6.0 release:
+  - On a network where the phone has only an IPv6 address of its own, TVs are given an address they can reach.
+  - Ending a cast on a DLNA TV stops only Castor's video, not something the TV moved on to, and a Roku stays on the channel you switched to.
+  - A newer Chromecast cast keeps playing when an earlier one is cancelled while it loads.
+  - Sound at a higher sample rate than TVs play is converted instead of sent as it is.
+  - If the phone's hardware video encoder fails during a cast, Castor restarts the cast in software from where you were, or from the live edge of a live stream; this now also covers live streams the phone converts while reading them. On DLNA TVs the TV now reloads the video instead of continuing in the same stream, and the next cast tries the hardware encoder again.
+
+### Italiano
+
+- **Controlla il cast dalla notifica e dalla schermata di blocco.** Mentre un video va sulla TV, la notifica di Castor mostra il video e la TV con Pausa/Riprendi, i salti di 10 secondi e **Interrompi trasmissione**, e la schermata di blocco mostra gli stessi controlli. Con più cast agiscono sul più recente.
+- Le TV il cui Wi-Fi scarta i messaggi di ricerca della rete compaiono ora anche come TV DLNA quando si annunciano come Chromecast, AirPlay o FCast: durante la ricerca Castor chiede direttamente a ciascuna di quelle TV il suo ricevitore DLNA.
+- La notifica di Castor ora è anche in italiano.
+- Il motore di trasmissione porta ora il core più recente di castor, prima della sua versione 2.6.0:
+  - Su una rete in cui il telefono ha solo un indirizzo IPv6 proprio, le TV ricevono un indirizzo che possono raggiungere.
+  - Chiudere un cast su una TV DLNA ferma solo il video di Castor, non quello a cui la TV è passata, e un Roku resta sul canale su cui sei passato.
+  - Un cast Chromecast più recente continua quando uno precedente viene annullato mentre carica.
+  - L'audio con una frequenza di campionamento più alta di quella che le TV riproducono viene convertito invece di essere inviato così com'è.
+  - Se l'encoder video hardware del telefono si guasta durante un cast, Castor riavvia il cast in software da dove eri, o dal punto attuale di una diretta; ora vale anche per le dirette che il telefono converte mentre le legge. Sulle TV DLNA la TV ora ricarica il video invece di proseguire nello stesso flusso, e il cast successivo riprova l'encoder hardware.
+
 ## 2.0.0 — 2026-11-17
 
 **Before updating:** Castor 2.0.0 is a new app for Android, `com.muratoreware.castorandroid`, ready for Google Play; 1.x was `io.github.stupside.castor`. It installs beside the old Castor instead of updating it, so choose your TV and settings again, then uninstall the old Castor. Later versions update 2.0.0 normally.
