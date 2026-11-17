@@ -11,28 +11,33 @@ import (
 )
 
 func (s *session) Position(ctx context.Context) (device.Playhead, error) {
+	asked := s.played.Load()
 	ctx, cancel := context.WithTimeout(ctx, actionTimeout)
 	defer cancel()
-	var response struct{ RelTime string }
+	var response struct{ TrackURI, RelTime string }
 	if err := s.transport.SOAPClient.PerformActionCtx(ctx, s.transport.Service.ServiceType,
 		"GetPositionInfo", &struct{ InstanceID string }{"0"}, &response); err != nil {
 		return device.Playhead{}, fmt.Errorf("reading the playback position: %w", err)
 	}
+	// An answer naming the stream castor handed before is the renderer still playing it until Play lands.
+	if asked != nil && asked.before != "" && asked.before != asked.uri && strings.TrimSpace(response.TrackURI) == asked.before {
+		return device.Playhead{}, device.ErrNoPosition
+	}
 	at, err := parseClock(response.RelTime)
 	// Many renderers answer NOT_IMPLEMENTED, or a 0:00:00 that never moves, while they play.
-	if err != nil || at == 0 && !s.ticked.Load() {
+	if err != nil || at == 0 && s.ticked.Load() != asked {
 		return device.Playhead{}, device.ErrNoPosition
 	}
 	info, err := s.transportInfo(ctx)
 	if err != nil {
 		return device.Playhead{}, fmt.Errorf("reading the transport state: %w", err)
 	}
-	// A stopped renderer answers 0:00:00, or where it stopped, which is not where anything plays.
-	if info.CurrentTransportState == "STOPPED" || info.CurrentTransportState == "NO_MEDIA_PRESENT" {
+	// An answer about a stream castor replaced since it asked says nothing of the one handed now.
+	if info.CurrentTransportState.idle() || s.played.Load() != asked {
 		return device.Playhead{}, device.ErrNoPosition
 	}
-	s.ticked.Store(true)
-	return device.Playhead{At: at, Paused: info.CurrentTransportState == "PAUSED_PLAYBACK"}, nil
+	s.ticked.Store(asked)
+	return device.Playhead{At: at, Paused: info.CurrentTransportState == statePaused}, nil
 }
 
 // parseClock reads H+:MM:SS[.F+], the clock AVTransport states positions in.

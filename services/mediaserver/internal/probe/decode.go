@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"math"
+	"math/big"
 	"regexp"
 	"slices"
 	"strconv"
@@ -189,17 +190,6 @@ func pixFmtBitDepth(pixFmt string) int {
 	}
 }
 
-// frameRate reads ffprobe's "num/den"; 0 is unknown, as ffprobe's own "0/0" is.
-func frameRate(rational string) float64 {
-	num, den, ok := strings.Cut(rational, "/")
-	n, nerr := strconv.ParseFloat(num, 64)
-	d, derr := strconv.ParseFloat(den, 64)
-	if !ok || nerr != nil || derr != nil || n <= 0 || d <= 0 {
-		return 0
-	}
-	return n / d
-}
-
 // probedFrame is one decoded frame: whether it was coded as fields is only known once one decodes.
 type probedFrame struct {
 	StreamIndex     int `json:"stream_index"`
@@ -242,4 +232,14 @@ func formatToContentType(format string) string {
 		}
 	}
 	return ""
+}
+
+// frameRate reads ffprobe's "num/den", 0 where it is unknown, as ffprobe's own "0/0" is.
+func frameRate(rational string) float64 {
+	r, ok := new(big.Rat).SetString(rational)
+	if !ok {
+		return 0
+	}
+	f, _ := r.Float64()
+	return f
 }

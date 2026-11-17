@@ -140,6 +140,7 @@ func steer(ctx context.Context, run Runner, a Attempt, seeks <-chan Seek) (Outco
 				continue
 			}
 			next.Try = a.Try + 1
+			s.Leaving()
 			s.Accepted <- nil
 			cut(errSought)
 			return <-ran, &next
@@ -149,7 +150,7 @@ func steer(ctx context.Context, run Runner, a Attempt, seeks <-chan Seek) (Outco
 
 // climbWait is none for the best ranked link, for a live one, which has no place to resume at on another, and once a climb found none to read.
 func climbWait(a Attempt, wait time.Duration) time.Duration {
-	if a.candidate == 0 || a.live() {
+	if a.candidate == 0 || a.Live() {
 		return 0
 	}
 	return wait

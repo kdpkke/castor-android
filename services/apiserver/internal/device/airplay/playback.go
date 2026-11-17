@@ -258,7 +258,7 @@ func (p *playhead) v2Command(item string, c map[string]any, answered func(uint64
 		started := p.started
 		p.mu.Unlock()
 		// Before the item plays, that is its refusal. Once it plays, a live playlist reload it missed is not its end:
-		// an LG asks again, or gives up with an error of its own about 17 s later, and only that ends the cast.
+		// the receiver asks again, or gives up with an error of its own, and only that ends the cast.
 		if started {
 			slog.Warn("the receiver could not fetch part of the playing media itself", "url", url,
 				"request", nested(c, "request", "FCUP_Response_RequestID"), "headers", nested(c, "request", "FCUP_Response_Headers"))

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -23,30 +22,33 @@ type Encoder struct {
 	Filters  []string    // appended to the -vf chain: e.g. the GPU upload
 	Flags    []string    // encoder-specific -c:v flags: preset, pix_fmt, GOP
 
-	// GOPKeyframes ignores forced keyframes: only the -g length places them, counted in frames of the rate truncated
-	// to a whole number, so a fractional rate (23.976) drifts them off the clock.
-	GOPKeyframes bool
-	// EntryInBandOnly makes every keyframe an entry point (IDR) only while the decoder configuration travels in band:
-	// asked to keep it out of band, the first frame is the only one, and later keyframes are frames no decoder can start at.
-	EntryInBandOnly bool
-	// AverageRate honors -b:v alone: no VBV ceiling and no constant-quality target.
-	AverageRate bool
-	// Level spells castor's dotted level (e.g. "4.0") as -level:v expects it; nil passes it as is.
-	Level func(string) string
+	AverageRate        bool // honors -b:v alone, no VBV ceiling
+	GOPKeyframes       bool // places keyframes by -g alone, ignoring forced ones
+	SingleIDROutOfBand bool // with the decoder config out of band, only its first frame is an IDR
+	MediaCodecLevels   bool // reads -level:v by MediaCodec's names: 4, 4.2, m4.1
+}
+
+// Level is level as e's -level:v reads it: MediaCodec's names drop ".0", and HEVC's name its main tier.
+func (e Encoder) Level(level string) string {
+	if !e.MediaCodecLevels {
+		return level
+	}
+	level = strings.TrimSuffix(level, ".0")
+	if e.Codec == media.CodecHEVC {
+		return "m" + level
+	}
+	return level
 }
 
 const vaapiRenderNode = "/dev/dri/renderD128"
 
-// handheldPreset is the software preset of a host that declares a handheld's encoders: its cores hold veryfast only just
-// ahead of a 1080p50 read and fall behind it once they warm, which starves a live cast, while this one keeps about twice realtime.
-const handheldPreset = "superfast"
-
 // pix_fmt is fixed on CPU encoders; VA-API converts on the GPU instead.
 var (
-	// veryfast keeps the software encoders ahead of realtime in the live pipeline on a desktop's cores; a handheld takes handheldPreset.
+	// veryfast keeps the software encoders ahead of realtime in the live pipeline.
 	softwareFlags     = []string{"-preset", "veryfast", "-pix_fmt", "yuv420p"}
 	videotoolboxFlags = []string{"-pix_fmt", "yuv420p", "-g", "600"}
 	vaapiFilters      = []string{"format=nv12", "hwupload"}
+	mediacodecFlags   = []string{"-pix_fmt", "nv12", "-bitrate_mode", "vbr"}
 )
 
 var (
@@ -65,74 +67,43 @@ var (
 	h264AMF          = Encoder{Name: "h264_amf", Codec: media.CodecH264, Hardware: true, Flags: []string{"-quality", "speed", "-pix_fmt", "nv12"}}
 	hevcAMF          = Encoder{Name: "hevc_amf", Codec: media.CodecHEVC, Hardware: true, Flags: []string{"-quality", "speed", "-pix_fmt", "nv12"}}
 
+	h264MediaCodec = Encoder{Name: "h264_mediacodec", Codec: media.CodecH264, Hardware: true, Flags: mediacodecFlags, AverageRate: true, GOPKeyframes: true, SingleIDROutOfBand: true, MediaCodecLevels: true}
+	hevcMediaCodec = Encoder{Name: "hevc_mediacodec", Codec: media.CodecHEVC, Hardware: true, Flags: mediacodecFlags, AverageRate: true, GOPKeyframes: true, SingleIDROutOfBand: true, MediaCodecLevels: true}
+
 	h264VAAPI = vaapiEncoder("h264_vaapi", media.CodecH264, vaapiRenderNode)
 	hevcVAAPI = vaapiEncoder("hevc_vaapi", media.CodecHEVC, vaapiRenderNode)
 )
 
-// encoders is every encoder castor knows, grouped by codec, hardware before software.
+// encoders is every encoder castor tries on its own, grouped by codec, hardware before software.
 var encoders = []Encoder{
 	h264VideoToolbox, h264NVENC, h264QSV, h264VAAPI, h264AMF, libx264,
 	hevcVideoToolbox, hevcNVENC, hevcQSV, hevcVAAPI, hevcAMF, libx265,
 }
 
-// declarable are encoders only a platform's own build offers, so castor tries them only where the host declares them.
-var declarable = map[string]Encoder{
-	"h264_mediacodec": mediacodecEncoder("h264_mediacodec", media.CodecH264, ""),
-	"hevc_mediacodec": mediacodecEncoder("hevc_mediacodec", media.CodecHEVC, "m"),
-}
+// known is every encoder castor knows: those it tries on its own, and MediaCodec, which it does not probe; the Android host declares the ones its phone backs with hardware.
+var known = slices.Concat(encoders, []Encoder{h264MediaCodec, hevcMediaCodec})
 
-// Declarable is every encoder name a host may declare, sorted.
-func Declarable() []string {
-	names := slices.Collect(maps.Keys(declarable))
-	slices.Sort(names)
-	return names
-}
+// Declared is a hardware encoder the host says its ffmpeg has, configured by its name and tried first.
+type Declared Encoder
 
-// mediacodecEncoder takes 8-bit NV12 buffers at an average rate; tier is the HEVC level prefix ("m" main), empty for H.264.
-func mediacodecEncoder(name string, codec media.Codec, tier string) Encoder {
-	return Encoder{
-		Name: name, Codec: codec, Hardware: true,
-		Flags:        []string{"-pix_fmt", "nv12", "-bitrate_mode", "vbr"},
-		GOPKeyframes: true, AverageRate: true, EntryInBandOnly: true,
-		// Its levels are named constants: "4.0" would parse as the number 4, which is level 1.1.
-		Level: func(level string) string { return tier + strings.TrimSuffix(level, ".0") },
+func (d *Declared) UnmarshalText(name []byte) error {
+	i := slices.IndexFunc(known, func(e Encoder) bool { return e.Hardware && e.Name == string(name) })
+	if i < 0 {
+		return fmt.Errorf("%q is not a hardware encoder castor knows", name)
 	}
+	*d = Declared(known[i])
+	return nil
 }
 
-// candidates is the declared encoders, then encoders plus VA-API on every other render node this host has; a handheld's software encoders take its preset.
+// candidates is the declared encoders, then encoders plus VA-API on every other render node this host has.
 func candidates(declared []Encoder) []Encoder {
-	known := encoders
-	if handheld(declared) {
-		known = lightened(encoders)
-	}
-	out := slices.Concat(declared, known)
+	out := slices.Concat(declared, encoders)
 	nodes, _ := filepath.Glob("/dev/dri/renderD*")
 	for _, node := range nodes {
 		if node == vaapiRenderNode {
 			continue
 		}
 		out = append(out, vaapiEncoder("h264_vaapi", media.CodecH264, node), vaapiEncoder("hevc_vaapi", media.CodecHEVC, node))
-	}
-	return out
-}
-
-// handheld reports a host that declares MediaCodec encoders, which only a handheld's build offers.
-func handheld(declared []Encoder) bool {
-	return slices.ContainsFunc(declared, func(e Encoder) bool { return strings.HasSuffix(e.Name, "_mediacodec") })
-}
-
-// lightened is list with every software encoder on handheldPreset; list itself is not edited.
-func lightened(list []Encoder) []Encoder {
-	out := slices.Clone(list)
-	for i, e := range out {
-		if e.Hardware {
-			continue
-		}
-		flags := slices.Clone(e.Flags)
-		if at := slices.Index(flags, "-preset"); at >= 0 && at+1 < len(flags) {
-			flags[at+1] = handheldPreset
-		}
-		out[i].Flags = flags
 	}
 	return out
 }
@@ -146,55 +117,21 @@ func vaapiEncoder(name string, codec media.Codec, node string) Encoder {
 	}
 }
 
-// Encoders is the best working encoder per codec on ffmpegPath, hardware first; each encoder is proven once by the value it returns.
-func Encoders(ffmpegPath string) func(context.Context, media.Codec) (Encoder, bool) {
-	c, _ := NewCatalog(ffmpegPath, nil)
-	return c.Best
-}
-
-// Catalog is the encoders proven on one ffmpeg binary, and those retired after failing a cast.
-type Catalog struct{ proven *provenEncoders }
-
-// NewCatalog proves encoders on ffmpegPath, trying the declared ones, which only a platform's own build offers, before the rest.
-func NewCatalog(ffmpegPath string, declared []string) (*Catalog, error) {
-	p := &provenEncoders{ffmpegPath: ffmpegPath, slots: map[string]*proof{}, retired: map[string]bool{}}
-	for _, name := range declared {
-		e, ok := declarable[name]
-		if !ok {
-			return nil, fmt.Errorf("unknown hardware encoder %q: castor knows %s", name, strings.Join(Declarable(), ", "))
-		}
-		p.declared = append(p.declared, e)
+// Encoders is the best working encoder per codec on ffmpegPath, declared ones first and hardware first unless software; each is proven once.
+func Encoders(ffmpegPath string, declared []Declared) func(ctx context.Context, codec media.Codec, software bool) (Encoder, bool) {
+	proven := &provenEncoders{ffmpegPath: ffmpegPath, slots: map[string]*proof{}}
+	for _, d := range declared {
+		proven.declared = append(proven.declared, Encoder(d))
 	}
-	return &Catalog{proven: p}, nil
-}
-
-// Best is the best working encoder for codec, hardware first.
-func (c *Catalog) Best(ctx context.Context, codec media.Codec) (Encoder, bool) {
-	return c.proven.best(ctx, codec, []bool{true, false})
-}
-
-// Software is the best working encoder for codec that needs no hardware.
-func (c *Catalog) Software(ctx context.Context, codec media.Codec) (Encoder, bool) {
-	return c.proven.best(ctx, codec, []bool{false})
-}
-
-// Retire stops offering the encoder named name for as long as this catalog lives.
-func (c *Catalog) Retire(name string) {
-	c.proven.mu.Lock()
-	defer c.proven.mu.Unlock()
-	if !c.proven.retired[name] {
-		slog.Warn("encoder retired after failing a cast", "encoder", name)
-	}
-	c.proven.retired[name] = true
+	return proven.best
 }
 
 type provenEncoders struct {
 	ffmpegPath string
 	declared   []Encoder
 
-	mu      sync.Mutex
-	slots   map[string]*proof
-	retired map[string]bool
+	mu    sync.Mutex
+	slots map[string]*proof
 }
 
 // proof is one encoder's test, held per encoder so a slow test blocks only askers of that same encoder.
@@ -204,11 +141,15 @@ type proof struct {
 	works  bool
 }
 
-func (p *provenEncoders) best(ctx context.Context, codec media.Codec, passes []bool) (Encoder, bool) {
+func (p *provenEncoders) best(ctx context.Context, codec media.Codec, software bool) (Encoder, bool) {
 	all := candidates(p.declared)
+	passes := []bool{true, false}
+	if software {
+		passes = passes[1:]
+	}
 	for _, hardware := range passes {
 		for _, e := range all {
-			if e.Codec != codec || e.Hardware != hardware || p.isRetired(e.Name) {
+			if e.Codec != codec || e.Hardware != hardware {
 				continue
 			}
 			works, ran := p.available(ctx, e)
@@ -222,12 +163,6 @@ func (p *provenEncoders) best(ctx context.Context, codec media.Codec, passes []b
 		}
 	}
 	return Encoder{}, false
-}
-
-func (p *provenEncoders) isRetired(name string) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.retired[name]
 }
 
 // available reports whether e works, and whether this call ran the test encode that proved it.

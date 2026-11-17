@@ -25,7 +25,7 @@ import (
 )
 
 // receiverAnswering is a Cast receiver on the other end of a pipe; loadAnswers says what it sends once LOAD arrives.
-func receiverAnswering(t *testing.T, loadAnswers func(requestID int, load castmedia.MediaItem) []any) *session {
+func receiverAnswering(t *testing.T, loadAnswers func(requestID int, load mediaItem) []any) *session {
 	t.Helper()
 	return receiverSaying(t, running, loadAnswers)
 }
@@ -38,17 +38,17 @@ func running(requestID int) any {
 }
 
 // receiverSaying is receiverAnswering answering GET_STATUS with status.
-func receiverSaying(t *testing.T, status func(requestID int) any, loadAnswers func(requestID int, load castmedia.MediaItem) []any) *session {
+func receiverSaying(t *testing.T, status func(requestID int) any, loadAnswers func(requestID int, load mediaItem) []any) *session {
 	t.Helper()
 	near, far := net.Pipe()
 	dev := &session{ending: newEnding()}
 	dev.ch = newChannel(near, dev.watchMessage)
 	var receiver *channel
-	receiver = newChannel(far, func(payload []byte) {
+	receiver = newChannel(far, func(_ messageHeader, payload []byte) {
 		var req struct {
-			Type      string              `json:"type"`
-			RequestID int                 `json:"requestId"`
-			Media     castmedia.MediaItem `json:"media"`
+			Type      string    `json:"type"`
+			RequestID int       `json:"requestId"`
+			Media     mediaItem `json:"media"`
 		}
 		if json.Unmarshal(payload, &req) != nil {
 			return
@@ -86,7 +86,7 @@ func TestADevicesAnswersAreReadAsItSendsThem(t *testing.T) {
 	stream := &url.URL{Scheme: "http", Host: "media.test", Path: "/stream.mp4", RawQuery: "a=1&b=2"}
 	dev := receiverSaying(t, func(id int) any {
 		return jsontext.Value(fmt.Sprintf(`{"requestId":%d,"status":{"applications":[{"appId":"CC1AD845","appType":"WEB","displayName":"Default Media Receiver","iconUrl":"","isIdleScreen":false,"launchedFromCloud":false,"namespaces":[{"name":"urn:x-cast:com.google.cast.media"}],"sessionId":"7E2FF513","statusText":"Default Media Receiver","transportId":"7E2FF513","universalAppId":"CC1AD845"}],"userEq":{},"volume":{"controlType":"attenuation","level":1.0,"muted":false,"stepInterval":0.05000000074505806}},"type":"RECEIVER_STATUS"}`, id))
-	}, func(id int, load castmedia.MediaItem) []any {
+	}, func(id int, load mediaItem) []any {
 		return []any{
 			jsontext.Value(fmt.Sprintf(`{"type":"MEDIA_STATUS","status":[{"mediaSessionId":1,"playbackRate":1,"playerState":"BUFFERING","currentTime":0,"supportedMediaCommands":12303,"volume":{"level":1,"muted":false},"activeTrackIds":[],"media":{"contentId":%q,"streamType":"BUFFERED","contentType":"video/mp4","mediaCategory":"VIDEO","duration":596.474195,"tracks":[{"trackId":1,"type":"VIDEO"}]},"currentItemId":1,"repeatMode":"REPEAT_OFF"}],"requestId":%d}`, load.ContentId, id)),
 			jsontext.Value(`{"type":"MEDIA_STATUS","status":[{"mediaSessionId":1,"playbackRate":1,"playerState":"PLAYING","currentTime":1.5,"supportedMediaCommands":12303,"volume":{"level":1,"muted":false},"currentItemId":1,"repeatMode":"REPEAT_OFF"}],"requestId":0}`),
@@ -122,7 +122,7 @@ func TestChromecastPositionIsTheCurrentTimeOfTheMediaItLoaded(t *testing.T) {
 				}
 				asked = true
 				return running(id)
-			}, func(id int, load castmedia.MediaItem) []any {
+			}, func(id int, load mediaItem) []any {
 				return []any{mediaStatus(id, load.ContentId, "BUFFERING", "")}
 			})
 			if _, err := dev.Position(t.Context()); !errors.Is(err, device.ErrNoPosition) {
@@ -138,35 +138,10 @@ func TestChromecastPositionIsTheCurrentTimeOfTheMediaItLoaded(t *testing.T) {
 	}
 }
 
-func TestChromecastLoadDescribesLiveAndFiniteMedia(t *testing.T) {
-	for _, live := range []bool{false, true} {
-		t.Run(fmt.Sprint(live), func(t *testing.T) {
-			loaded := make(chan string, 1)
-			dev := receiverAnswering(t, func(id int, load castmedia.MediaItem) []any {
-				loaded <- load.StreamType
-				return []any{mediaStatus(id, load.ContentId, "BUFFERING", "")}
-			})
-			play := devicetest.Source(mediav1.Container_CONTAINER_MP4)
-			play.Live = live
-			stream := &url.URL{Scheme: "http", Host: "media.test", Path: "/stream.mp4"}
-			if err := dev.Play(t.Context(), device.Playback{URL: stream, Play: play}); err != nil {
-				t.Fatal(err)
-			}
-			want := "BUFFERED"
-			if live {
-				want = "LIVE"
-			}
-			if got := <-loaded; got != want {
-				t.Errorf("stream type = %s, want %s", got, want)
-			}
-		})
-	}
-}
-
 func TestChromecastLoadIncludesSelectedMovieDetails(t *testing.T) {
 	info := &castorv1.MediaInfo{Title: "The Matrix", Synopsis: "A hacker learns the truth.", ImageUrl: "https://image.tmdb.org/t/p/w500/matrix.jpg", ReleaseDate: "1999-03-31"}
 	loaded := make(chan castmedia.MediaMetadata, 1)
-	dev := receiverAnswering(t, func(id int, load castmedia.MediaItem) []any {
+	dev := receiverAnswering(t, func(id int, load mediaItem) []any {
 		loaded <- load.Metadata
 		return []any{mediaStatus(id, load.ContentId, "BUFFERING", "")}
 	})
@@ -184,30 +159,30 @@ func TestChromecastPlayReturnsTheReceiversVerdictOnTheLoad(t *testing.T) {
 	stream := &url.URL{Scheme: "http", Host: "origin.test", Path: "/stream.m3u8"}
 	for _, tt := range []struct {
 		name    string
-		answer  func(id int, load castmedia.MediaItem) []any
+		answer  func(id int, load mediaItem) []any
 		wantErr bool
 	}{
-		{"a buffering load is accepted", func(id int, load castmedia.MediaItem) []any {
+		{"a buffering load is accepted", func(id int, load mediaItem) []any {
 			return []any{mediaStatus(id, load.ContentId, "BUFFERING", "")}
 		}, false},
-		{"a load failure fails the hand-off", func(id int, load castmedia.MediaItem) []any {
+		{"a load failure fails the hand-off", func(id int, load mediaItem) []any {
 			return []any{mediaStatus(0, load.ContentId, "IDLE", "ERROR"), castmedia.PayloadHeader{Type: "LOAD_FAILED", RequestId: id}}
 		}, true},
-		{"an invalid request fails the hand-off", func(id int, _ castmedia.MediaItem) []any {
+		{"an invalid request fails the hand-off", func(id int, _ mediaItem) []any {
 			return []any{castmedia.PayloadHeader{Type: "INVALID_REQUEST", RequestId: id}}
 		}, true},
-		{"a status already idle on an error fails the hand-off", func(id int, load castmedia.MediaItem) []any {
+		{"a status already idle on an error fails the hand-off", func(id int, load mediaItem) []any {
 			return []any{mediaStatus(id, load.ContentId, "IDLE", "ERROR")}
 		}, true},
-		{"a status for an older stream does not accept the load", func(id int, _ castmedia.MediaItem) []any {
+		{"a status for an older stream does not accept the load", func(id int, _ mediaItem) []any {
 			return []any{mediaStatus(id, "http://origin.test/previous.mp4", "PLAYING", "")}
 		}, true},
-		{"another media session beside this load is ignored", func(id int, load castmedia.MediaItem) []any {
+		{"another media session beside this load is ignored", func(id int, load mediaItem) []any {
 			answer := mediaStatus(id, load.ContentId, "BUFFERING", "")
 			answer.Status = append([]castmedia.Media{{MediaSessionId: 2, PlayerState: "IDLE", IdleReason: "ERROR", Media: castmedia.MediaItem{ContentId: "http://origin.test/previous.mp4"}}}, answer.Status...)
 			return []any{answer}
 		}, false},
-		{"an empty status does not accept the load", func(id int, _ castmedia.MediaItem) []any {
+		{"an empty status does not accept the load", func(id int, _ mediaItem) []any {
 			return []any{castmedia.MediaStatusResponse{Type: msgMediaStatus, RequestId: id}}
 		}, true},
 	} {
@@ -223,7 +198,7 @@ func TestChromecastPlayReturnsTheReceiversVerdictOnTheLoad(t *testing.T) {
 
 func TestALoadNamesItsContainerAsAReceiverKnowsIt(t *testing.T) {
 	loaded := make(chan string, 1)
-	dev := receiverAnswering(t, func(id int, load castmedia.MediaItem) []any {
+	dev := receiverAnswering(t, func(id int, load mediaItem) []any {
 		loaded <- load.ContentType
 		return []any{mediaStatus(id, load.ContentId, "BUFFERING", "")}
 	})
@@ -235,10 +210,126 @@ func TestALoadNamesItsContainerAsAReceiverKnowsIt(t *testing.T) {
 	}
 }
 
+func TestALoadSaysWhenAPlaylistIsCutIntoFMP4(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		play *mediav1.DeviceCommand_Play
+		want string
+	}{
+		{"a playlist of fragmented MP4", devicetest.Playlist(mediav1.Container_CONTAINER_MP4), "fmp4"},
+		{"a playlist of MPEG-TS", devicetest.Playlist(mediav1.Container_CONTAINER_MPEGTS), ""},
+		{"a source playlist is left to the receiver", devicetest.Source(mediav1.Container_CONTAINER_HLS), ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			loaded := make(chan mediaItem, 1)
+			dev := receiverAnswering(t, func(id int, load mediaItem) []any {
+				loaded <- load
+				return []any{mediaStatus(id, load.ContentId, "BUFFERING", "")}
+			})
+			if err := dev.Play(t.Context(), device.Playback{URL: &url.URL{Scheme: "http", Host: "media.test", Path: "/stream.m3u8"}, Play: tt.play}); err != nil {
+				t.Fatal(err)
+			}
+			if got := <-loaded; got.HLSSegmentFormat != tt.want || got.HLSVideoSegmentFormat != tt.want {
+				t.Errorf("segment formats = %q, %q, want %q", got.HLSSegmentFormat, got.HLSVideoSegmentFormat, tt.want)
+			}
+		})
+	}
+}
+
+func TestALoadSaysWhetherTheStreamEnds(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		play *mediav1.DeviceCommand_Play
+		want string
+	}{
+		{"a source with an end", devicetest.Source(mediav1.Container_CONTAINER_MP4), "BUFFERED"},
+		{"a served stream with an end", devicetest.Served(mediav1.Container_CONTAINER_MPEGTS, time.Hour, mediav1.DeviceCommand_Play_Runtime_SEEK_START), "BUFFERED"},
+		{"a playlist with an end", devicetest.Playlist(mediav1.Container_CONTAINER_MP4), "BUFFERED"},
+		{"a live source", devicetest.Live(devicetest.Source(mediav1.Container_CONTAINER_HLS)), "LIVE"},
+		{"a live served stream", devicetest.Live(devicetest.Served(mediav1.Container_CONTAINER_MPEGTS, 0, 0)), "LIVE"},
+		{"a live playlist", devicetest.Live(devicetest.Playlist(mediav1.Container_CONTAINER_MP4)), "LIVE"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			loaded := make(chan mediaItem, 1)
+			dev := receiverAnswering(t, func(id int, load mediaItem) []any {
+				loaded <- load
+				return []any{mediaStatus(id, load.ContentId, "BUFFERING", "")}
+			})
+			if err := dev.Play(t.Context(), device.Playback{URL: &url.URL{Scheme: "http", Host: "media.test", Path: "/stream"}, Play: tt.play}); err != nil {
+				t.Fatal(err)
+			}
+			if got := <-loaded; got.StreamType != tt.want {
+				t.Errorf("stream type = %q, want %q", got.StreamType, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnErrorTheReceiverGaveEndsTheCastNamingItsCode(t *testing.T) {
+	stream := &url.URL{Scheme: "http", Host: "media.test", Path: "/stream.m3u8"}
+	play := func(dev *session) error {
+		return dev.Play(t.Context(), device.Playback{URL: stream, Play: devicetest.Source(mediav1.Container_CONTAINER_HLS)})
+	}
+	t.Run("a refused load", func(t *testing.T) {
+		dev := receiverAnswering(t, func(id int, _ mediaItem) []any {
+			return []any{map[string]any{"type": "LOAD_FAILED", "requestId": id, "detailedErrorCode": 104}}
+		})
+		if err := play(dev); err == nil || !strings.Contains(err.Error(), "receiver error code 104") {
+			t.Errorf("Play = %v, want the refusal to name the receiver's code 104", err)
+		}
+	})
+	t.Run("a cast failing while it plays", func(t *testing.T) {
+		dev := receiverAnswering(t, func(id int, load mediaItem) []any {
+			return []any{
+				mediaStatus(id, load.ContentId, "PLAYING", ""),
+				map[string]any{"type": "ERROR", "detailedErrorCode": 905},
+				mediaStatus(0, load.ContentId, "IDLE", "ERROR"),
+			}
+		})
+		if err := play(dev); err != nil {
+			t.Fatal(err)
+		}
+		if err := dev.AwaitEnd(t.Context()); err == nil || !strings.Contains(err.Error(), "receiver error code 905") {
+			t.Errorf("AwaitEnd = %v, want the end to name the receiver's code 905", err)
+		}
+	})
+	t.Run("a refusal that gave none", func(t *testing.T) {
+		dev := receiverAnswering(t, func(id int, _ mediaItem) []any {
+			return []any{castmedia.PayloadHeader{Type: "LOAD_FAILED", RequestId: id}}
+		})
+		if err := play(dev); err == nil || strings.Contains(err.Error(), "receiver error code") {
+			t.Errorf("Play = %v, want a refusal naming no code", err)
+		}
+	})
+	t.Run("a code of an earlier play", func(t *testing.T) {
+		loads := 0
+		dev := receiverAnswering(t, func(id int, load mediaItem) []any {
+			loads++
+			if loads == 1 {
+				return []any{
+					mediaStatus(id, load.ContentId, "PLAYING", ""),
+					map[string]any{"type": "ERROR", "detailedErrorCode": 905},
+					mediaStatus(0, load.ContentId, "IDLE", "FINISHED"),
+				}
+			}
+			return []any{castmedia.PayloadHeader{Type: "LOAD_FAILED", RequestId: id}}
+		})
+		if err := play(dev); err != nil {
+			t.Fatal(err)
+		}
+		if err := dev.AwaitEnd(t.Context()); err != nil {
+			t.Fatalf("the first cast ended with %v, want a clean end", err)
+		}
+		if err := play(dev); err == nil || strings.Contains(err.Error(), "receiver error code") {
+			t.Errorf("Play = %v, want the second refusal not to name the first cast's code", err)
+		}
+	})
+}
+
 func TestAPlayRetriedAfterARefusedOneIsAwaitedToItsOwnEnd(t *testing.T) {
 	refused := &url.URL{Scheme: "http", Host: "media.test", Path: "/attempt-1.mp4"}
 	retried := &url.URL{Scheme: "http", Host: "media.test", Path: "/attempt-2.mp4"}
-	dev := receiverAnswering(t, func(id int, load castmedia.MediaItem) []any {
+	dev := receiverAnswering(t, func(id int, load mediaItem) []any {
 		if load.ContentId == refused.String() {
 			return []any{mediaStatus(0, load.ContentId, "IDLE", "ERROR"), castmedia.PayloadHeader{Type: "LOAD_FAILED", RequestId: id}}
 		}
@@ -259,7 +350,7 @@ func TestAPlayAbandonedForANewerOneLeavesTheNewerOneWatched(t *testing.T) {
 	abandoned := &url.URL{Scheme: "http", Host: "media.test", Path: "/attempt-1.mp4"}
 	current := &url.URL{Scheme: "http", Host: "media.test", Path: "/attempt-2.mp4"}
 	loading := make(chan struct{})
-	dev := receiverAnswering(t, func(id int, load castmedia.MediaItem) []any {
+	dev := receiverAnswering(t, func(id int, load mediaItem) []any {
 		if load.ContentId == abandoned.String() {
 			close(loading)
 			return nil
@@ -286,6 +377,45 @@ func TestAPlayAbandonedForANewerOneLeavesTheNewerOneWatched(t *testing.T) {
 	}
 }
 
+// The receiver cancels a superseded LOAD under that LOAD's request id.
+func TestAnEarlierLoadsCancellationLeavesTheNewerCastPlaying(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		abandoned := &url.URL{Scheme: "http", Host: "media.test", Path: "/attempt-1.m3u8"}
+		current := &url.URL{Scheme: "http", Host: "media.test", Path: "/attempt-2.m3u8"}
+		loading := make(chan struct{})
+		first := 0
+		dev := receiverAnswering(t, func(id int, load mediaItem) []any {
+			if load.ContentId == abandoned.String() {
+				first = id
+				close(loading)
+				return nil
+			}
+			return []any{
+				castmedia.PayloadHeader{Type: "LOAD_CANCELLED", RequestId: first},
+				mediaStatus(id, load.ContentId, "BUFFERING", ""),
+				mediaStatus(0, load.ContentId, "PLAYING", ""),
+			}
+		})
+		ctx, abandon := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() {
+			done <- dev.Play(ctx, device.Playback{URL: abandoned, Play: devicetest.Source(mediav1.Container_CONTAINER_HLS)})
+		}()
+		<-loading
+		abandon()
+		<-done
+		if err := dev.Play(t.Context(), device.Playback{URL: current, Play: devicetest.Source(mediav1.Container_CONTAINER_HLS)}); err != nil {
+			t.Fatal(err)
+		}
+		// Shorter than the heartbeat's silence window.
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		if err := dev.AwaitEnd(ctx); !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("AwaitEnd() = %v, want the newer cast still playing", err)
+		}
+	})
+}
+
 func TestAPlayOnADroppedConnectionIsGone(t *testing.T) {
 	near, far := net.Pipe()
 	dev := &session{name: "Living Room", ending: newEnding()}
@@ -301,7 +431,7 @@ func TestAPlayOnADroppedConnectionIsGone(t *testing.T) {
 func TestChromecastClosesWhileTheReceiverKeepsTalking(t *testing.T) {
 	stream := &url.URL{Scheme: "http", Host: "origin.test", Path: "/stream.mp4"}
 	for range 50 {
-		dev := receiverAnswering(t, func(id int, load castmedia.MediaItem) []any {
+		dev := receiverAnswering(t, func(id int, load mediaItem) []any {
 			answers := []any{mediaStatus(id, load.ContentId, "BUFFERING", "")}
 			for range 20 {
 				answers = append(answers, mediaStatus(0, load.ContentId, "PLAYING", ""))
@@ -332,7 +462,7 @@ func TestCancellingABlockedCastWriteLeavesTheChannelUsable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		near, far := net.Pipe()
 		writing := &writingConn{Conn: near, started: make(chan struct{})}
-		ch := newChannel(writing, func([]byte) {})
+		ch := newChannel(writing, func(messageHeader, []byte) {})
 		t.Cleanup(func() { _ = ch.Close() })
 		t.Cleanup(func() { _ = far.Close() })
 		ctx, cancel := context.WithCancelCause(t.Context())
@@ -355,7 +485,7 @@ func TestCancellingABlockedCastWriteLeavesTheChannelUsable(t *testing.T) {
 		}
 		// A cancelled sender must not leave a deadline on the next Play's write.
 		received := make(chan struct{})
-		peer := newChannel(far, func([]byte) { close(received) })
+		peer := newChannel(far, func(messageHeader, []byte) { close(received) })
 		t.Cleanup(func() { _ = peer.Close() })
 		if err := ch.send(t.Context(), receiverID, nsConnection, &castmedia.PayloadHeader{Type: msgConnect}); err != nil {
 			t.Fatalf("send after cancellation = %v", err)
@@ -367,7 +497,7 @@ func TestCancellingABlockedCastWriteLeavesTheChannelUsable(t *testing.T) {
 func TestCancellingAPartialCastFrameClosesTheConnection(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		near, far := net.Pipe()
-		ch := newChannel(near, func([]byte) {})
+		ch := newChannel(near, func(messageHeader, []byte) {})
 		t.Cleanup(func() { _ = ch.Close() })
 		t.Cleanup(func() { _ = far.Close() })
 		ctx, cancel := context.WithCancel(t.Context())
@@ -400,7 +530,7 @@ func TestCancellingAPartialCastFrameClosesTheConnection(t *testing.T) {
 func TestAnInvalidCastFrameClosesTheSocket(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		near, far := net.Pipe()
-		ch := newChannel(near, func([]byte) {})
+		ch := newChannel(near, func(messageHeader, []byte) {})
 		t.Cleanup(func() { _ = ch.Close() })
 		t.Cleanup(func() { _ = far.Close() })
 		// Install the deadline before the invalid header can close the socket.

@@ -1,7 +1,8 @@
 package mediaserver
 
 import (
-	"github.com/stupside/castor/internal/settings"
+	"github.com/stupside/castor/internal/transport"
+	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/source/rank"
 	"github.com/stupside/castor/services/mediaserver/internal/subtitle/whisper"
 )
@@ -15,10 +16,9 @@ type Config struct {
 
 // FFmpegConfig names the installed media tools.
 type FFmpegConfig struct {
-	Path      string `yaml:"path" validate:"required"`
-	ProbePath string `yaml:"probe_path" validate:"required"`
-	// HardwareEncoders are encoders only this platform's ffmpeg build offers, tried before the ones castor probes everywhere.
-	HardwareEncoders []string `yaml:"hardware_encoders" validate:"dive,oneof=h264_mediacodec hevc_mediacodec"`
+	Path             string            `yaml:"path" validate:"required"`
+	ProbePath        string            `yaml:"probe_path" validate:"required"`
+	HardwareEncoders []ffmpeg.Declared `yaml:"hardware_encoders"`
 }
 
 // ResolverConfig is how found streams are ranked.
@@ -28,8 +28,8 @@ type ResolverConfig struct {
 
 // ServerConfig is where `castor media-server` listens, where devices reach it, and the token its API asks for.
 type ServerConfig struct {
-	settings.Endpoint `yaml:",inline"`
-	Listen            string `yaml:"listen" validate:"required,hostname_port|startswith=:"`
+	transport.Endpoint `yaml:",inline"`
+	Listen             string `yaml:"listen" validate:"required,hostname_port|startswith=:"`
 	// Advertise is where devices reach this server from outside its network.
 	Advertise string `yaml:"advertise" validate:"omitempty,http_url"`
 	// FFmpeg names the tools installed on this host.

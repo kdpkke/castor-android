@@ -44,6 +44,8 @@ type Intent struct {
 type Seek struct {
 	At       time.Duration
 	Accepted chan<- error
+	// Leaving is called once the seek is taken, before the attempt from At starts.
+	Leaving func()
 }
 
 // ErrNoPosition refuses a seek outside the media, or into a live one.
@@ -82,10 +84,8 @@ type Attempt struct {
 	// Delivery is carried per attempt because recovery may change it.
 	Delivery compose.DeliveryPreference
 
-	// SoftwareVideo encodes the picture without hardware, after FailedEncoder produced nothing that validated.
-	SoftwareVideo bool
-	// FailedEncoder is retired for good once this attempt plays, which proves the hardware was the fault.
-	FailedEncoder string
+	// Software encodes this link without hardware, after a hardware encode of it failed.
+	Software bool
 
 	// Climb is how long the attempt plays well before a better link is tried, zero for never.
 	Climb time.Duration
@@ -117,7 +117,7 @@ func (a Attempt) identify() identity {
 		delivery:      cmp.Or(a.Delivery, compose.DeliveryAuto),
 		decode:        a.Decode,
 		optimizedLive: a.OptimizedLive,
-		software:      a.SoftwareVideo,
+		software:      a.Software,
 	}
 }
 
@@ -145,15 +145,21 @@ func programIdentity(program media.Program) string {
 // at begins a at pos; a live source, or a position past its end, has no such place.
 func (a Attempt) at(pos time.Duration) (Attempt, bool) {
 	a.Program.Start = pos
-	return a, pos <= 0 || !a.live() && (a.Origin.Duration == 0 || pos < a.Origin.Duration)
+	return a, pos <= 0 || !a.Live() && (a.Origin.Duration == 0 || pos < a.Origin.Duration)
 }
 
-func (a Attempt) live() bool {
+// Live is a program with no end, which has no runtime.
+func (a Attempt) Live() bool {
 	return slices.ContainsFunc(a.Program.Inputs, func(input media.Input) bool { return input.Fetching().Live })
 }
 
-// Runtime is what is left to play of the program from where the attempt begins, zero where the source declared none.
-func (a Attempt) Runtime() time.Duration { return max(0, a.Origin.Duration-a.Program.Start) }
+// Runtime is what is left to play of the program from where the attempt begins, zero where the source declared none or has no end.
+func (a Attempt) Runtime() time.Duration {
+	if a.Live() {
+		return 0
+	}
+	return max(0, a.Origin.Duration-a.Program.Start)
+}
 
 // reading binds a resolution to the attempt with a fetch plan derived for its program.
 func (a Attempt) reading(r source.Resolution, deadline time.Duration) Attempt {

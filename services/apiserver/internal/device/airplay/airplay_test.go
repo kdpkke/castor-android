@@ -197,8 +197,8 @@ func TestAnItemTheReceiverCannotFetchFails(t *testing.T) {
 	}
 }
 
-// An LG playing a live HLS item asks castor to fetch a playlist reload it missed. That alone does not end a cast
-// that plays: the receiver asks again or gives up with an error of its own.
+// A receiver playing a live HLS item may ask castor to fetch a playlist reload it missed. That alone does not end
+// a cast that plays: the receiver asks again or gives up with an error of its own.
 func TestAPlayingItemOutlivesAPartTheReceiverCouldNotFetch(t *testing.T) {
 	r := newFakeReceiver(t, lgFeatures, lgStatus)
 	r.script = append(scenario(t, "hls_plays"), scenario(t, "refused")[0])

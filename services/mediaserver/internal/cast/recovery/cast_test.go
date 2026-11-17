@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -158,45 +159,6 @@ func TestOnlyADeviceHandedWhatItFetchesItselfIsServedInstead(t *testing.T) {
 				t.Errorf("the refusal was answered by %s, want %s", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestAHardwareEncoderThatNeverMadeValidOutputIsRetriedInSoftware(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		err  error
-	}{
-		{"an encoder that would not start", errors.New("h264_nvenc: validating encoded output: context deadline exceeded")},
-		{"an encoder that ended with nothing playable", &health.Fault{Kind: health.Dead, Subject: "the stream output", Revise: true}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8"), Deadline: 30 * time.Second}
-			failed := Outcome{Err: tc.err, Evidence: Evidence{Reached: health.Opening, HardwareEncoder: "h264_nvenc"}}
-			run := &scriptedRunner{outcomes: []Outcome{failed, delivered}}
-			if err := Cast(t.Context(), in, run, &fakeProgram{}); err != nil || len(run.seen) != 2 {
-				t.Fatalf("Cast error = %v after %d attempts, want a second attempt to deliver", err, len(run.seen))
-			}
-			if next := run.seen[1]; !next.SoftwareVideo || next.candidate != 0 {
-				t.Fatalf("second attempt = candidate %d, software %v; want the same link in software", next.candidate, next.SoftwareVideo)
-			}
-		})
-	}
-}
-
-func TestAHardwareEncoderThatDiesWhilePlayingIsReplacedBySoftwareWhereTheViewerWas(t *testing.T) {
-	in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/one.m3u8"), Deadline: 30 * time.Second}
-	died := &health.Fault{Kind: health.Dead, Revise: true, Subject: "the encoder", Err: errors.New("exit status 187")}
-	failed := Outcome{Err: died, Evidence: Evidence{Reached: health.Playing, Began: 40 * time.Second, Verdict: health.Dead, HardwareEncoder: "h264_mediacodec"}}
-	run := &scriptedRunner{outcomes: []Outcome{failed, delivered}}
-	if err := Cast(t.Context(), in, run, &fakeProgram{}); err != nil || len(run.seen) != 2 {
-		t.Fatalf("Cast error = %v after %d attempts, want a second attempt to deliver", err, len(run.seen))
-	}
-	next := run.seen[1]
-	if !next.SoftwareVideo || next.FailedEncoder != "h264_mediacodec" {
-		t.Fatalf("second attempt software %v after %q, want software after h264_mediacodec", next.SoftwareVideo, next.FailedEncoder)
-	}
-	if next.Program.Start != 40*time.Second {
-		t.Fatalf("second attempt starts at %v, want 40s where the viewer was", next.Program.Start)
 	}
 }
 
@@ -390,8 +352,12 @@ func TestASeekRunsTheNextAttemptFromWhereTheViewerMovedTheCast(t *testing.T) {
 	seeks := make(chan Seek)
 	in := Intent{Turns: unheard{}, Candidates: []*source.Stream{head}, Deadline: 30 * time.Second, Seeks: seeks}
 	var seen []Attempt
+	var mu sync.Mutex
+	var turns []string
+	turn := func(name string) { mu.Lock(); turns = append(turns, name); mu.Unlock() }
 	run := runnerFunc(func(ctx context.Context, a Attempt) Outcome {
 		seen = append(seen, a)
+		turn("attempt")
 		if len(seen) > 1 {
 			return delivered
 		}
@@ -399,15 +365,16 @@ func TestASeekRunsTheNextAttemptFromWhereTheViewerMovedTheCast(t *testing.T) {
 		<-ctx.Done()
 		return Outcome{Err: context.Cause(ctx), Evidence: Evidence{Reached: health.Playing, Cancelled: true}}
 	})
+	leaving := func() { turn("left") }
 	cast := make(chan error, 1)
 	go func() { cast <- Cast(t.Context(), in, run, publishing(head, ladder(), source.Rendition{})) }()
 
 	accepted := make(chan error, 1)
-	seeks <- Seek{At: 3 * time.Hour, Accepted: accepted}
+	seeks <- Seek{At: 3 * time.Hour, Accepted: accepted, Leaving: leaving}
 	if err := <-accepted; !errors.Is(err, ErrNoPosition) {
 		t.Errorf("seeking past the two hours of media: %v, want no such position", err)
 	}
-	seeks <- Seek{At: 40 * time.Minute, Accepted: accepted}
+	seeks <- Seek{At: 40 * time.Minute, Accepted: accepted, Leaving: leaving}
 	if err := <-accepted; err != nil {
 		t.Fatalf("seeking within the media: %v", err)
 	}
@@ -416,6 +383,11 @@ func TestASeekRunsTheNextAttemptFromWhereTheViewerMovedTheCast(t *testing.T) {
 	}
 	if len(seen) != 2 || seen[1].Program.Start != 40*time.Minute || seen[1].Try != 2 {
 		t.Errorf("ran %d attempts, the last from %s on try %d; want a second from 40m", len(seen), seen[len(seen)-1].Program.Start, seen[len(seen)-1].Try)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if last := len(turns) - 1; len(turns) != 3 || turns[last] != "attempt" || !slices.Contains(turns[:last], "left") {
+		t.Errorf("turns %v, want the stream left once the seek was taken, before the next attempt", turns)
 	}
 }
 

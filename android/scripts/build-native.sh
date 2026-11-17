@@ -19,8 +19,8 @@ fetch() {
         touch "$destination/.castor-source-$checksum"
     fi
 }
-go_root="$cache/go1.27.3"
-fetch https://go.dev/dl/go1.27.3.linux-amd64.tar.gz go1.27.3.tar.gz "$go_root" 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+go_root="$cache/go1.27.4"
+fetch https://go.dev/dl/go1.27.4.linux-amd64.tar.gz go1.27.4.tar.gz "$go_root" 7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
 export PATH="$go_root/bin:$PATH"
 if [ ! -f "$cache/ndk.zip" ]; then
     curl --fail --location --retry 3 https://dl.google.com/android/repository/android-ndk-r30-linux.zip -o "$cache/ndk.zip"

@@ -1,7 +1,6 @@
 package encoding
 
 import (
-	"cmp"
 	"fmt"
 	"math"
 	"slices"
@@ -24,7 +23,7 @@ type axis struct {
 	// dolbyVision is a picture carrying a Dolby Vision configuration, which only a copy keeps.
 	dolbyVision bool
 	action      codec.Action
-	refused bool // the tables already say this container will not carry it
+	refused     bool // the tables already say this container will not carry it
 	// encode is the encoder's own options, nil when copied.
 	encode []string
 }
@@ -51,11 +50,7 @@ func videoEncodeArgs(venc codec.VideoEncode) []string {
 		args = append(args, "-profile:v", venc.Profile)
 	}
 	if venc.Level != "" {
-		level := venc.Level
-		if venc.Encoder.Level != nil {
-			level = venc.Encoder.Level(level)
-		}
-		args = append(args, "-level:v", level)
+		args = append(args, "-level:v", venc.Encoder.Level(venc.Level))
 	}
 	if venc.ToneMap {
 		args = append(args, "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709")
@@ -63,11 +58,11 @@ func videoEncodeArgs(venc codec.VideoEncode) []string {
 	if venc.Bitrate > 0 {
 		args = append(args, "-b:v", venc.Bitrate.FFmpeg())
 	}
+	// A quality target rather than an average rate, which only the recovery floor asks for.
+	if venc.Quality > 0 {
+		args = append(args, "-crf", strconv.Itoa(venc.Quality))
+	}
 	if !venc.Encoder.AverageRate {
-		// A quality target rather than an average rate, which only the recovery floor asks for.
-		if venc.Quality > 0 {
-			args = append(args, "-crf", strconv.Itoa(venc.Quality))
-		}
 		// VBV cap: bound the instantaneous bitrate so the pacer's fixed send rate is a real ceiling.
 		if venc.Maxrate > 0 {
 			args = append(args, "-maxrate", venc.Maxrate.FFmpeg())
@@ -76,19 +71,16 @@ func videoEncodeArgs(venc codec.VideoEncode) []string {
 			args = append(args, "-bufsize", venc.Bufsize.FFmpeg())
 		}
 	}
-	switch {
-	case venc.KeyframeIntervalSec <= 0:
-	case venc.Encoder.GOPKeyframes:
-		// The interval the encoder derives is the GOP over the rate it is told, so the GOP spans the seconds at the rate frames arrive.
-		args = append(args, "-g", strconv.Itoa(int(math.Round(float64(venc.KeyframeIntervalSec)*cmp.Or(venc.FrameRate, defaultFrameRate)))))
-	default:
-		args = append(args, "-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", venc.KeyframeIntervalSec))
+	if venc.KeyframeIntervalSec > 0 {
+		if venc.Encoder.GOPKeyframes {
+			// Only the GOP places its keyframes, so it spans the interval at the rate frames arrive.
+			args = append(args, "-g", strconv.Itoa(int(math.Round(float64(venc.KeyframeIntervalSec)*venc.FrameRate))))
+		} else {
+			args = append(args, "-force_key_frames", fmt.Sprintf("expr:gte(t,n_forced*%d)", venc.KeyframeIntervalSec))
+		}
 	}
 	return args
 }
-
-// defaultFrameRate is what an encoder assumes of a picture whose rate nothing measured.
-const defaultFrameRate = 30.0
 
 func hardwareInitArgs(video codec.Track[codec.VideoEncode]) []string {
 	venc, ok := video.Encode()

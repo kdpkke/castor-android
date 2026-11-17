@@ -36,7 +36,7 @@ func TestEncodeTriesNextTransportWhenHostCannotEncodeForFirst(t *testing.T) {
 		{Transport: media.TransportHLS, Video: media.VideoSupport{Codec: media.CodecHEVC}, Audio: media.AudioSupport{Codec: media.CodecAAC, MaxChannels: 2}},
 		{Transport: media.TransportMP4, Video: media.VideoSupport{Codec: media.CodecH264}, Audio: media.AudioSupport{Codec: media.CodecAAC, MaxChannels: 2}},
 	}}
-	s.Encoders = func(context.Context, media.Codec) (ffmpeg.Encoder, bool) { return ffmpeg.Encoder{}, false }
+	s.Encoders = func(context.Context, media.Codec, bool) (ffmpeg.Encoder, bool) { return ffmpeg.Encoder{}, false }
 	opts, err := s.encode(feed{buffered: buf}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func bufferedCast(t *testing.T, ffmpegPath, ffprobePath string) (*preparation, *
 	return s, &buffered{reader: &pull{spool: sp, done: make(chan struct{})}}
 }
 
-func TestLiveAndFiniteNativeDownloadsPreferSegmentedDelivery(t *testing.T) {
+func TestNativeFiniteDownloadPrefersSeekableHLSWithoutChangingLiveOrOptimized(t *testing.T) {
 	ffmpegPath, ffprobePath := requireFFmpegTools(t)
 	body, err := os.ReadFile(generateFixture(t, ffmpegPath, "seekable.ts", 1,
 		[]string{"-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-shortest", "-f", "mpegts"}))
@@ -121,8 +121,7 @@ func TestLiveAndFiniteNativeDownloadsPreferSegmentedDelivery(t *testing.T) {
 		want                string
 	}{
 		{"finite native", true, true, false, time.Hour, media.HLS},
-		{"live native", true, true, true, time.Hour, media.HLS},
-		{"live optimized", false, true, true, 0, media.HLS},
+		{"live native", true, true, true, time.Hour, media.MP4},
 		{"unknown duration", true, true, false, 0, media.MP4},
 		{"optimized", false, true, false, time.Hour, media.MP4},
 		{"other receiver", true, false, false, time.Hour, media.MP4},

@@ -29,10 +29,11 @@ func TestTheReadsFloorEncodeIsCappedAtTheCastsCeiling(t *testing.T) {
 	program := programFromStream(t, origin.stream())
 
 	s := readingAttempt(t, c, recovery.Attempt{Program: program, Fetch: sourceFetchPlan(t, program, testReadDeadline), Decode: media.Axes{Video: true}})
-	followed, err := s.follow(program)
+	followed, unfollow, err := s.follow(program)
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.releases.push(unfollow)
 	buf, err := s.read(t.TempDir(), followed)
 	if err != nil {
 		t.Fatal(err)
@@ -151,7 +152,7 @@ func TestEncoderResultPreservesExpiredLiveInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _ = io.Copy(io.Discard, proc.Stdout)
-	err = encoderResult(t.Context(), proc)
+	err = encoderResult(t.Context(), proc, false, false)
 	if !errors.Is(err, storage.ErrSpoolExpired) {
 		t.Fatalf("encoder erased expiry: %v", err)
 	}

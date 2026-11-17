@@ -14,6 +14,7 @@ import (
 	"github.com/stupside/castor/internal/telemetry"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/codec"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/container"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/fetch"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output/storage"
@@ -41,9 +42,9 @@ func (s *preparation) encode(f feed, burn burnRenderer) (encodePlan, error) {
 		runtime = s.attempt.Runtime()
 	}
 	selections := s.Outputs.Selections(caps, captions, runtime)
-	if runtime > 0 || f.live() {
-		// Segmented delivery publishes complete fragments while a live stream or
-		// seekable download grows, keeping receivers off an unindexed MP4 tail.
+	if runtime > 0 {
+		// A growing, unindexed progressive MP4 is not seekable in Chromium.
+		// HLS indexes complete fragments without waiting for the whole download.
 		slices.SortStableFunc(selections, func(a, b output.Selection) int {
 			priority := func(s output.Selection) int {
 				if s.Plan.Format().ContentType == media.HLS {
@@ -77,7 +78,7 @@ func (s *preparation) encode(f feed, burn burnRenderer) (encodePlan, error) {
 		if err != nil {
 			return encodePlan{}, err
 		}
-		decided, err := s.decide(selected.Capabilities, selected.Plan, facts, burnIn, f.spliced(), s.MaxBitrate, "", s.encoders())
+		decided, err := s.decide(selected.Capabilities, into, facts, burnIn, f.spliced(), s.MaxBitrate, "")
 		if err != nil {
 			planningErr = errors.Join(planningErr, fmt.Errorf("%s: %w", into.ContentType, err))
 			continue
@@ -110,10 +111,9 @@ func (s *preparation) bufferedFacts(src *pull) facts {
 	return measure(s.ctx, "the local buffer this encode reads", s.Probes.File(src.spool.ProbePath()))
 }
 
-// decide plans the encode with encoders, the attempt's own lookup unless a failed hardware encoder asks for software.
-func (s *preparation) decide(caps media.Capabilities, delivery output.Plan, facts facts, burnIn string, spliced bool, ceiling media.Bitrate, keepAudio media.Codec, encoders codec.Encoders) (codec.Plan, error) {
+func (s *preparation) decide(caps media.Capabilities, into container.Format, facts facts, burnIn string, spliced bool, ceiling media.Bitrate, keepAudio media.Codec) (codec.Plan, error) {
 	decided, err := codec.Served(s.ctx, codec.Inputs{
-		Caps: caps, Probe: facts.probe, Measured: facts.measured, Into: delivery.Format(), MaxHeight: s.MaxHeight,
+		Caps: caps, Probe: facts.probe, Measured: facts.measured, Into: into, MaxHeight: s.MaxHeight,
 		PreserveSource: s.PreserveSource,
 		// A playlist's own bit_rate is not the media's, so the rate its rung declares stands in.
 		MaxBitrate: ceiling, Rate: cmp.Or(media.Bitrate(facts.probe.BitRate), s.attempt.Rendition.Bitrate),
@@ -121,10 +121,8 @@ func (s *preparation) decide(caps media.Capabilities, delivery output.Plan, fact
 		// Attempt's evidence: axis a reader already died copying not handed to second process to copy again.
 		Decode:   s.attempt.Decode,
 		BurnIn:   burnIn,
-		Encoders: encoders,
-		// The encoder's own format may cut where the delivery's would not.
-		KeyframesOnClock: delivery.EncoderFormat().Tuning.ClockCuts,
-		Software:         s.Software,
+		Encoders: s.Encoders,
+		Software: s.attempt.Software,
 	})
 	if err != nil {
 		return codec.Plan{}, fmt.Errorf("planning media: %w", err)
@@ -198,17 +196,46 @@ func (s *preparation) startEncoder(opts encoding.EncodeOptions, tail io.Reader, 
 	return proc, nil
 }
 
-func encoderResult(ctx context.Context, proc *ffmpeg.Process) error {
+// onHardware is whether a hardware encoder makes video's picture.
+func onHardware(video codec.Track[codec.VideoEncode]) bool {
+	encode, ok := video.Encode()
+	return ok && encode.Encoder.Hardware
+}
+
+// encoderResult is how proc ended.
+func encoderResult(ctx context.Context, proc *ffmpeg.Process, hardware, buffered bool) error {
 	err := cmp.Or(proc.Wait(), proc.SilentFailure())
 	if ctx.Err() == nil && errors.Is(err, storage.ErrSpoolExpired) {
 		return fmt.Errorf("encoder input expired: %w", err)
 	}
 	err = teardown.Failures(ctx, err)
-	if err == nil || proc.Evidence().ExitStatus < 0 {
+	evidence := proc.Evidence()
+	if err == nil || evidence.ExitStatus < 0 {
 		return nil
 	}
-	if complaints := proc.Evidence().Lines; len(complaints) > 0 {
-		return fmt.Errorf("encoder: %w: %s", err, strings.Join(complaints[max(0, len(complaints)-4):], " | "))
+	err = fmt.Errorf("encoder: %w", err)
+	// An ffmpeg reading the source exits on the source's failure as on its own.
+	if evidence.ExitStatus > 0 && (buffered || evidence.Signaled) {
+		// The cast's fault quotes the encoder's lines itself.
+		return &encoderFailed{err: err, hardware: hardware, lines: evidence.Lines}
 	}
-	return fmt.Errorf("encoder: %w", err)
+	return quoting(err, evidence.Lines)
 }
+
+// quoting is err followed by the encoder's last lines, where no fault quotes them beside it.
+func quoting(err error, lines []string) error {
+	if err == nil || len(lines) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, strings.Join(lines[max(0, len(lines)-4):], " | "))
+}
+
+// encoderFailed is an encode failing on its own account.
+type encoderFailed struct {
+	err      error
+	hardware bool
+	lines    []string
+}
+
+func (e *encoderFailed) Error() string { return e.err.Error() }
+func (e *encoderFailed) Unwrap() error { return e.err }

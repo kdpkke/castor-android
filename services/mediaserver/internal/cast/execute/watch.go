@@ -2,6 +2,7 @@ package execute
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -26,9 +27,19 @@ func awaitArtifact(ctx context.Context, d delivery) error {
 		Phase:     health.Opening,
 		Producer:  d.output,
 		Telemetry: d.output,
+		Served:    d.output,
+		Fed:       d.output.Fed,
 		Landed:    artifact.Landed,
 		Grace:     artifact.Grace,
 	})
+}
+
+// wedgedOn types a wedged verdict as the failure of the encode making the delivery when it wedged.
+func wedgedOn(err error, d delivery) error {
+	if f, ok := errors.AsType[*health.Fault](err); ok && f.Kind == health.Wedged {
+		return &encoderFailed{err: err, hardware: d.output.onHardware(), lines: d.output.Evidence()}
+	}
+	return err
 }
 
 // readMonitor judges a buffered cast by its read.
@@ -39,9 +50,13 @@ func readMonitor(reader *pull, m health.Monitor) health.Monitor {
 	return m
 }
 
-// playingMonitor judges a buffered cast by its read, and one reading its source by the encoder serving it.
+// playingMonitor judges a buffered cast by its read and encoder, and one reading its source by its encoder.
 func playingMonitor(f feed, d delivery, aud health.Audience, maxBitrate media.Bitrate, climb time.Duration, dev Device) health.Monitor {
-	m := health.Monitor{Subject: "the playing cast", Phase: health.Playing, Audience: aud, Served: d.output, Switchable: d.rate != nil, MaxBitrate: maxBitrate, Climb: climb}
+	m := health.Monitor{Subject: "the playing cast", Phase: health.Playing, Audience: aud, Served: d.output, Fed: d.output.Fed, Switchable: d.rate != nil, MaxBitrate: maxBitrate, Asked: maxBitrate, Climb: climb}
+	if d.rate != nil {
+		// A watch begun again after a seek starts from the rate the delivery was changed to, not the cast's own.
+		m.Asked = d.rate.Ceiling()
+	}
 	if p, ok := dev.(health.Playhead); ok {
 		m.Playhead = p
 	}

@@ -89,3 +89,44 @@ func TestWrappedHLSRequiresOneCompatibleEnvelope(t *testing.T) {
 		t.Fatal("wrapped HLS rejected by a compatible envelope")
 	}
 }
+
+func TestTheHalvesAReceiverRefusesAreNamed(t *testing.T) {
+	ts := func(video VideoSupport, audio AudioSupport) FormatSupport {
+		return FormatSupport{Transport: TransportMPEGTS, Video: video, Audio: audio}
+	}
+	h264, hevc := VideoSupport{Codec: CodecH264}, VideoSupport{Codec: CodecHEVC}
+	aac, ac3 := AudioSupport{Codec: CodecAAC, MaxChannels: 2}, AudioSupport{Codec: CodecAC3, MaxChannels: 2}
+	p := ProbeInfo{VideoCodec: CodecH264, VideoBitDepth: 8, AudioCodec: CodecAAC, AudioChannels: 2}
+	for _, tt := range []struct {
+		name    string
+		formats []FormatSupport
+		want    Axes
+	}{
+		{"a stream it plays", []FormatSupport{ts(h264, aac)}, Axes{}},
+		{"a picture it cannot decode", []FormatSupport{ts(hevc, aac)}, Axes{Video: true}},
+		{"a sound it cannot decode", []FormatSupport{ts(h264, ac3)}, Axes{Audio: true}},
+		{"halves it decodes only apart", []FormatSupport{ts(h264, ac3), ts(hevc, aac)}, Axes{Video: true, Audio: true}},
+	} {
+		if got := (Capabilities{Formats: tt.formats}).Refused(MPEGTS, p); got != tt.want {
+			t.Errorf("%s: refused %s, want %s", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestAnInterlacedPictureIsPlayedOnlyByADeviceThatDeinterlaces(t *testing.T) {
+	interlaced := ProbeInfo{VideoCodec: CodecH264, VideoProfile: "High", VideoHeight: 1080, VideoBitDepth: 8, VideoInterlaced: true}
+	for _, deinterlaces := range []bool{false, true} {
+		caps := Capabilities{Deinterlaces: deinterlaces, Formats: []FormatSupport{{Transport: TransportMPEGTS, Video: VideoSupport{Codec: CodecH264}}}}
+		if caps.CanCopyVideo(interlaced) != deinterlaces || caps.CanPlayIn(MPEGTS, interlaced) != deinterlaces || caps.Refused(MPEGTS, interlaced).Video == deinterlaces {
+			t.Errorf("deinterlaces %t: copy %t, plays %t, refused %v", deinterlaces, caps.CanCopyVideo(interlaced), caps.CanPlayIn(MPEGTS, interlaced), caps.Refused(MPEGTS, interlaced))
+		}
+	}
+}
+
+func TestSoundAboveWhatDevicesPlayIsPlayedNowhere(t *testing.T) {
+	hiRes := ProbeInfo{AudioCodec: CodecAAC, AudioChannels: 2, AudioSampleRate: 96000}
+	caps := Capabilities{Formats: []FormatSupport{{Transport: TransportMP4, Audio: AudioSupport{Codec: CodecAAC, MaxChannels: 2}}}}
+	if caps.CanCopyAudio(hiRes) || caps.CanPlayIn(MP4, hiRes) || caps.CanPlaySourceIn(MP4, hiRes) {
+		t.Errorf("96 kHz sound: copy %t, plays %t, source plays %t, want none: no device castor serves plays it", caps.CanCopyAudio(hiRes), caps.CanPlayIn(MP4, hiRes), caps.CanPlaySourceIn(MP4, hiRes))
+	}
+}

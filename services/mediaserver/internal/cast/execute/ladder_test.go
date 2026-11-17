@@ -3,6 +3,7 @@ package execute
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -145,7 +146,7 @@ func moved(t *testing.T, caps media.Capabilities, head, after int, ceiling media
 		t.Fatalf("the delivery cannot change: %+v", p.delivery)
 	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, p.target.String(), nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := reader.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +209,37 @@ func TestAStreamServedAsItIsMovesToALighterRungOfItsSource(t *testing.T) {
 	}
 }
 
+// A seamed program has no one clock another rung's read could join, so a lighter ceiling is made from the rung it reads.
+func TestASeamedProgramIsNeverCarriedOnFromAnotherRung(t *testing.T) {
+	ffmpegPath, ffprobePath := requireFFmpegTools(t)
+	ladder := serveLadder(t, ffmpegPath)
+	for _, program := range ladder.programs {
+		for i := range program.Inputs {
+			program.Inputs[i].Fetch.Spliced = true
+		}
+	}
+	c := realCast(&fakeDevice{caps: dlnaLike()}, ffmpegPath, ffprobePath)
+	c.Resolver = ladder
+	program := ladder.programs[ladder.hi.URL.String()]
+	ctx, cancel := context.WithTimeout(t.Context(), castTimeout)
+	defer cancel()
+	s := testPreparation(ctx, c, recovery.Attempt{
+		Try: 1, Program: program, Fetch: ladderPlan(program),
+		Stream: &source.Stream{URL: ladder.hi.URL, ContentType: media.HLS}, Origin: source.Origin{Renditions: []source.Rendition{ladder.hi, ladder.lo}}, Rendition: ladder.hi,
+	})
+	t.Cleanup(func() { _ = s.releases.release() })
+	p, err := s.preparePresentation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.delivery.rate.Switch(ctx, 1_200_000); err != nil {
+		t.Fatalf("switching to a lighter ceiling: %v", err)
+	}
+	if p.reached.reader.tail() != p.reached.reader {
+		t.Error("the seamed read was carried on by another rung")
+	}
+}
+
 // The same, from a read well into the program, which the lighter rung is started a little before.
 func TestAStreamFarIntoTheProgramMovesToALighterRungToo(t *testing.T) {
 	served, _, _ := moved(t, dlnaLike(), 9<<20, 3<<20, 1_200_000)
@@ -238,8 +270,10 @@ func TestACastOnALighterRungGoesBackToTheHeavyOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	timelines := &unfollowing{}
+	s.Timelines = timelines
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, p.target.String(), nil)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := reader.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,6 +297,11 @@ func TestACastOnALighterRungGoesBackToTheHeavyOne(t *testing.T) {
 		t.Fatalf("switch back to the heavy rung: %v", err)
 	}
 	take(9 << 20)
+	for deadline := time.Now().Add(5 * time.Second); timelines.given.Load() != 1; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the lighter rung's timeline was given back %d times once the heavy rung replaced it, want once while the cast plays", timelines.given.Load())
+		}
+	}
 	served = served[:len(served)/packet*packet]
 	file := filepath.Join(t.TempDir(), "served.ts")
 	if err := os.WriteFile(file, served, 0o600); err != nil {
@@ -291,5 +330,55 @@ func TestACastOnALighterRungGoesBackToTheHeavyOne(t *testing.T) {
 	out, err := exec.Command(ffmpegPath, "-v", "error", "-i", file, "-t", strconv.Itoa(last-3), "-f", "null", "-").CombinedOutput()
 	if err != nil || strings.TrimSpace(string(out)) != "" {
 		t.Errorf("decoding what was served: %v\n%s", err, out)
+	}
+}
+
+// failingResolver can read no rung of the source again.
+type failingResolver struct{}
+
+func (failingResolver) Resolve(context.Context, *source.Stream, source.Rendition, media.Bitrate) (source.Resolution, error) {
+	return source.Resolution{}, errors.New("origin unreachable now")
+}
+
+// A move to another rung still waiting stands when the rate made is asked again, since the read it leaves has stopped.
+func TestAMoveToAnotherRungStillWaitingStands(t *testing.T) {
+	ffmpegPath, ffprobePath := requireFFmpegTools(t)
+	ladder := serveLadder(t, ffmpegPath)
+	c := realCast(&fakeDevice{caps: ac3Only()}, ffmpegPath, ffprobePath)
+	c.Resolver = ladder
+	program := ladder.programs[ladder.hi.URL.String()]
+	ctx, cancel := context.WithTimeout(t.Context(), castTimeout)
+	defer cancel()
+	s := testPreparation(ctx, c, recovery.Attempt{
+		Try: 1, Program: program, Fetch: ladderPlan(program),
+		Stream: &source.Stream{URL: ladder.hi.URL, ContentType: media.HLS}, Origin: source.Origin{Renditions: []source.Rendition{ladder.hi, ladder.lo}}, Rendition: ladder.hi,
+	})
+	t.Cleanup(func() { _ = s.releases.release() })
+	p, err := s.preparePresentation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := p.delivery.rate.(*adjustable)
+	chain, _ := a.chain()
+	time.Sleep(3 * time.Second)
+	if _, err := chain.Switch(ctx, 1_200_000); err != nil {
+		t.Fatalf("switching to the lighter rung: %v", err)
+	}
+	chain.mu.Lock()
+	waiting := chain.next
+	chain.mu.Unlock()
+	if waiting == nil || waiting.src == chain.current().src {
+		t.Fatal("no move to another rung is waiting for the device")
+	}
+	// The heavy rung cannot be read again, so the ask is planned on the read the move left.
+	s.Resolver = failingResolver{}
+	if _, err := chain.Switch(ctx, a.Ceiling()); err != nil {
+		t.Fatalf("asking for the rate made: %v", err)
+	}
+	chain.mu.Lock()
+	pending := chain.next
+	chain.mu.Unlock()
+	if pending != waiting {
+		t.Error("the waiting move was withdrawn, leaving the delivery to end on the read it stopped")
 	}
 }

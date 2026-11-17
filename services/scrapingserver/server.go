@@ -8,16 +8,15 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 
 	"connectrpc.com/connect"
 	scrapingv1 "github.com/stupside/castor/gen/castor/scraping/v1"
 	"github.com/stupside/castor/gen/castor/scraping/v1/scrapingv1connect"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
+	"github.com/stupside/castor/internal/admission"
 	"github.com/stupside/castor/internal/browserstream"
 	"github.com/stupside/castor/internal/transport"
 	"github.com/stupside/castor/services/scrapingserver/internal/extract"
-	"golang.org/x/sync/semaphore"
 )
 
 // Resolver is implemented by the composition root that owns the browser.
@@ -27,18 +26,18 @@ type Resolver interface {
 type Server struct {
 	http.Handler
 	resolver  Resolver
-	requests  *semaphore.Weighted
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.Mutex
+	requests  *admission.Gate
+	shut      context.CancelCauseFunc
 	playlists *browserstream.Playlists
 }
 
 const maxRequests = 16
 
+var errShutdown = errors.New("the scraping server is shutting down")
+
 func New(resolver Resolver) *Server {
-	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{requests: semaphore.NewWeighted(maxRequests), resolver: resolver, ctx: ctx, cancel: cancel}
+	life, shut := context.WithCancelCause(context.Background())
+	s := &Server{requests: admission.New(life, maxRequests), resolver: resolver, shut: shut}
 	if extractor, ok := resolver.(*extract.Extractor); ok {
 		s.playlists = extractor.Playlists
 	}
@@ -72,33 +71,24 @@ func (s *Server) Authorized(token string) http.Handler {
 }
 
 func (s *Server) Resolve(ctx context.Context, req *scrapingv1.ResolveRequest) (*scrapingv1.ResolveResponse, error) {
-	s.mu.Lock()
-	if s.ctx.Err() != nil {
-		s.mu.Unlock()
-		return nil, connect.NewError(connect.CodeUnavailable, context.Canceled)
-	}
-	if !s.requests.TryAcquire(1) {
-		s.mu.Unlock()
+	working, leave, err := s.requests.Enter(ctx)
+	switch {
+	case errors.Is(err, admission.ErrFull):
 		return nil, connect.NewError(connect.CodeResourceExhausted, errors.New("concurrent request capacity exhausted"))
+	case err != nil:
+		return nil, connect.NewError(connect.CodeUnavailable, errShutdown)
 	}
-	defer s.requests.Release(1)
-	s.mu.Unlock()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	stop := context.AfterFunc(s.ctx, cancel)
-	defer stop()
-	streams, err := s.resolver.Resolve(ctx, req.GetUrls())
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
+	defer leave()
+	streams, err := s.resolver.Resolve(working, req.GetUrls())
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return nil, connect.NewError(connect.CodeCanceled, err)
+		code := connect.CodeNotFound
+		switch {
+		case errors.Is(err, context.Canceled):
+			code = connect.CodeCanceled
+		case errors.Is(err, context.DeadlineExceeded):
+			code = connect.CodeDeadlineExceeded
 		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, connect.NewError(connect.CodeDeadlineExceeded, err)
-		}
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, s.requests.Answer(working, connect.NewError(code, err))
 	}
 	if len(streams) == 0 {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("no streams extracted"))
@@ -107,17 +97,11 @@ func (s *Server) Resolve(ctx context.Context, req *scrapingv1.ResolveRequest) (*
 }
 
 func (s *Server) Shutdown(ctx context.Context) {
-	s.mu.Lock()
-	s.cancel()
-	s.mu.Unlock()
+	s.shut(errShutdown)
 	if s.playlists != nil {
 		s.playlists.Close()
 	}
-	// Admission has stopped. Taking every slot joins the accepted requests;
-	// the context bounds the wait without leaving a waiter goroutine behind.
-	if s.requests.Acquire(ctx, maxRequests) == nil {
-		s.requests.Release(maxRequests)
-	}
+	_ = s.requests.Wait(ctx)
 }
 
 var _ scrapingv1connect.ScrapingServiceHandler = (*Server)(nil)

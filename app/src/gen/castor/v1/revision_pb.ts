@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file castor/v1/revision.proto.
  */
 export const file_castor_v1_revision: GenFile = /*@__PURE__*/
-  fileDesc("ChhjYXN0b3IvdjEvcmV2aXNpb24ucHJvdG8SCWNhc3Rvci52MSJXCghSZXZpc2lvbhI1CgZhY3Rpb24YASABKA4yGS5jYXN0b3IudjEuUmVjb3ZlcnlBY3Rpb25CCrpIB4IBBBABIAASFAoDd2h5GAIgASgJQge6SARyAhABKp8CCg5SZWNvdmVyeUFjdGlvbhIfChtSRUNPVkVSWV9BQ1RJT05fVU5TUEVDSUZJRUQQABIkCiBSRUNPVkVSWV9BQ1RJT05fU1dJVENIX0NBTkRJREFURRABEh8KG1JFQ09WRVJZX0FDVElPTl9ERUNPREVfQVhJUxACEh4KGlJFQ09WRVJZX0FDVElPTl9SRUxBWF9SRUFEEAMSIQodUkVDT1ZFUllfQUNUSU9OX1NFUlZFX0lOU1RFQUQQBBIYChRSRUNPVkVSWV9BQ1RJT05fU1RBWRAFEiIKHVJFQ09WRVJZX0FDVElPTl9PUFRJTUlaRV9MSVZFEOgHEiQKH1JFQ09WRVJZX0FDVElPTl9TT0ZUV0FSRV9FTkNPREUQ6QdiBnByb3RvMw", [file_buf_validate_validate]);
+  fileDesc("ChhjYXN0b3IvdjEvcmV2aXNpb24ucHJvdG8SCWNhc3Rvci52MSJXCghSZXZpc2lvbhI1CgZhY3Rpb24YASABKA4yGS5jYXN0b3IudjEuUmVjb3ZlcnlBY3Rpb25CCrpIB4IBBBABIAASFAoDd2h5GAIgASgJQge6SARyAhABKp4CCg5SZWNvdmVyeUFjdGlvbhIfChtSRUNPVkVSWV9BQ1RJT05fVU5TUEVDSUZJRUQQABIkCiBSRUNPVkVSWV9BQ1RJT05fU1dJVENIX0NBTkRJREFURRABEh8KG1JFQ09WRVJZX0FDVElPTl9ERUNPREVfQVhJUxACEh4KGlJFQ09WRVJZX0FDVElPTl9SRUxBWF9SRUFEEAMSIQodUkVDT1ZFUllfQUNUSU9OX1NFUlZFX0lOU1RFQUQQBBIYChRSRUNPVkVSWV9BQ1RJT05fU1RBWRAFEiMKH1JFQ09WRVJZX0FDVElPTl9TT0ZUV0FSRV9FTkNPREUQBhIiCh1SRUNPVkVSWV9BQ1RJT05fT1BUSU1JWkVfTElWRRDoB2IGcHJvdG8z", [file_buf_validate_validate]);
 
 /**
  * Revision is a cast's latest change of plan.
@@ -74,20 +74,17 @@ export enum RecoveryAction {
   STAY = 5,
 
   /**
+   * @generated from enum value: RECOVERY_ACTION_SOFTWARE_ENCODE = 6;
+   */
+  SOFTWARE_ENCODE = 6,
+
+  /**
    * Convert a live source only after native planning refuses it.
    * Android extension; upstream proposal: stupside/castor#83.
    *
    * @generated from enum value: RECOVERY_ACTION_OPTIMIZE_LIVE = 1000;
    */
   OPTIMIZE_LIVE = 1000,
-
-  /**
-   * Encode the picture in software after a hardware encoder's output never validated.
-   * Upstream proposal: stupside/castor#85.
-   *
-   * @generated from enum value: RECOVERY_ACTION_SOFTWARE_ENCODE = 1001;
-   */
-  SOFTWARE_ENCODE = 1001,
 }
 
 /**

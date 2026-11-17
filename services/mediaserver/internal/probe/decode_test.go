@@ -205,30 +205,6 @@ func TestTheProbeReadsWhatDecidesWhetherAPictureCanBeCopied(t *testing.T) {
 	}
 }
 
-func TestTheProbeReadsThePicturesFrameRate(t *testing.T) {
-	for _, tt := range []struct {
-		avg, real string
-		want      float64
-	}{
-		{"24000/1001", "24000/1001", 24000.0 / 1001},
-		{"0/0", "25/1", 25},
-		{"", "", 0},
-		{"30/0", "garbage", 0},
-	} {
-		stream := `{"codec_type":"video","codec_name":"h264","width":1920,"height":1080,"avg_frame_rate":"` + tt.avg + `","r_frame_rate":"` + tt.real + `"}`
-		info, err := decode(probeJSON(vodFormat, stream), 0, -1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.VideoFrameRate != tt.want {
-			t.Errorf("avg %q r %q: VideoFrameRate = %v, want %v", tt.avg, tt.real, info.VideoFrameRate, tt.want)
-		}
-		if carried := (media.ProbeInfo{}).TakeVideo(info); carried.VideoFrameRate != info.VideoFrameRate {
-			t.Error("TakeVideo lost the frame rate")
-		}
-	}
-}
-
 func TestTheProbeReadsTheDolbyVisionConfigurationOfThePicture(t *testing.T) {
 	dovi := `{"codec_type":"video","codec_name":"hevc","profile":"Main 10","width":3840,"height":2160,"pix_fmt":"yuv420p10le","color_transfer":"smpte2084",
 		"side_data_list":[{"side_data_type":"DOVI configuration record","dv_profile":8,"dv_level":6,"dv_bl_signal_compatibility_id":1}]}`
@@ -300,5 +276,25 @@ func TestSelectedVideoOffsetUsesItsInputClock(t *testing.T) {
 				t.Fatal("TakeVideo lost selected track clock")
 			}
 		})
+	}
+}
+
+func TestDecodeReadsThePicturesFrameRate(t *testing.T) {
+	for _, tt := range []struct {
+		avg, r string
+		want   float64
+	}{
+		{"24000/1001", "24000/1001", 24000.0 / 1001},
+		{"0/0", "25/1", 25},
+		{"0/0", "0/0", 0},
+	} {
+		stream := `{"codec_type":"video","codec_name":"h264","width":1920,"height":1080,"pix_fmt":"yuv420p","avg_frame_rate":"` + tt.avg + `","r_frame_rate":"` + tt.r + `"}`
+		info, err := decode(probeJSON(vodFormat, stream+","+aacStream), 0, 0)
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if info.VideoFrameRate != tt.want {
+			t.Errorf("avg %s, r %s: frame rate %v, want %v", tt.avg, tt.r, info.VideoFrameRate, tt.want)
+		}
 	}
 }

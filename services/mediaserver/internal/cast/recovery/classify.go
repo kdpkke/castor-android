@@ -35,8 +35,8 @@ const (
 	deviceRefused
 	// producedNothing is a delivery that ended without an artifact to fetch.
 	producedNothing
-	// hardwareFailed is a hardware video encoder that failed on its own: its output never validated, or it died with errors of its own.
-	hardwareFailed
+	// encodeFailed is castor's own encode exiting, making what its plan refused, or stopping while fed.
+	encodeFailed
 	// outranked is a cast that played well on a link another outranks.
 	outranked
 )
@@ -65,8 +65,8 @@ func (k kind) String() string {
 		return "device-refused"
 	case producedNothing:
 		return "produced-nothing"
-	case hardwareFailed:
-		return "hardware-failed"
+	case encodeFailed:
+		return "encode-failed"
 	case outranked:
 		return "outranked"
 	default:
@@ -126,10 +126,10 @@ var classes = []classRule{{
 	},
 	kind: deviceRefused,
 }, {
-	// Ahead of blaming the delivery: the same failure in software is a different fault.
-	why:  "the hardware encoder failed",
-	when: func(e Evidence) bool { return e.HardwareEncoder != "" },
-	kind: hardwareFailed,
+	// Ahead of producedNothing: castor can make its own encode again.
+	why:  "the encoder failed",
+	when: func(e Evidence) bool { return e.EncodeErr != nil },
+	kind: encodeFailed,
 }, {
 	// Container refuses tracks at header-write time or reader's every segment answered 404; or it fell silent over a buffer already proven.
 	why: "the delivery produced nothing",
@@ -215,7 +215,7 @@ func (f *fault) Error() string {
 		fmt.Fprintf(&b, "; the device %q stopped answering", gone.Device)
 	}
 	if lines := tells(f.evidence.Lines); len(lines) > 0 {
-		fmt.Fprintf(&b, "; the reader said: %s", strings.Join(lines, " | "))
+		fmt.Fprintf(&b, "; %s said: %s", f.evidence.speaker(), strings.Join(lines, " | "))
 	}
 	if f.err != nil {
 		fmt.Fprintf(&b, ": %s", f.err)

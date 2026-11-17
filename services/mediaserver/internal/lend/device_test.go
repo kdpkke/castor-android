@@ -1,6 +1,7 @@
 package lend
 
 import (
+	"cmp"
 	"errors"
 	"net/url"
 	"slices"
@@ -19,8 +20,11 @@ import (
 // remote is a device that says it plays at, paused when its own remote paused it, and records every press it takes.
 type remote struct {
 	presses []string
+	plays   []*mediav1.DeviceCommand_Play
 	heads   []*castorv1.Playhead
 	paused  bool
+	// late, where set, holds where the device says it plays until it is closed.
+	late chan struct{}
 }
 
 func (r *remote) device(t *testing.T, at time.Duration) *Device {
@@ -37,9 +41,10 @@ func (r *remote) device(t *testing.T, at time.Duration) *Device {
 			}
 			call := cmd.GetCall()
 			answer := &mediav1.AnswerRequest{CommandId: call.GetId(), Answer: &mediav1.AnswerRequest_Done_{Done: &mediav1.AnswerRequest_Done{}}}
-			switch call.GetOperation().(type) {
+			switch op := call.GetOperation().(type) {
 			case *mediav1.DeviceCommand_Call_Play:
 				r.presses = append(r.presses, "play")
+				r.plays = append(r.plays, op.Play)
 			case *mediav1.DeviceCommand_Call_Pause:
 				r.presses = append(r.presses, "pause")
 			case *mediav1.DeviceCommand_Call_Resume:
@@ -48,6 +53,10 @@ func (r *remote) device(t *testing.T, at time.Duration) *Device {
 				r.presses = append(r.presses, "seek "+call.GetSeek().GetPosition().AsDuration().String())
 			case *mediav1.DeviceCommand_Call_Position:
 				answer.Answer = &mediav1.AnswerRequest_Position_{Position: &mediav1.AnswerRequest_Position{At: durationpb.New(at), Paused: r.paused}}
+				if r.late != nil {
+					go func() { <-r.late; l.Answer(answer) }()
+					continue
+				}
 			}
 			l.Answer(answer)
 		}
@@ -118,6 +127,56 @@ func TestThePlayheadIsInTheWholeMediaNotTheStreamHanded(t *testing.T) {
 	})
 }
 
+func TestAPlaylistTellsTheDeviceWhatItIsCutInto(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := &remote{}
+		d := r.device(t, 0)
+		if err := d.Play(t.Context(), execute.Playback{URL: &url.URL{Scheme: "http", Host: "castor"}, Stream: execute.Playlist{Segments: media.MP4}}); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.plays[0].GetPlaylist().GetSegments(); got != mediav1.Container_CONTAINER_MP4 {
+			t.Errorf("segments = %v, want MP4", got)
+		}
+	})
+}
+
+func TestAStreamTellsTheDeviceWhetherItEndsAndHowLong(t *testing.T) {
+	told := func(p *mediav1.DeviceCommand_Play) (live bool, length time.Duration) {
+		live = p.GetSource().GetLive() != nil || p.GetProgressive().GetLive() != nil || p.GetPlaylist().GetLive() != nil
+		length = cmp.Or(p.GetSource().GetDuration(), p.GetProgressive().GetRuntime().GetDuration(), p.GetPlaylist().GetDuration()).AsDuration()
+		return live, length
+	}
+	for _, tt := range []struct {
+		name   string
+		stream execute.Stream
+		live   bool
+		length time.Duration
+	}{
+		{name: "a source of an hour", stream: execute.Source{Runtime: time.Hour}, length: time.Hour},
+		{name: "a live source", stream: execute.Source{Live: true}, live: true},
+		{name: "a source that declared none", stream: execute.Source{}},
+		{name: "a served stream of an hour", stream: execute.Served{Runtime: &execute.Runtime{Length: time.Hour}}, length: time.Hour},
+		{name: "a live served stream", stream: execute.Served{Live: true}, live: true},
+		{name: "a served stream that declared none", stream: execute.Served{}},
+		{name: "a playlist of an hour", stream: execute.Playlist{Runtime: time.Hour, Segments: media.MP4}, length: time.Hour},
+		{name: "a live playlist", stream: execute.Playlist{Live: true, Segments: media.MP4}, live: true},
+		{name: "a playlist that declared none", stream: execute.Playlist{Segments: media.MP4}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				r := &remote{}
+				d := r.device(t, 0)
+				if err := d.Play(t.Context(), execute.Playback{URL: &url.URL{Scheme: "http", Host: "castor"}, Stream: tt.stream}); err != nil {
+					t.Fatal(err)
+				}
+				if live, length := told(r.plays[0]); live != tt.live || length != tt.length {
+					t.Errorf("the device was told live=%v and length %v, want live=%v and length %v", live, length, tt.live, tt.length)
+				}
+			})
+		})
+	}
+}
+
 func TestTheViewerResumesADeviceItsOwnRemotePaused(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := &remote{paused: true}
@@ -144,6 +203,50 @@ func TestTheViewerResumesADeviceItsOwnRemotePaused(t *testing.T) {
 	})
 }
 
+func TestWhatTheDeviceSaidBeforeAPressOrAStreamIsDropped(t *testing.T) {
+	for _, change := range []string{"press", "stream"} {
+		synctest.Test(t, func(t *testing.T) {
+			r := &remote{paused: true, late: make(chan struct{})}
+			d := r.device(t, 30*time.Second)
+			ctx := t.Context()
+			_ = d.Play(ctx, fromAMinuteIn)
+			asked := make(chan bool)
+			go func() { _, _, ok := d.Position(ctx); asked <- ok }()
+			synctest.Wait()
+			if change == "press" {
+				_ = d.Hold(ctx, Viewer, true)
+				_ = d.Hold(ctx, Viewer, false)
+			} else {
+				_ = d.Play(ctx, fromAMinuteIn)
+			}
+			close(r.late)
+			if <-asked || len(r.heads) != 0 {
+				t.Errorf("after a %s, the paused answer asked before it was kept: %v", change, r.heads)
+			}
+			_ = d.Pause(ctx)
+			if got := r.presses[len(r.presses)-1]; got != "pause" {
+				t.Errorf("after a %s, castor's pause pressed %v, want it pressed though the stale answer said paused", change, r.presses)
+			}
+		})
+	}
+}
+
+func TestCastorNeverResumesADeviceItsViewerPaused(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := &remote{paused: true}
+		d := r.device(t, 0)
+		ctx := t.Context()
+		_ = d.Play(ctx, fromAMinuteIn)
+		d.Position(ctx)
+		_ = d.Resume(ctx)
+		_ = d.Pause(ctx)
+		_ = d.Resume(ctx)
+		if want := []string{"play"}; !slices.Equal(r.presses, want) {
+			t.Errorf("the device was pressed %v, want %v: castor held nothing, so it resumes nothing", r.presses, want)
+		}
+	})
+}
+
 func TestWhatTheDeviceSaysOfAStreamItWasMovedOffIsDropped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := &remote{}
@@ -160,16 +263,63 @@ func TestWhatTheDeviceSaysOfAStreamItWasMovedOffIsDropped(t *testing.T) {
 	})
 }
 
-func TestCastorNeverResumesADeviceItsViewerPaused(t *testing.T) {
+func TestTheViewersResumeOfARemotePauseWaitsForCastorsHold(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := &remote{paused: true}
 		d := r.device(t, 0)
 		ctx := t.Context()
 		_ = d.Play(ctx, fromAMinuteIn)
 		d.Position(ctx)
-		_ = d.Resume(ctx)
+		_ = d.Pause(ctx)
+		_ = d.Hold(ctx, Viewer, false)
 		if want := []string{"play"}; !slices.Equal(r.presses, want) {
-			t.Errorf("the device was pressed %v, want %v: castor held nothing, so it resumes nothing", r.presses, want)
+			t.Errorf("the device was pressed %v, want %v: resumed while castor still held it", r.presses, want)
+		}
+		_ = d.Resume(ctx)
+		if want := []string{"play", "resume"}; !slices.Equal(r.presses, want) {
+			t.Errorf("the device was pressed %v, want %v once castor let go", r.presses, want)
+		}
+	})
+}
+
+func TestADeviceResumedFromItsOwnRemoteIsHeldByNoOne(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := &remote{paused: true}
+		d := r.device(t, 0)
+		ctx := t.Context()
+		_ = d.Play(ctx, fromAMinuteIn)
+		d.Position(ctx)
+		r.paused = false
+		d.Position(ctx)
+		if head := r.heads[len(r.heads)-1]; head.GetPaused() {
+			t.Errorf("playhead %v after the device's own remote resumed it, want playing", head)
+		}
+		_ = d.Pause(ctx)
+		if want := []string{"play", "pause"}; !slices.Equal(r.presses, want) {
+			t.Errorf("the device was pressed %v, want %v: castor's pause pressed once the remote let go", r.presses, want)
+		}
+	})
+}
+
+func TestCastorsHoldOverARemotePauseIsPressedOnceTheRemotePlaysOn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := &remote{paused: true}
+		d := r.device(t, 0)
+		ctx := t.Context()
+		_ = d.Play(ctx, fromAMinuteIn)
+		d.Position(ctx)
+		_ = d.Pause(ctx)
+		r.paused = false
+		d.Position(ctx)
+		if want := []string{"play", "pause"}; !slices.Equal(r.presses, want) {
+			t.Errorf("the device was pressed %v, want %v: castor still held it when its remote played on", r.presses, want)
+		}
+		if head := r.heads[len(r.heads)-1]; !head.GetPaused() {
+			t.Errorf("playhead %v, want paused while castor holds it", head)
+		}
+		_ = d.Resume(ctx)
+		if want := []string{"play", "pause", "resume"}; !slices.Equal(r.presses, want) {
+			t.Errorf("the device was pressed %v, want %v once castor let go", r.presses, want)
 		}
 	})
 }

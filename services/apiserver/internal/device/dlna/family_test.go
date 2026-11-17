@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/huin/goupnp"
@@ -35,6 +36,22 @@ func TestFindServiceReachesAVersion3OnlyDevice(t *testing.T) {
 	bare := &goupnp.RootDevice{Device: goupnp.Device{Services: []goupnp.Service{service("urn:schemas-upnp-org:service:RenderingControl:3")}}}
 	if _, err := findService(bare, loc, "AVTransport"); err == nil {
 		t.Error("a device without any AVTransport was accepted")
+	}
+}
+
+func TestATypedPortIsNotWhereSSDPIsAsked(t *testing.T) {
+	for typed, want := range map[string]string{
+		"192.0.2.10":      "192.0.2.10:1900",
+		"192.0.2.10:1534": "192.0.2.10:1900",
+		"tv.local:9197":   "tv.local:1900",
+		"fe80::1":         "[fe80::1]:1900",
+		"[fe80::1]:1534":  "[fe80::1]:1900",
+		"fe80::1%en0":     "[fe80::1%en0]:1900",
+		"[fe80::1]":       "[fe80::1]:1900",
+	} {
+		if got := ssdpTarget(typed); got != want {
+			t.Errorf("ssdpTarget(%q) = %q, want %q", typed, got, want)
+		}
 	}
 }
 
@@ -83,6 +100,34 @@ func TestSSDPSearchWithoutCallerDeadlineStillEnds(t *testing.T) {
 	if elapsed := time.Since(started); elapsed > searchTimeout+time.Second {
 		t.Fatalf("unanswered SSDP search waited %s beyond its %s budget", elapsed, searchTimeout)
 	}
+}
+
+func TestADeviceThatNeverDescribesItselfHidesNoOtherDevice(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+		defer cancel()
+		answer := func(usn, location string) *http.Response {
+			return &http.Response{Header: http.Header{"Usn": {usn}, "Location": {location}}}
+		}
+		// The device that hangs answers first: read one after the other, it would leave the others no time.
+		responses := []*http.Response{answer("uuid:asleep", "http://asleep.test/d.xml"), answer("uuid:tv", "http://tv.test/d.xml"), answer("uuid:gone", "http://gone.test/d.xml")}
+		found := readDescriptions(ctx, responses, func(ctx context.Context, location *url.URL) (*goupnp.RootDevice, error) {
+			switch location.Host {
+			case "asleep.test":
+				<-ctx.Done()
+				return nil, ctx.Err()
+			case "gone.test":
+				return nil, errors.New("connection refused")
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return &goupnp.RootDevice{Device: goupnp.Device{FriendlyName: "Living Room TV"}}, nil
+		})
+		if len(found) != 1 || found[0].Name != "Living Room TV" || found[0].ID != "uuid:tv" || found[0].Address != "http://tv.test/d.xml" {
+			t.Fatalf("readDescriptions = %+v, want only the living room TV", found)
+		}
+	})
 }
 
 func TestATypedPortIsTheDescriptionServerNotTheSSDPPort(t *testing.T) {

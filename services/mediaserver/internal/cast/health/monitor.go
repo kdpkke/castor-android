@@ -26,6 +26,9 @@ type Monitor struct {
 	// Served maps the bytes the device took to media (nil where unmeasured).
 	Served Telemetry
 
+	// Fed is castor waiting on Served's output with input for it; nil where castor feeds nothing.
+	Fed func() bool
+
 	Playhead Playhead
 
 	// Holdable says whether the attempt can pause this playback.
@@ -36,6 +39,9 @@ type Monitor struct {
 
 	// MaxBitrate bounds the rate asked of the device, zero for none.
 	MaxBitrate media.Bitrate
+
+	// Asked is the rate the delivery is made at already, which the watch starts from; zero for none.
+	Asked media.Bitrate
 
 	// Climb is how long the cast plays well before a better link is tried, zero for never.
 	Climb time.Duration

@@ -289,7 +289,7 @@ func restartPosition(c *cast, w *watched, initial time.Duration) (time.Duration,
 	if loaded == nil {
 		return initial, false, nil
 	}
-	if loaded.Play.GetLive() {
+	if loaded.Live() {
 		return 0, false, nil
 	}
 	head := playhead(c)
@@ -309,7 +309,7 @@ type liveStall struct {
 }
 
 func (s *liveStall) sample(now time.Time, loaded *device.Playback, head *castorv1.Playhead) bool {
-	if loaded == nil || !loaded.Play.GetLive() || head.GetPosition() == nil || head.GetPaused() {
+	if loaded == nil || !loaded.Live() || head.GetPosition() == nil || head.GetPaused() {
 		*s = liveStall{}
 		return false
 	}

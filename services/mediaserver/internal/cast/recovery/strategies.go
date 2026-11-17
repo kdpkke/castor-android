@@ -77,8 +77,8 @@ func readable(ctx context.Context, in Intent, resolver SourceResolver, a Attempt
 			continue
 		}
 		a.candidate, a.Stream = i, link
-		// Packets the last link broke on do not condemn this one's.
-		a.Decode = media.Axes{}
+		// A new link keeps neither the last one's decode nor its fallbacks.
+		a.Decode, a.Software = media.Axes{}, false
 		a.OptimizedLive = false
 		return a.reading(resolved, in.Deadline), true
 	}
@@ -90,7 +90,7 @@ var optimizeLive = strategy{
 	action: OptimizeLive,
 	apply: func(_ context.Context, c change) (Attempt, bool) {
 		a := c.attempt
-		if !c.intent.PreserveSource || a.OptimizedLive || !a.live() {
+		if !c.intent.PreserveSource || a.OptimizedLive || !a.Live() {
 			return a, false
 		}
 		a.OptimizedLive = true
@@ -112,16 +112,15 @@ var decodeAxis = strategy{
 	},
 }
 
-// softwareEncode encodes the picture again without hardware, once, naming the encoder that failed.
+// softwareEncode makes the picture again without hardware, where hardware made the encode that failed.
 var softwareEncode = strategy{
 	action: SoftwareEncode,
 	apply: func(_ context.Context, c change) (Attempt, bool) {
 		a := c.attempt
-		failed := c.outcome.Evidence.HardwareEncoder
-		if a.SoftwareVideo || failed == "" {
+		if a.Software || !c.outcome.Evidence.Hardware {
 			return a, false
 		}
-		a.SoftwareVideo, a.FailedEncoder = true, failed
+		a.Software = true
 		return a, true
 	},
 }

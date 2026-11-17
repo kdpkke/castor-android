@@ -30,7 +30,7 @@ func newSegments(o output.Opening, dir string, captions *output.Captions) (*Segm
 		return nil, err
 	}
 	if captions != nil {
-		store.captions = &captionDelivery{root: store.root, playlist: o.Format.Tuning.Output, cues: captions.Cues, videoOffset: captions.VideoOffset, cache: make(map[string]captionSegment)}
+		store.captions = &captionDelivery{root: store.root, playlist: o.Format.Tuning.Output, cues: captions.Cues, videoOffset: captions.VideoOffset, vtt: map[string]string{}}
 	}
 	return &Segments{o: o, store: store, lastRequest: time.Now()}, nil
 }
@@ -38,8 +38,8 @@ func newSegments(o output.Opening, dir string, captions *output.Captions) (*Segm
 // Write packages native captions, or drains FFmpeg's stdout when FFmpeg writes
 // the HLS files itself. The caller owns the reader and its interruption.
 func (s *Segments) Write(ctx context.Context, producer io.Reader) error {
-	if c := s.store.captions; c != nil {
-		return publishCaptionHLS(ctx, s.store.root, producer, c.cues, c.videoOffset)
+	if s.store.captions != nil {
+		return s.store.captions.write(ctx, producer)
 	}
 	_, err := io.Copy(io.Discard, producer)
 	return err
@@ -50,18 +50,13 @@ func (s *Segments) Path() string {
 		return "master.m3u8"
 	}
 	if s.store.captions != nil {
-		return "master.m3u8"
+		return masterPlaylist
 	}
 	return s.o.Format.Tuning.Output
 }
 func (s *Segments) Served() int { return int(s.served.Load()) }
 func (s *Segments) Artifact() output.Artifact {
-	landed := s.store.landed
-	// A retained event starts at its beginning and a caption rendition has its own readiness; only a rolling window is joined at its edge.
-	if s.runtime == 0 && s.store.captions == nil {
-		landed = s.store.rollingLanded
-	}
-	return output.Artifact{Path: s.store.playlist, Subject: "the HLS playlist", Landed: landed}
+	return output.Artifact{Path: s.store.playlist, Subject: "the HLS playlist", Landed: s.store.landed}
 }
 func (s *Segments) WatchStorage(ctx context.Context) error {
 	if s.runtime > 0 {

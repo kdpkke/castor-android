@@ -8,9 +8,12 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/codec"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output/storage"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
+	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 )
 
 // fakeLead mocks transcriber for gate testing without whisper model.
@@ -189,4 +192,33 @@ func TestCancellationJoinsHealthControlBeforeReleasingResources(t *testing.T) {
 			t.Fatalf("result = %v", err)
 		}
 	})
+}
+
+// A relayed cast copies at first, so what wedges is the encoder a change of rate cut in, not the plan it began with.
+func TestAWedgeIsBlamedOnTheEncoderMakingTheDeliveryWhenItWedged(t *testing.T) {
+	hardware := encoding.EncodeOptions{Video: codec.Encode(codec.VideoEncode{Encoder: ffmpeg.Encoder{Name: "h264_videotoolbox", Hardware: true}})}
+	relayed := &adjustable{reader: &pull{proc: finished(t)}}
+	for _, tt := range []struct {
+		name  string
+		chain *stages
+		want  bool
+	}{
+		{"the read's buffer served as it is", nil, false},
+		{"a hardware encoder cut in by a change of rate", &stages{cur: &stage{proc: finished(t), opts: hardware}}, true},
+	} {
+		relayed.stages = tt.chain
+		failed, ok := errors.AsType[*encoderFailed](wedgedOn(&health.Fault{Kind: health.Wedged}, delivery{output: relayed}))
+		if !ok || failed.hardware != tt.want {
+			t.Errorf("%s: wedged on hardware %t, want %t", tt.name, ok && failed.hardware, tt.want)
+		}
+	}
+}
+
+// A watch begun again after a seek is told the rate its delivery was changed to, not the cast's own ceiling.
+func TestThePlayingWatchStartsFromTheRateTheDeliveryIsMadeAt(t *testing.T) {
+	lighter := &adjustable{ceiling: 3_000_000}
+	read := feed{buffered: &buffered{reader: &pull{}}}
+	if m := playingMonitor(read, delivery{output: lighter, rate: lighter}, nil, 6_000_000, 0, &fakeDevice{}); m.Asked != 3_000_000 {
+		t.Errorf("asked %s, want the 3 Mbit/s the delivery is made at", m.Asked)
+	}
 }

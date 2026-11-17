@@ -38,6 +38,7 @@ type model struct {
 	query      textinput.Model
 	queryTok   int // monotonic; only the latest debounce tick fires
 	results    list.Model
+	listTab    tabID // the tab whose rows results holds, noTab for search or discover rows
 	topsCache  [tabCount][]list.Item
 	topsCursor [tabCount]int
 	disc       discoverState
@@ -82,6 +83,7 @@ func newModel(ctx context.Context, client Catalog, badge string) model {
 		mode:      modeCurated,
 		query:     q,
 		results:   results,
+		listTab:   noTab,
 		disc:      discoverState{sort: tmdb.SortPopularity},
 		inspector: newInspector(ctx, client),
 		genres:    newGenrePicker(),
@@ -184,7 +186,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		m.results.SetItems(toResultItems(msg.res))
+		m.setRows(toResultItems(msg.res), noTab)
 		m.results.Select(0)
 		return m, m.inspector.hover()
 
@@ -199,7 +201,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.tok != m.drill.tok {
 			return m, nil
 		}
-		m.loading = false
+		m.drill.loading = false
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -212,7 +214,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.tok != m.drill.tok {
 			return m, nil
 		}
-		m.loading = false
+		m.drill.loading = false
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -237,6 +239,10 @@ func (m model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 	km, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m.forwardToQuery(msg)
+	}
+	// Any key but moving through the list leaves a show still loading behind; a pick then asks for its own.
+	if !key.Matches(km, m.keys.up, m.keys.down, m.keys.pageUp, m.keys.pageDown) {
+		m.drill.abandon()
 	}
 	switch {
 	case key.Matches(km, m.keys.genres):
@@ -287,7 +293,6 @@ func (m model) updateBrowse(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) onBrowseBack() (tea.Model, tea.Cmd) {
-	m.drill.tok++
 	m.loading = false
 	if m.query.Value() != "" {
 		m.query.SetValue("")
@@ -303,20 +308,14 @@ func (m model) onBrowseBack() (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateDrilldown(msg tea.Msg) (tea.Model, tea.Cmd) {
-	before := m.drill.tok
 	out := m.drill.update(msg, m.keys)
-	if before != m.drill.tok && !out.loading {
-		m.loading = false
-	}
 	switch {
 	case out.selected != nil:
 		return m.choose(out.selected)
 	case out.exit:
-		m.loading = false
 		m.goTo(screenBrowse)
 		return m, nil
-	case out.loading:
-		m.loading = true
+	case out.asked:
 		m.err = nil
 		return m, tea.Batch(out.cmd, m.spin.Tick)
 	}
@@ -325,7 +324,7 @@ func (m model) updateDrilldown(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // spinning is whether anything on screen shows the spinner.
 func (m model) spinning() bool {
-	return m.loading || (m.genres.draft != nil && !m.genres.loaded && m.genres.err == nil)
+	return m.loading || m.drill.loading || (m.genres.draft != nil && !m.genres.loaded && m.genres.err == nil)
 }
 
 func (m model) drilldownFiltering() bool {

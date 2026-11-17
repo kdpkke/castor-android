@@ -2,6 +2,7 @@ package execute
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding"
-	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/codec"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/splice"
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 
@@ -51,12 +51,18 @@ type switchable interface {
 	Switch(ctx context.Context, ceiling media.Bitrate) (from int64, err error)
 	// Withheld says the delivery is holding itself back for the device.
 	Withheld() bool
+	// Ceiling is the rate the delivery is made at now, zero for none.
+	Ceiling() media.Bitrate
 }
 
 // producer is what writes the served bytes, judged by the media it has made rather than bytes a muxer pads.
 type producer interface {
 	health.Producer
 	health.Telemetry
+	// Fed is castor waiting on the output with input for it.
+	Fed() bool
+	// onHardware is whether a hardware encoder makes what the producer writes now.
+	onHardware() bool
 }
 
 // validateOutput checks the encoder's actual result, not just its requested flags.
@@ -80,7 +86,24 @@ func (s *preparation) validateOutput(d delivery, opts encodePlan, f feed) error 
 		}
 		return encoding.ValidateOriginalOutput(ctx, s.Probes.File(path), opts.Probe, expected, d.output.Done())
 	}
-	return encoding.ValidateOutput(ctx, s.Probes.File(path), opts.delivery.Capabilities, opts.Format.ContentType, expected, d.output.Done())
+	return encodeFault(encoding.ValidateOutput(ctx, s.Probes.File(path), opts.delivery.Capabilities, opts.Format.ContentType, expected, d.output.Done()), opts.EncodeOptions)
+}
+
+// encodeFault types err as the encode's own where it refuses a half opts encoded.
+func encodeFault(err error, opts encoding.EncodeOptions) error {
+	mismatch, ok := errors.AsType[*encoding.Mismatch](err)
+	// Both refused may be their pairing, not the encode.
+	if !ok || mismatch.Refused.Video && mismatch.Refused.Audio {
+		return err
+	}
+	video, encodedVideo := opts.Video.Encode()
+	_, encodedAudio := opts.Audio.Encode()
+	refusedVideo := encodedVideo && mismatch.Refused.Video
+	refusedAudio := encodedAudio && mismatch.Refused.Audio
+	if !refusedVideo && !refusedAudio {
+		return err
+	}
+	return &encoderFailed{err: err, hardware: refusedVideo && video.Encoder.Hardware}
 }
 
 func (s *preparation) produce(work string, f feed, opts encodePlan, burn burnRenderer) (delivery, error) {
@@ -93,7 +116,8 @@ func (s *preparation) produce(work string, f feed, opts encodePlan, burn burnRen
 	}
 	splices := f.buffered != nil && f.buffered.reader.index != nil && burn == nil && opts.delivery.Plan.Splices()
 	var rungs *ladder
-	if splices && f.buffered.transcript == nil {
+	// Another rung carries the read on from its clock, so only a read keeping the source's clock gets one.
+	if splices && f.buffered.reader.timeline {
 		rungs = s.ladder(work)
 	}
 	dir := filepath.Join(work, "delivery")
@@ -149,29 +173,23 @@ func (s *preparation) produceOnce(f feed, encoderOpts encoding.EncodeOptions, pr
 	if burn != nil {
 		step = burn.Writer(s.ctx)
 	}
-	var tail io.ReadCloser
-	var unread func() int64
+	var in *splice.Cursor
+	var tail io.Reader
 	if f.buffered != nil {
-		buffer, err := f.buffered.reader.spool.TailAt(s.ctx, 0)
-		if err != nil {
+		var err error
+		if in, err = splice.Open(s.ctx, f.buffered.reader.spool, 0, nil, nil); err != nil {
 			return nil, err
 		}
-		counted := &countedInput{ReadCloser: buffer}
-		tail = counted
-		// Only an output castor reads tells an encoder that makes nothing from one castor is not asking.
-		if encoderOpts.Format.Tuning.Output == ffmpeg.StdoutPipe {
-			spool := f.buffered.reader.spool
-			unread = func() int64 { return spool.Size() - counted.took.Load() }
-		}
+		tail = in
 	}
 	proc, err := s.startEncoder(encoderOpts, tail, step, dir)
 	if err != nil {
-		if tail != nil {
-			_ = tail.Close()
+		if in != nil {
+			_ = in.Close()
 		}
 		return nil, err
 	}
-	production := startProduction(s.ctx, proc, tail, unread, prepared.Write)
+	production := startProduction(s.ctx, proc, in, onHardware(encoderOpts.Video), prepared.Write)
 	s.releases.worker(production.stop, func() error {
 		<-production.Done()
 		return production.Err()
@@ -270,23 +288,15 @@ const (
 )
 
 func (s *preparation) stageSpec(opts encodePlan, dir string, rungs *ladder) stageSpec {
-	planWith := func(encoders codec.Encoders) func(*pull, media.Bitrate) (encoding.EncodeOptions, error) {
-		return func(src *pull, ceiling media.Bitrate) (encoding.EncodeOptions, error) {
+	return stageSpec{
+		plan: func(src *pull, ceiling media.Bitrate) (encoding.EncodeOptions, error) {
 			facts := s.bufferedFacts(src)
-			decided, err := s.decide(opts.delivery.Capabilities, opts.delivery.Plan, facts, "", false, ceiling, carried(opts.EncodeOptions), encoders)
+			decided, err := s.decide(opts.delivery.Capabilities, opts.delivery.Plan.Format(), facts, "", false, ceiling, carried(opts.EncodeOptions))
 			if err != nil {
 				return encoding.EncodeOptions{}, err
 			}
 			return encoding.EncodeOptions{Input: encoding.FromPipe(opts.delivery.Plan.Pace(false)), Format: opts.delivery.Plan.EncoderFormat(), Probe: facts.probe, Video: decided.Video, Audio: decided.Audio, KeepTimeline: true}, nil
-		}
-	}
-	var soft func(*pull, media.Bitrate) (encoding.EncodeOptions, error)
-	if s.Software != nil {
-		soft = planWith(s.Software)
-	}
-	return stageSpec{
-		plan: planWith(s.encoders()),
-		soft: soft, retire: s.RetireEncoder,
+		},
 		probe: func(src *pull) media.ProbeInfo { return s.bufferedFacts(src).probe },
 		spawn: func(next encoding.EncodeOptions, from io.Reader) (*ffmpeg.Process, error) {
 			return s.startEncoder(next, from, nil, dir)
@@ -317,7 +327,6 @@ func (s *preparation) produceChain(f feed, opts encodePlan, encoderOpts encoding
 	handed := func() int64 { n, _ := audience.Handed(); return n }
 	spec := s.stageSpec(opts, dir, rungs)
 	chain := startStages(s.ctx, reader, newStage(proc, in, reader, encoderOpts), 0, handed, spec, prepared.Write)
-	chain.ceiling.Store(int64(s.MaxBitrate))
 	s.releases.worker(chain.stop, func() error {
 		<-chain.Done()
 		return chain.Err()

@@ -10,6 +10,8 @@ import (
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"github.com/stupside/castor/services/mediaserver/internal/cast"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding"
+	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/fetch"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/execute"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
 	hlsoutput "github.com/stupside/castor/services/mediaserver/internal/cast/output/hls"
@@ -41,23 +43,21 @@ const (
 // backend is the machinery the media server casts with, bound to c.
 func (c *Config) backend() func(*mediav1.PlaybackSettings) cast.Caster {
 	ffmpegBinary, ffprobeBinary := c.Servers.Media.FFmpeg.Path, c.Servers.Media.FFmpeg.ProbePath
-	// The configuration was validated against the same names the catalog knows.
-	encoders, _ := ffmpeg.NewCatalog(ffmpegBinary, c.Servers.Media.FFmpeg.HardwareEncoders)
 	machinery := execute.Machinery{
-		Outputs:       output.Factory{progressive.Adapter{}, hlsoutput.Adapter{}},
-		FFmpegPath:    ffmpegBinary,
-		Binary:        ffmpeg.Inspect(ffmpegBinary),
-		Encoders:      encoders.Best,
-		Software:      encoders.Software,
-		RetireEncoder: encoders.Retire,
-		Probes:        probe.FFprobe(ffprobeBinary),
-		InputArgs:     formats.InputArgs,
+		Outputs:    output.Factory{progressive.Adapter{}, hlsoutput.Adapter{}},
+		FFmpegPath: ffmpegBinary,
+		Binary:     ffmpeg.Inspect(ffmpegBinary),
+		Encoders:   ffmpeg.Encoders(ffmpegBinary, c.Servers.Media.FFmpeg.HardwareEncoders),
+		Probes:     probe.FFprobe(ffprobeBinary),
+		InputArgs:  formats.InputArgs,
 	}
 	resolverConfig, whisperConfig := c.Servers.Media.Resolver.Config, c.Servers.Media.Whisper
 	return func(asked *mediav1.PlaybackSettings) cast.Caster {
-		playbackMachinery := machinery
+		playback := machinery
 		if asked.GetSoftwareVideo() {
-			playbackMachinery.Encoders = machinery.Software
+			// Android extension: a live cast restarted after its receiver stalled encodes its picture without hardware.
+			encoders := machinery.Encoders
+			playback.Encoders = func(ctx context.Context, c media.Codec, _ bool) (ffmpeg.Encoder, bool) { return encoders(ctx, c, true) }
 		}
 		client := web.New(fetchTimeout)
 		timelines := follow.New(client, formats, follow.Repackager(ffmpegBinary))
@@ -66,7 +66,7 @@ func (c *Config) backend() func(*mediav1.PlaybackSettings) cast.Caster {
 			Ranker: rank.New(resolverConfig, media.HeightCap(asked.GetMaxHeight()), asked.GetAudio().GetLanguages(), func(ctx context.Context, s *source.Stream) (source.Inspection, error) {
 				return (candidateProbe{stream: s, client: client, resolver: resolver, timelines: timelines, binary: machinery.Probes}).Inspect(ctx)
 			}),
-			machinery:     playbackMachinery,
+			machinery:     playback,
 			client:        client,
 			resolver:      resolver,
 			timelines:     timelines,
@@ -185,7 +185,8 @@ func (k caster) Play(ctx context.Context, device execute.Device, publisher outpu
 
 func resolverWithProbe(client source.Client, height media.HeightCap, languages []string, binary probe.FFprobe) *source.Resolver {
 	measure := func(ctx context.Context, u *url.URL, h http.Header) (media.ProbeInfo, error) {
-		info, _, err := binary.Link(probe.Link{URL: u, Headers: h, InputArgs: formats.InputArgs(media.HLS, 0)}, fetchTimeout).Probe(ctx)
+		args := encoding.CandidateArgs(formats.InputArgs, h, media.HLS, fetch.For(media.Fetch{Segmented: true}, readDeadline))
+		info, _, err := binary.Link(probe.Link{URL: u, Args: args}, fetchTimeout).Probe(ctx)
 		return info, err
 	}
 	return source.NewResolver(client, height, languages, source.Formats{hls.Format{ProbeRendition: measure}, dash.Format{}})

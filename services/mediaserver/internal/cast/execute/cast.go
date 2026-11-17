@@ -29,10 +29,6 @@ type Machinery struct {
 
 	// Encoders is the host's encoder lookup, bound to that binary.
 	Encoders codec.Encoders
-	// Software is the lookup an attempt encodes with once a hardware encoder failed it; nil leaves Encoders.
-	Software codec.Encoders
-	// RetireEncoder stops offering an encoder a software retry proved at fault; nil keeps it.
-	RetireEncoder func(name string)
 
 	// Probes measures what an attempt reads: its source program, or its local buffer.
 	Probes probe.FFprobe
@@ -94,13 +90,11 @@ type Playback struct {
 	Stream   Stream
 	// Begins is where in the media the stream starts.
 	Begins time.Duration
-	// Live is a stream with no end (Android extension).
-	Live bool
 }
 
 // Stream is how what the device plays reaches it: a Source, a Served stream or a Playlist.
 type Stream interface {
-	// Length is how long the stream runs from where it begins, zero where the source declared none.
+	// Length is how long the stream runs from where it begins, zero where the source declared none or it has no end.
 	Length() time.Duration
 }
 
@@ -109,12 +103,16 @@ type Source struct {
 	ContentType string
 	// Runtime is zero where the source declared none.
 	Runtime time.Duration
+	// Live is a source with no end, which has no Runtime.
+	Live bool
 }
 
 // Served is one stream castor serves, from its start only where it has no Runtime.
 type Served struct {
 	ContentType string
 	Runtime     *Runtime
+	// Live is a stream with no end, which has no Runtime.
+	Live bool
 }
 
 // Runtime is a served stream's length from where it begins; TimeSeek serves it from any time within.
@@ -127,6 +125,10 @@ type Runtime struct {
 type Playlist struct {
 	// Runtime is zero where the source declared none.
 	Runtime time.Duration
+	// Segments is the content type the playlist is cut into.
+	Segments string
+	// Live is a playlist with no end, which has no Runtime.
+	Live bool
 }
 
 func (s Source) Length() time.Duration   { return s.Runtime }
@@ -139,11 +141,11 @@ func (s Served) Length() time.Duration {
 }
 
 func (s Source) LogValue() slog.Value {
-	return slog.GroupValue(slog.String("kind", "source"), slog.String("content_type", s.ContentType), slog.Duration("runtime", s.Runtime))
+	return slog.GroupValue(slog.String("kind", "source"), slog.String("content_type", s.ContentType), slog.Duration("runtime", s.Runtime), slog.Bool("live", s.Live))
 }
 
 func (s Served) LogValue() slog.Value {
-	attrs := []slog.Attr{slog.String("kind", "served"), slog.String("content_type", s.ContentType)}
+	attrs := []slog.Attr{slog.String("kind", "served"), slog.String("content_type", s.ContentType), slog.Bool("live", s.Live)}
 	if s.Runtime != nil {
 		attrs = append(attrs, slog.Duration("runtime", s.Runtime.Length), slog.Bool("time_seek", s.Runtime.TimeSeek))
 	}

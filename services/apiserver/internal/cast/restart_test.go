@@ -12,6 +12,7 @@ import (
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"github.com/stupside/castor/services/apiserver/internal/device"
+	"github.com/stupside/castor/services/apiserver/internal/device/devicetest"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -172,8 +173,8 @@ func (d *stoppedAfterEnd) AwaitEnd(ctx context.Context) error {
 
 var (
 	finite = device.Playback{Play: &mediav1.DeviceCommand_Play{}}
-	live   = device.Playback{Play: &mediav1.DeviceCommand_Play{Live: true}}
-	source = device.Playback{Play: &mediav1.DeviceCommand_Play{Stream: &mediav1.DeviceCommand_Play_Source_{Source: &mediav1.DeviceCommand_Play_Source{Duration: durationpb.New(time.Hour)}}}}
+	live   = device.Playback{Play: devicetest.Live(devicetest.Source(mediav1.Container_CONTAINER_HLS))}
+	source = device.Playback{Play: &mediav1.DeviceCommand_Play{Stream: &mediav1.DeviceCommand_Play_Source_{Source: &mediav1.DeviceCommand_Play_Source{Length: &mediav1.DeviceCommand_Play_Source_Duration{Duration: durationpb.New(time.Hour)}}}}}
 )
 
 // heard is the media server saying where c's device plays.

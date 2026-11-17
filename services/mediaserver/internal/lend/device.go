@@ -28,6 +28,8 @@ type Holder uint8
 const (
 	Castor Holder = 1 << iota
 	Viewer
+	// deviceRemote is the device's own remote, which holds it while the device says it is paused with no one else holding it.
+	deviceRemote
 )
 
 // Device is the lent device as the engine sees it: its lender holds it for the whole cast and plays what it is asked.
@@ -40,12 +42,11 @@ type Device struct {
 	// mu is held across pause and resume presses, so the viewer's and castor's never interleave.
 	mu      sync.Mutex
 	holders Holder
-	// stream counts the streams handed; what the device says of an earlier one is dropped.
-	stream          int
+	// changes counts each stream handed and each press; what the device said when asked before one is dropped.
+	changes         int
 	playing         bool
 	begins, runtime time.Duration
 	at              time.Duration
-	paused          bool
 	// original is a stream the device fetches as the source's own file, which it seeks itself.
 	original bool
 	// askedAt is the last time anyone asked where the device plays, saidAt the last it answered.
@@ -71,47 +72,51 @@ func (d *Device) Play(ctx context.Context, p execute.Playback) error {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.playing, d.holders, d.paused, d.stream = true, 0, false, d.stream+1
+	d.playing, d.holders, d.changes = true, 0, d.changes+1
 	d.begins, d.runtime, d.saidAt = p.Begins, p.Stream.Length(), time.Time{}
 	_, d.original = p.Stream.(execute.Source)
 	return nil
 }
 
-// Reload leaves the stream the device plays behind until the next Play, as when the viewer moved the cast.
-func (d *Device) Reload() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.playing, d.stream = false, d.stream+1
-}
-
 func played(p execute.Playback) *mediav1.DeviceCommand_Play {
-	play := &mediav1.DeviceCommand_Play{Url: p.URL.String(), Live: p.Live}
+	play := &mediav1.DeviceCommand_Play{Url: p.URL.String()}
 	for _, c := range p.Captions {
 		play.Captions = append(play.Captions, wire.Caption(c, c.URL))
 	}
 	switch s := p.Stream.(type) {
 	case execute.Source:
-		play.Stream = &mediav1.DeviceCommand_Play_Source_{Source: &mediav1.DeviceCommand_Play_Source{Container: wire.Container(s.ContentType), Duration: runtime(s.Runtime)}}
+		source := &mediav1.DeviceCommand_Play_Source{Container: wire.Container(s.ContentType)}
+		switch {
+		case s.Live:
+			source.Length = &mediav1.DeviceCommand_Play_Source_Live{Live: &mediav1.DeviceCommand_Play_Live{}}
+		case s.Runtime > 0:
+			source.Length = &mediav1.DeviceCommand_Play_Source_Duration{Duration: durationpb.New(s.Runtime)}
+		}
+		play.Stream = &mediav1.DeviceCommand_Play_Source_{Source: source}
 	case execute.Served:
 		served := &mediav1.DeviceCommand_Play_Progressive{Container: wire.Container(s.ContentType)}
-		if r := s.Runtime; r != nil {
-			served.Runtime = &mediav1.DeviceCommand_Play_Runtime{Duration: durationpb.New(r.Length), Seek: mediav1.DeviceCommand_Play_Runtime_SEEK_START}
-			if r.TimeSeek {
-				served.Runtime.Seek = mediav1.DeviceCommand_Play_Runtime_SEEK_TIME
+		switch {
+		case s.Live:
+			served.Timeline = &mediav1.DeviceCommand_Play_Progressive_Live{Live: &mediav1.DeviceCommand_Play_Live{}}
+		case s.Runtime != nil:
+			runtime := &mediav1.DeviceCommand_Play_Runtime{Duration: durationpb.New(s.Runtime.Length), Seek: mediav1.DeviceCommand_Play_Runtime_SEEK_START}
+			if s.Runtime.TimeSeek {
+				runtime.Seek = mediav1.DeviceCommand_Play_Runtime_SEEK_TIME
 			}
+			served.Timeline = &mediav1.DeviceCommand_Play_Progressive_Runtime{Runtime: runtime}
 		}
 		play.Stream = &mediav1.DeviceCommand_Play_Progressive_{Progressive: served}
 	case execute.Playlist:
-		play.Stream = &mediav1.DeviceCommand_Play_Playlist_{Playlist: &mediav1.DeviceCommand_Play_Playlist{Duration: runtime(s.Runtime)}}
+		playlist := &mediav1.DeviceCommand_Play_Playlist{Segments: wire.Container(s.Segments)}
+		switch {
+		case s.Live:
+			playlist.Length = &mediav1.DeviceCommand_Play_Playlist_Live{Live: &mediav1.DeviceCommand_Play_Live{}}
+		case s.Runtime > 0:
+			playlist.Length = &mediav1.DeviceCommand_Play_Playlist_Duration{Duration: durationpb.New(s.Runtime)}
+		}
+		play.Stream = &mediav1.DeviceCommand_Play_Playlist_{Playlist: playlist}
 	}
 	return play
-}
-
-func runtime(d time.Duration) *durationpb.Duration {
-	if d <= 0 {
-		return nil
-	}
-	return durationpb.New(d)
 }
 
 // AwaitEnd waits for the device's end; once its lender has left, the cast's deliveries decide it.
@@ -122,6 +127,13 @@ func (d *Device) AwaitEnd(ctx context.Context) error {
 		return ctx.Err()
 	}
 	return err
+}
+
+// Reload leaves the stream the device plays behind until the next Play, as when the viewer moved the cast.
+func (d *Device) Reload() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.playing, d.changes = false, d.changes+1
 }
 
 // Pause and Resume are castor's hold while its read gets ahead.
@@ -139,28 +151,32 @@ func (d *Device) Hold(ctx context.Context, by Holder, held bool) error {
 	if held {
 		holders |= by
 	}
-	// Castor only undoes its own hold; the viewer's press also reaches a device paused by its own remote.
-	if by == Castor && holders == d.holders {
-		return nil
+	// The viewer's resume ends their pause wherever they pressed it.
+	if by == Viewer && !held {
+		holders &^= deviceRemote
 	}
-	if pause := holders != 0; pause != (d.holders != 0 || d.paused) {
-		press := &mediav1.DeviceCommand_Call{Operation: &mediav1.DeviceCommand_Call_Resume{Resume: &mediav1.DeviceCommand_Resume{}}}
-		if pause {
-			press = &mediav1.DeviceCommand_Call{Operation: &mediav1.DeviceCommand_Call_Pause{Pause: &mediav1.DeviceCommand_Pause{}}}
-		}
-		if err := d.done(ctx, press); err != nil {
+	if pause := holders != 0; pause != (d.holders != 0) {
+		if err := d.done(ctx, press(pause)); err != nil {
 			return err
 		}
-		d.paused = pause
+		d.changes++
 	}
 	d.holders = holders
 	d.publish()
 	return nil
 }
 
+// press is the call that pauses the device, or resumes it.
+func press(pause bool) *mediav1.DeviceCommand_Call {
+	if pause {
+		return &mediav1.DeviceCommand_Call{Operation: &mediav1.DeviceCommand_Call_Pause{Pause: &mediav1.DeviceCommand_Pause{}}}
+	}
+	return &mediav1.DeviceCommand_Call{Operation: &mediav1.DeviceCommand_Call_Resume{Resume: &mediav1.DeviceCommand_Resume{}}}
+}
+
 func (d *Device) Position(ctx context.Context) (at time.Duration, paused, ok bool) {
 	d.mu.Lock()
-	stream := d.stream
+	changes := d.changes
 	d.askedAt = time.Now()
 	d.mu.Unlock()
 	a, err := d.line.Call(ctx, &mediav1.DeviceCommand_Call{Operation: &mediav1.DeviceCommand_Call_Position{Position: &mediav1.DeviceCommand_Position{}}})
@@ -171,10 +187,23 @@ func (d *Device) Position(ctx context.Context) (at time.Duration, paused, ok boo
 	at, paused = p.GetAt().AsDuration(), p.GetPaused()
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.stream != stream || !d.playing {
+	if d.changes != changes || !d.playing {
 		return 0, false, false
 	}
-	d.at, d.paused, d.saidAt = at, paused, time.Now()
+	d.at, d.saidAt = at, time.Now()
+	switch {
+	case !paused && d.holders&deviceRemote != 0:
+		// The viewer played on from the device's own remote, ending their pause; castor's, which no press made, is pressed now.
+		d.holders &^= deviceRemote | Viewer
+		if d.holders != 0 && d.done(ctx, press(true)) == nil {
+			d.changes++
+			paused = true
+		} else {
+			d.holders = 0
+		}
+	case d.holders == 0 && paused:
+		d.holders = deviceRemote
+	}
 	d.publish()
 	return at, paused, true
 }
@@ -196,7 +225,7 @@ func (d *Device) Seek(ctx context.Context, at time.Duration) error {
 		return err
 	}
 	// What the device said before it moved is no longer where it plays.
-	d.stream++
+	d.changes++
 	d.at, d.saidAt = within, time.Now()
 	d.publish()
 	return nil
@@ -228,7 +257,7 @@ func (d *Device) publish() {
 	if !d.playing || d.saidAt.IsZero() {
 		return
 	}
-	head := &castorv1.Playhead{Position: durationpb.New(d.begins + d.at), Paused: d.holders != 0 || d.paused}
+	head := &castorv1.Playhead{Position: durationpb.New(d.begins + d.at), Paused: d.holders != 0}
 	if d.runtime > 0 {
 		head.Duration = durationpb.New(d.begins + d.runtime)
 	}

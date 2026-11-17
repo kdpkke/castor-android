@@ -42,18 +42,18 @@ func certifyPresentation(p presentation) (readyPresentation, error) {
 }
 
 func (p readyPresentation) play(ctx context.Context, device Device) error {
-	return hand(ctx, device, Playback{URL: p.target, Captions: p.captions, Stream: p.stream(), Live: p.live, Begins: p.reached.began})
+	return hand(ctx, device, Playback{URL: p.target, Captions: p.captions, Stream: p.stream(), Begins: p.reached.began})
 }
 
 // stream is how what the device is handed reaches it.
 func (p presentation) stream() Stream {
 	switch {
 	case p.source:
-		return Source{ContentType: p.contentType, Runtime: p.runtime}
+		return Source{ContentType: p.contentType, Runtime: p.runtime, Live: p.live}
 	case p.contentType == media.HLS:
-		return Playlist{Runtime: p.runtime}
+		return Playlist{Runtime: p.runtime, Segments: p.segments, Live: p.live}
 	}
-	served := Served{ContentType: p.contentType}
+	served := Served{ContentType: p.contentType, Live: p.live}
 	if p.runtime > 0 {
 		served.Runtime = &Runtime{Length: p.runtime, TimeSeek: p.delivery != nil && p.delivery.sought != nil}
 	}

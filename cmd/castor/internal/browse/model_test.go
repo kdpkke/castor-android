@@ -405,3 +405,90 @@ func TestChoosingATitleAsksWhereToStartInTheBrowser(t *testing.T) {
 		t.Fatalf("sel = %+v; want it to start at 1:12", m.sel)
 	}
 }
+
+// A tab left while it still loaded never showed its rows, so it keeps no cursor from the rows the list showed instead.
+func TestATabRestoresOnlyACursorItShowed(t *testing.T) {
+	m := newModel(t.Context(), shelf{}, "")
+	m, _ = drive(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m, _ = drive(t, m, topsLoadedMsg{tab: tabTrending, res: fakeResults(40)})
+	m.results.Select(35)
+	m.cycleTab(1)
+	m.cycleTab(1)
+	m.cycleTab(-1)
+	m, _ = drive(t, m, topsLoadedMsg{tab: tabPopularMovies, res: fakeResults(20)})
+	if got := m.results.Index(); got != 0 || m.selectedResult() == nil {
+		t.Errorf("the tab opened at row %d with a selection %t, want its first row selected", got, m.selectedResult() != nil)
+	}
+}
+
+// Any browse key but a move through the list leaves a show still loading behind, its spinner with it.
+func TestAShowStillLoadingIsLeftBehindByABrowseKey(t *testing.T) {
+	tv, _ := shelf{}.TV(t.Context(), 0)
+	for name, press := range map[string]tea.KeyPressMsg{
+		"genres": {Code: 'g', Mod: tea.ModCtrl},
+		"left":   {Code: tea.KeyLeft},
+		"enter":  {Code: tea.KeyEnter},
+	} {
+		m := newModel(t.Context(), shelf{}, "")
+		m, _ = drive(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+		m, _ = drive(t, m, topsLoadedMsg{tab: tabTrending, res: fakeResults(3)})
+		m.ask = true
+		m.drill.begin(2316, "The Office", "")
+		pending := m.drill.tok
+		m, _ = drive(t, m, press)
+		m, _ = drive(t, m, tvDoneMsg{tok: pending, tv: tv})
+		if m.scr == screenDrilldown || m.drill.loading {
+			t.Errorf("after %s, the show left behind took the screen: %t, kept its spinner: %t", name, m.scr == screenDrilldown, m.drill.loading)
+		}
+	}
+	pasted := newModel(t.Context(), shelf{}, "")
+	pasted.drill.begin(2316, "The Office", "")
+	pending := pasted.drill.tok
+	pasted, _ = drive(t, pasted, tea.PasteMsg{Content: "office"})
+	pasted, _ = drive(t, pasted, tvDoneMsg{tok: pending, tv: tv})
+	if pasted.scr == screenDrilldown || pasted.drill.loading {
+		t.Error("a query changed by a paste left the show still loading to take the screen")
+	}
+	m := newModel(t.Context(), shelf{}, "")
+	m, _ = drive(t, m, topsLoadedMsg{tab: tabTrending, res: fakeResults(3)})
+	m.drill.begin(2316, "The Office", "")
+	pending = m.drill.tok
+	m, _ = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m, _ = drive(t, m, tvDoneMsg{tok: pending, tv: tv})
+	if m.scr != screenDrilldown {
+		t.Error("a move through the list left the show still loading behind")
+	}
+}
+
+// A query cleared before its debounce fired still shows search rows, whose cursor is no tab's.
+func TestATabKeepsNoCursorFromSearchRows(t *testing.T) {
+	m := newModel(t.Context(), shelf{}, "")
+	m, _ = drive(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m, _ = drive(t, m, topsLoadedMsg{tab: tabTrending, res: fakeResults(3)})
+	m, _ = drive(t, m, runes("x"))
+	m, _ = drive(t, m, searchDoneMsg{tok: m.queryTok, res: fakeResults(40)})
+	m.results.Select(30)
+	m, _ = drive(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m, _ = drive(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m, _ = drive(t, m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if got := m.results.Index(); got != 0 || m.selectedResult() == nil {
+		t.Errorf("the tab came back at row %d with a selection %t, want its first row selected", got, m.selectedResult() != nil)
+	}
+}
+
+// A tab that lands while a show is open is the list the browse screen comes back to.
+func TestATabLandingUnderAShowIsShownOnReturn(t *testing.T) {
+	m := newModel(t.Context(), shelf{}, "")
+	m, _ = drive(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m, _ = drive(t, m, topsLoadedMsg{tab: tabTrending, res: fakeResults(30)})
+	m.results.Select(25)
+	m, _ = drive(t, m, tea.KeyPressMsg{Code: tea.KeyTab})
+	tv, _ := shelf{}.TV(t.Context(), 0)
+	m.drill.begin(2316, "The Office", "")
+	m, _ = drive(t, m, tvDoneMsg{tok: m.drill.tok, tv: tv})
+	m, _ = drive(t, m, topsLoadedMsg{tab: tabPopularMovies, res: []tmdb.SearchResult{{ID: 99, MediaType: tmdb.MediaMovie, Title: "Popular"}}})
+	m, _ = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if r := m.selectedResult(); m.scr != screenBrowse || r == nil || r.ID != 99 {
+		t.Errorf("came back to %+v on screen %v, want the popular tab's row", r, m.scr)
+	}
+}

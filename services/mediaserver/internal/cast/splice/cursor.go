@@ -10,6 +10,7 @@ import (
 
 // Cursor reads a buffer from an offset, to a limit that may be set while it reads.
 type Cursor struct {
+	sp   *storage.Spool
 	tail io.ReadCloser
 
 	// skip drops the sound a reader starting at a cut has already been given, nil for none.
@@ -31,7 +32,7 @@ func Open(ctx context.Context, sp *storage.Spool, from int64, tables []byte, ski
 	if err != nil {
 		return nil, err
 	}
-	return &Cursor{tail: tail, skip: skip, prefix: tables, next: from, limit: -1}, nil
+	return &Cursor{sp: sp, tail: tail, skip: skip, prefix: tables, next: from, limit: -1}, nil
 }
 
 func (c *Cursor) Read(p []byte) (int, error) {
@@ -92,25 +93,47 @@ func (c *Cursor) Offset() int64 {
 	return c.next
 }
 
-// Stop ends the cursor's reading at offset at, reporting whether it had not read past it already.
+// Behind is buffer the cursor has yet to read before its limit; a read waiting for more has claimed it.
+func (c *Cursor) Behind() bool {
+	end := c.sp.Size()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.limit >= 0 {
+		end = min(end, c.limit)
+	}
+	return c.next < end
+}
+
+// OffsetAfter is the offset the cursor is at once it reads n more bytes, never past where it stops.
+func (c *Cursor) OffsetAfter(n int64) int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.limit >= 0 {
+		return min(c.next+n, c.limit)
+	}
+	return c.next + n
+}
+
+// Stop ends the cursor's reading at offset at, reporting whether it had not read past it and was not stopping sooner.
 func (c *Cursor) Stop(at int64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if at < c.next {
+	if at < c.next || c.limit >= 0 && at > c.limit {
 		return false
 	}
 	c.limit = at
 	return true
 }
 
-// Unread is what the cursor has yet to read of a buffer size bytes long, up to where it was stopped.
-func (c *Cursor) Unread(size int64) int64 {
+// Unstop lifts a stop the cursor has not reached yet, reporting whether it reads on.
+func (c *Cursor) Unstop() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.limit >= 0 {
-		size = min(size, c.limit)
+	if c.limit < 0 || c.next >= c.limit {
+		return false
 	}
-	return max(0, size-c.next)
+	c.limit = -1
+	return true
 }
 
 func (c *Cursor) Close() error { return c.tail.Close() }

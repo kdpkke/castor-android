@@ -91,21 +91,15 @@ type AudioSupport struct {
 const PlaybackSampleRate = 48000
 
 func (c Capabilities) CanCopyVideo(v ProbeInfo) bool {
-	if v.VideoInterlaced && !c.Deinterlaces {
-		return false
-	}
-	return slices.ContainsFunc(c.Formats, func(f FormatSupport) bool { return f.Video.accepts(v) })
+	return slices.ContainsFunc(c.Formats, func(f FormatSupport) bool { return f.acceptsVideo(v, c.Deinterlaces) })
 }
 
 func (c Capabilities) CanCopyAudio(p ProbeInfo) bool {
-	if p.AudioSampleRate > PlaybackSampleRate {
-		return false
-	}
 	return slices.ContainsFunc(c.Formats, func(f FormatSupport) bool { return f.Audio.accepts(p) })
 }
 
 func (s AudioSupport) accepts(p ProbeInfo) bool {
-	if p.AudioCodec == "" || p.AudioCodec != s.Codec {
+	if p.AudioCodec == "" || p.AudioCodec != s.Codec || p.AudioSampleRate > PlaybackSampleRate {
 		return false
 	}
 	// Unknown source channel count (0) is trusted: don't force-transcode a matching codec with no layout.
@@ -210,9 +204,31 @@ func (c Capabilities) CanPlayIn(container string, p ProbeInfo) bool {
 	})
 }
 
+// Refused is the halves of p no format in container plays, both where only their pairing fails.
+func (c Capabilities) Refused(container string, p ProbeInfo) Axes {
+	if c.CanPlayIn(container, p) {
+		return Axes{}
+	}
+	offered := func(takes func(FormatSupport) bool) bool {
+		return slices.ContainsFunc(c.Formats, func(f FormatSupport) bool { return f.Transport.ContentType() == container && takes(f) })
+	}
+	refused := Axes{
+		Video: p.HasVideo() && !offered(func(f FormatSupport) bool { return f.acceptsVideo(p, c.Deinterlaces) }),
+		Audio: p.HasAudio() && !offered(func(f FormatSupport) bool { return f.Audio.accepts(p) }),
+	}
+	if refused.Any() {
+		return refused
+	}
+	return Axes{Video: p.HasVideo(), Audio: p.HasAudio()}
+}
+
 func (f FormatSupport) accepts(p ProbeInfo, deinterlaces bool) bool {
 	return (p.HasVideo() || p.HasAudio()) &&
-		(!p.VideoInterlaced || deinterlaces) &&
-		(!p.HasVideo() || f.Video.accepts(p)) &&
+		(!p.HasVideo() || f.acceptsVideo(p, deinterlaces)) &&
 		(!p.HasAudio() || f.Audio.accepts(p))
+}
+
+// acceptsVideo is whether f plays p's picture, an interlaced one only on a device that deinterlaces.
+func (f FormatSupport) acceptsVideo(p ProbeInfo, deinterlaces bool) bool {
+	return (!p.VideoInterlaced || deinterlaces) && f.Video.accepts(p)
 }

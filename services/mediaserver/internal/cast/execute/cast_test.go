@@ -29,11 +29,12 @@ import (
 	"github.com/stupside/castor/services/mediaserver/internal/testhttp"
 )
 
-// fakeDevice plays what it is handed; if drain is set, it fetches the served stream and keeps it in served.
+// fakeDevice plays what it is handed, kept in handed; if drain is set, it fetches the served stream and keeps it in served.
 type fakeDevice struct {
 	caps   media.Capabilities
 	drain  bool
 	refuse error
+	handed Playback
 	served []byte
 	ended  bool
 }
@@ -59,12 +60,35 @@ func (loopback) Publish(ctx context.Context, h http.Handler) (output.Publication
 	if err != nil {
 		return nil, err
 	}
-	return testhttp.Publish(ctx, ln, h), nil
+	return testhttp.Publish(ctx, smallSends{ln}, h), nil
 }
+
+// socketBuffer keeps kernel buffering small, so handed bytes match what the device read on any OS.
+const socketBuffer = 64 << 10
+
+type smallSends struct{ net.Listener }
+
+func (l smallSends) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if tc, ok := c.(*net.TCPConn); ok {
+		_ = tc.SetWriteBuffer(socketBuffer)
+	}
+	return c, err
+}
+
+// reader is a device client whose socket holds no more than socketBuffer.
+var reader = &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+	c, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+	if tc, ok := c.(*net.TCPConn); ok {
+		_ = tc.SetReadBuffer(socketBuffer)
+	}
+	return c, err
+}}}
 
 var _ Device = (*fakeDevice)(nil)
 
 func (d *fakeDevice) Play(ctx context.Context, p Playback) error {
+	d.handed = p
 	streamURL := p.URL
 	if d.refuse != nil {
 		return d.refuse
@@ -188,6 +212,23 @@ func TestAnAudioOnlyCastDoesNotRequireAVideoEncoder(t *testing.T) {
 	}
 }
 
+// A cast resumed into its source tells the device where the stream it is handed begins.
+func TestAResumedCastTellsTheDeviceWhereItsStreamBegins(t *testing.T) {
+	ffmpegPath, ffprobePath := requireFFmpegTools(t)
+	dev := &fakeDevice{caps: dlnaLike(), drain: true}
+	program := programFromStream(t, serveHeavy(t, ffmpegPath).stream())
+	program.Start = 15 * time.Second
+	ctx, cancel := context.WithTimeout(t.Context(), castTimeout)
+	defer cancel()
+	out := realCast(dev, ffmpegPath, ffprobePath).Run(ctx, recovery.Attempt{Try: 1, Program: program, Fetch: sourceFetchPlan(t, program, testReadDeadline)})
+	if out.Err != nil {
+		t.Fatal(out.Err)
+	}
+	if dev.handed.Begins != program.Start {
+		t.Errorf("the device was told the stream begins at %s, want %s, where the cast resumed", dev.handed.Begins, program.Start)
+	}
+}
+
 // testReadDeadline is the mid-read stall bound every cast in this suite reads with.
 const testReadDeadline = 30 * time.Second
 
@@ -225,7 +266,7 @@ func realCast(dev Device, ffmpegPath, ffprobePath string) Cast {
 		Outputs:    testOutputs(),
 		FFmpegPath: ffmpegPath,
 		Binary:     ffmpeg.Inspect(ffmpegPath),
-		Encoders:   ffmpeg.Encoders(ffmpegPath),
+		Encoders:   ffmpeg.Encoders(ffmpegPath, nil),
 		Probes:     probe.FFprobe(ffprobePath),
 		Timelines:  direct{},
 		InputArgs:  formats.InputArgs,

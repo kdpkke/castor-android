@@ -4,8 +4,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"log/slog"
-	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -64,50 +62,8 @@ func encodesVideo(in Inputs) bool {
 	return hasPicture(in) && len(refuse(videoRefusals, in)) > 0
 }
 
-// decideVideo plans the picture within what the ceiling leaves after sound, in software where the delivery needs keyframes the chosen encoder cannot give it:
-// placed on the clock for a clock-cut delivery, or entry points for a segmented one.
+// decideVideo plans the picture within what the ceiling leaves after sound.
 func decideVideo(ctx context.Context, in Inputs, sound media.Bitrate) (Track[VideoEncode], []Reason, error) {
-	track, refused, err := planVideo(ctx, in, sound)
-	venc, encodes := track.Encode()
-	if err != nil || !encodes {
-		return track, refused, err
-	}
-	switch {
-	case in.KeyframesOnClock && venc.Encoder.GOPKeyframes && !wholeRate(in.Probe.VideoFrameRate, venc.MaxFrameRate):
-		if in.Software == nil {
-			return Track[VideoEncode]{}, refused, fmt.Errorf("%s cannot key this delivery's clock at %v fps, and no software encoder can stand in", venc.Encoder.Name, in.Probe.VideoFrameRate)
-		}
-		slog.DebugContext(ctx, "encoder skipped: this delivery cuts on the clock", "encoder", venc.Encoder.Name, "source_frame_rate", in.Probe.VideoFrameRate)
-	case venc.Encoder.EntryInBandOnly && enteredAtSegments(in.Into):
-		if in.Software == nil {
-			return Track[VideoEncode]{}, refused, fmt.Errorf("%s gives a device no frame to enter this delivery's segments at, and no software encoder can stand in", venc.Encoder.Name)
-		}
-		slog.DebugContext(ctx, "encoder skipped: this delivery is entered at its segments", "encoder", venc.Encoder.Name, "content_type", in.Into.ContentType)
-	default:
-		return track, refused, err
-	}
-	in.Encoders, in.Software = in.Software, nil
-	return planVideo(ctx, in, sound)
-}
-
-// enteredAtSegments is a delivery a device starts decoding at any segment of, with the decoder configuration kept out of band:
-// each segment must then open on a frame a decoder can start at.
-func enteredAtSegments(into container.Format) bool {
-	return into.Delivery == container.DeliverSegmented && into.Framing == media.FramingOutOfBand
-}
-
-// wholeRate is frames reaching the encoder at a whole number a second: the source's own rate under the cap, the fps filter's cap at or above it; an unmeasured source promises neither.
-func wholeRate(source, limit float64) bool {
-	switch {
-	case source <= 0:
-		return false
-	case limit > 0 && source >= limit:
-		return limit == math.Trunc(limit)
-	}
-	return source == math.Trunc(source)
-}
-
-func planVideo(ctx context.Context, in Inputs, sound media.Bitrate) (Track[VideoEncode], []Reason, error) {
 	if !hasPicture(in) {
 		return OmitVideo(), nil, nil
 	}
@@ -115,7 +71,13 @@ func planVideo(ctx context.Context, in Inputs, sound media.Bitrate) (Track[Video
 	if len(refused) == 0 {
 		return CopyVideo(), nil, nil
 	}
-	host := func(c media.Codec) (ffmpeg.Encoder, bool) { return in.Encoders(ctx, c) }
+	host := func(c media.Codec) (ffmpeg.Encoder, bool) {
+		e, ok := in.Encoders(ctx, c, in.Software)
+		if ok && !everySegmentStartsOnIDR(e, in.Into) {
+			return in.Encoders(ctx, c, true)
+		}
+		return e, ok
+	}
 	enc, t, ok := selectVideoEncoder(in.Caps, host)
 	if !ok {
 		if ceilingOnly(refused) {
@@ -148,7 +110,7 @@ func planVideo(ctx context.Context, in Inputs, sound media.Bitrate) (Track[Video
 		Deinterlace:         in.Probe.VideoInterlaced && !in.Caps.Deinterlaces,
 		ToneMap:             in.Probe.VideoHDR,
 		MaxFrameRate:        frameRate,
-		FrameRate:           encodedRate(in.Probe.VideoFrameRate, frameRate),
+		FrameRate:           min(cmp.Or(in.Probe.VideoFrameRate, frameRate), frameRate),
 		Bitrate:             bitrate,
 		Maxrate:             maxrate,
 		Bufsize:             bufsize,
@@ -156,6 +118,15 @@ func planVideo(ctx context.Context, in Inputs, sound media.Bitrate) (Track[Video
 		KeyframeIntervalSec: keyframeSeconds,
 		SubtitleTextFile:    in.BurnIn,
 	}), refused, nil
+}
+
+// everySegmentStartsOnIDR reports whether every segment of into that e encodes starts on a frame a device can start decoding at.
+func everySegmentStartsOnIDR(e ffmpeg.Encoder, into container.Format) bool {
+	if e.SingleIDROutOfBand && into.Delivery == container.DeliverSegmented && into.Framing == media.FramingOutOfBand {
+		// A device may start at any segment, and none carries the decoder config.
+		return false
+	}
+	return true
 }
 
 // playbackFrameRate is the most any device castor serves shows in a second; above it a re-encode drops frames.

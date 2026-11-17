@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync/atomic"
 	"time"
 
 	"github.com/stupside/castor/internal/machine"
@@ -35,6 +34,8 @@ type ran struct {
 	reached health.Phase
 	began   time.Duration
 	reader  *pull
+	// seen is the playing watch's last reading.
+	seen health.Vitals
 }
 
 // attemptEvent keeps this machine's events distinct at Go call sites.
@@ -164,8 +165,6 @@ type operation struct {
 type coordinator struct {
 	device     Device
 	delivering func(media.Delivery)
-	// retire is called once software played what a failed hardware encoder could not; nil otherwise.
-	retire     func()
 	maxBitrate media.Bitrate
 	climb      time.Duration
 	inspect    func() (inspectedPresentation, error)
@@ -195,9 +194,9 @@ type coordinator struct {
 	made       context.Context
 	unmade     context.CancelFunc
 	stopHealth context.CancelFunc
-	// observer judges the playing cast, and knows where the viewer got to; nil before it plays.
-	observer  atomic.Pointer[health.Observer]
-	stopDrain context.CancelFunc
+	stopDrain  context.CancelFunc
+	// observer judges the playing cast, nil before it plays.
+	observer *health.Observer
 }
 
 func newCoordinator(parent context.Context, c Cast, a recovery.Attempt) *coordinator {
@@ -208,9 +207,6 @@ func newCoordinator(parent context.Context, c Cast, a recovery.Attempt) *coordin
 	s := &coordinator{
 		device: c.Device, delivering: c.Delivering, maxBitrate: c.MaxBitrate, climb: a.Climb, ctx: ctx, stop: cancel, releases: rel,
 		events: make(chan *operation), failures: make(chan error),
-	}
-	if a.SoftwareVideo && a.FailedEncoder != "" && c.RetireEncoder != nil {
-		s.retire = func() { c.RetireEncoder(a.FailedEncoder) }
 	}
 
 	s.machine = s.attemptMachine()
@@ -339,10 +335,6 @@ func (c *coordinator) loop() {
 			case presentationReady:
 				c.startPlayback()
 			case playbackStarted:
-				if c.retire != nil {
-					// Software played what the hardware could not: the hardware was the fault.
-					c.retire()
-				}
 				if c.delivering != nil {
 					c.delivering(c.ready.delivers)
 				}
@@ -402,8 +394,8 @@ func (c *coordinator) watchProduction() {
 		return
 	}
 	c.made, c.unmade = context.WithCancel(c.ctx)
-	made, opts := c.made, c.planned.options
-	c.launchUntil(made, productionFinished, func() error { return c.encoderFailed(ended(made, d.output), opts, d.output) })
+	made := c.made
+	c.launchUntil(made, productionFinished, func() error { return ended(made, d.output) })
 	if f := c.presentation.feed; f.buffered != nil && d.output != f.buffered.reader {
 		c.launchUntil(made, productionFinished, func() error { return ended(made, f.buffered.reader) })
 	}
@@ -459,10 +451,10 @@ func (c *coordinator) watchHealth(d *delivery) {
 		return
 	}
 	observer := health.Observe(playingMonitor(c.presentation.feed, *d, aud, c.maxBitrate, c.climb, c.device))
-	c.observer.Store(observer)
+	c.observer = observer
 	watching, stop := context.WithCancel(c.ctx)
 	c.stopHealth = stop
-	c.launchUntil(watching, healthEnded, func() error { return observeHealth(watching, observer, c.device, d.rate) })
+	c.launchUntil(watching, healthEnded, func() error { return wedgedOn(observeHealth(watching, observer, c.device, d.rate), *d) })
 }
 
 func (c *coordinator) watchSeeks(d *delivery) {

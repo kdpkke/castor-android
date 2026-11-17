@@ -10,6 +10,7 @@ import (
 	"buf.build/go/protovalidate"
 	"github.com/huin/goupnp"
 	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestRendererWithoutConnectionManagerKeepsConservativePlayback(t *testing.T) {
@@ -102,12 +103,12 @@ func TestContainersListedWithoutAProfileLeaveNativeTracksToTheRenderer(t *testin
 	for _, f := range caps.Formats {
 		order = append(order, f.GetProgressive().GetContainer())
 	}
+	// A row admitting several sounds lists one format per sound; the order of the containers is what counts.
 	if want := []mediav1.ProgressiveSupport_Container{
 		mediav1.ProgressiveSupport_CONTAINER_MPEGTS,
 		mediav1.ProgressiveSupport_CONTAINER_MP4,
-		mediav1.ProgressiveSupport_CONTAINER_MP4,
 		mediav1.ProgressiveSupport_CONTAINER_MKV,
-	}; !slices.Equal(order, want) {
+	}; !slices.Equal(slices.Compact(order), want) {
 		t.Fatalf("containers %v, want %v: served output prefers MPEG-TS and never a Matroska still being muxed", order, want)
 	}
 	if got := sinks[mediav1.Container_CONTAINER_MKV]; got.mime != "video/x-matroska" || got.features != "*" {
@@ -116,6 +117,84 @@ func TestContainersListedWithoutAProfileLeaveNativeTracksToTheRenderer(t *testin
 	// A profile naming codecs still stands on its own, without trial.
 	if profiled, _ := parseSinkProtocolInfo("http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_HD_AAC"); profiled.GetNativePlaybackTrial() {
 		t.Fatal("a profile naming its codecs is not a trial")
+	}
+}
+
+func TestAContainerNamedWithoutAProfilePlaysTheFamilyDefault(t *testing.T) {
+	caps, sinks := parseSinkProtocolInfo(lgC2Sink)
+	fallback, _ := fallbackCaps()
+	if !slices.ContainsFunc(caps.Formats, func(f *mediav1.FormatSupport) bool { return proto.Equal(f, fallback.Formats[0]) }) {
+		t.Fatalf("formats %v, want the MPEG-TS family default %v among them", caps.Formats, fallback.Formats[0])
+	}
+	if !slices.ContainsFunc(caps.Formats, func(f *mediav1.FormatSupport) bool {
+		return f.GetProgressive().GetContainer() == mediav1.ProgressiveSupport_CONTAINER_MP4 &&
+			slices.Contains(f.GetAv().GetVideo().GetH264().GetProfiles(), mediav1.H264Support_PROFILE_HIGH)
+	}) {
+		t.Errorf("formats %v: a profile-less MP4 row must admit High H.264, not only the CIF baseline profile", caps.Formats)
+	}
+	// The stream must not claim the CIF profile.
+	if got := sinks[mediav1.Container_CONTAINER_MP4]; got.features != "*" {
+		t.Errorf("MP4 sink entry = %+v, want no DLNA profile", got)
+	}
+	if got := sinks[mediav1.Container_CONTAINER_MPEGTS]; got != (sinkEntry{mime: "video/mp2t", features: "*"}) {
+		t.Errorf("MPEG-TS sink entry = %+v, want the renderer's own profile-less row", got)
+	}
+}
+
+func TestAnSCTEProfileAdmitsEverySoundItsStandardDoes(t *testing.T) {
+	caps, _ := parseSinkProtocolInfo(lgC2Sink)
+	var sounds []mediav1.AudioCodec
+	for _, f := range caps.Formats {
+		if f.GetProgressive().GetContainer() == mediav1.ProgressiveSupport_CONTAINER_MPEGTS && f.GetAv().GetVideo().GetH264() != nil {
+			sounds = append(sounds, f.GetAv().GetAudio().GetCodec())
+		}
+	}
+	for _, want := range []mediav1.AudioCodec{mediav1.AudioCodec_AUDIO_CODEC_AC3, mediav1.AudioCodec_AUDIO_CODEC_EAC3, mediav1.AudioCodec_AUDIO_CODEC_AAC} {
+		if !slices.Contains(sounds, want) {
+			t.Errorf("H.264 in MPEG-TS plays %v, want %v too: the C2 names AVC_TS_NA_T", sounds, want)
+		}
+	}
+}
+
+func TestAProfileAdmittingSeveralSoundsKeepsItsOwnEntry(t *testing.T) {
+	_, sinks := parseSinkProtocolInfo("http-get:*:video/mp2t:DLNA.ORG_PN=AVC_TS_NA_ISO")
+	if got, want := sinks[mediav1.Container_CONTAINER_MPEGTS], (sinkEntry{mime: "video/mp2t", features: "DLNA.ORG_PN=AVC_TS_NA_ISO"}); got != want {
+		t.Errorf("MPEG-TS entry = %+v, want the row's own %+v: its sounds are not alternatives of each other", got, want)
+	}
+}
+
+func TestATimestampedRowNeverAnnouncesCastorsStream(t *testing.T) {
+	for name, sink := range map[string]string{
+		"SCTE":         "http-get:*:video/vnd.dlna.mpeg-tts:DLNA.ORG_PN=MPEG_TS_HD_KO,http-get:*:video/vnd.dlna.mpeg-tts:DLNA.ORG_PN=AVC_TS_NA_T",
+		"single sound": "http-get:*:video/vnd.dlna.mpeg-tts:DLNA.ORG_PN=AVC_TS_HD_60_AC3_T",
+		"zero stamped": "http-get:*:video/vnd.dlna.mpeg-tts:DLNA.ORG_PN=AVC_TS_HD_50_AC3",
+	} {
+		caps, sinks := parseSinkProtocolInfo(sink)
+		if got, want := sinks[mediav1.Container_CONTAINER_MPEGTS], (sinkEntry{mime: "video/mp2t", features: "*"}); len(caps.Formats) == 0 || got != want {
+			t.Errorf("%s: MPEG-TS entry %+v over %d formats, want %+v: castor writes 188-byte packets", name, got, len(caps.Formats), want)
+		}
+	}
+}
+
+func TestATimestampedRowLeavesAnISORowItsOwnEntry(t *testing.T) {
+	const stamped, iso = "http-get:*:video/vnd.dlna.mpeg-tts:DLNA.ORG_PN=AVC_TS_HD_50_AC3_T", "http-get:*:video/mp2t:DLNA.ORG_PN=AVC_TS_HD_50_AC3_ISO"
+	for name, sink := range map[string]string{"stamped first": stamped + "," + iso, "ISO first": iso + "," + stamped} {
+		_, sinks := parseSinkProtocolInfo(sink)
+		if got, want := sinks[mediav1.Container_CONTAINER_MPEGTS], (sinkEntry{mime: "video/mp2t", features: "DLNA.ORG_PN=AVC_TS_HD_50_AC3_ISO"}); got != want {
+			t.Errorf("%s: MPEG-TS entry %+v, want the ISO row's %+v", name, got, want)
+		}
+	}
+}
+
+func TestOnlyCastorsOwnContainerWithoutAProfileImpliesTheDefault(t *testing.T) {
+	for name, sink := range map[string]string{
+		"a profile naming another codec":   "http-get:*:video/vnd.dlna.mpeg-tts:DLNA.ORG_PN=MPEG_TS_HD_KO",
+		"192-byte timestamped MPEG-TS":     "http-get:*:video/vnd.dlna.mpeg-tts:*",
+		"a container castor does not make": "http-get:*:video/x-msvideo:*",
+	} {
+		if got, _ := parseSinkProtocolInfo(sink); len(got.Formats) != 0 {
+			t.Errorf("%s yielded %v, want nothing castor makes", name, got.Formats)
+		}
 	}
 }
 

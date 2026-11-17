@@ -14,13 +14,22 @@ const (
 	searchTarget  = "urn:schemas-upnp-org:device:MediaRenderer:1"
 	ssdpPort      = "1900"
 	searchTimeout = 3 * time.Second
+	// multicastSearchTimeout is how long a multicast search waits for answers.
+	multicastSearchTimeout = 2 * time.Second
 )
 
-// searchDescription: unicast M-SEARCH for description (no interface enumeration).
-func searchDescription(ctx context.Context, host string) (string, error) {
+// ssdpTarget is address on SSDP's own port; a typed port is the device's HTTP server.
+func ssdpTarget(address string) string {
+	if host, _, err := net.SplitHostPort(address); err == nil {
+		address = host
+	}
+	return device.WithPort(address, ssdpPort)
+}
+
+// searchDescription: unicast M-SEARCH of target for description (no interface enumeration).
+func searchDescription(ctx context.Context, target string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
 	defer cancel()
-	target := device.WithPort(host, ssdpPort)
 
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "udp", target)

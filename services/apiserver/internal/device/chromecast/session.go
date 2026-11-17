@@ -60,14 +60,15 @@ func (s *session) play(ctx context.Context, playback device.Playback) error {
 	s.watchMu.Unlock()
 	load := &loadCommand{
 		Type: msgLoad, Autoplay: true,
-		Media: mediaItem{MediaItem: castmedia.MediaItem{ContentId: stream, ContentType: device.MIME(playback.Container()), StreamType: "BUFFERED", Duration: float32(playback.Duration().Seconds())}},
+		Media: mediaItem{MediaItem: castmedia.MediaItem{ContentId: stream, ContentType: device.MIME(playback.Container()), StreamType: streamBuffered, Duration: float32(playback.Duration().Seconds())}},
 	}
-	if playback.Play.GetLive() {
-		load.Media.StreamType = "LIVE"
+	if playback.Live() {
+		// A live stream has no end for the receiver to buffer toward or seek to.
+		load.Media.StreamType = streamLive
 	}
-	if playback.Play.GetPlaylist() != nil {
-		load.Media.HLSSegmentFormat = "fmp4"
-		load.Media.HLSVideoSegmentFormat = "fmp4"
+	if playback.Play.GetPlaylist().GetSegments() == mediav1.Container_CONTAINER_MP4 {
+		// The receiver's HLS player takes segments for MPEG-TS unless told otherwise.
+		load.Media.HLSSegmentFormat, load.Media.HLSVideoSegmentFormat = "fmp4", "fmp4"
 	}
 	load.Media.Metadata = castmedia.MediaMetadata{Title: info.GetTitle(), Subtitle: info.GetSynopsis(), ReleaseDate: info.GetReleaseDate()}
 	if imageURL := info.GetImageUrl(); imageURL != "" {
@@ -83,9 +84,8 @@ func (s *session) play(ctx context.Context, playback device.Playback) error {
 	}
 	if err != nil {
 		s.watchMu.Lock()
-		// A Play begun since owns the watch now; this one's failure is not its to clear.
+		// A Play begun since owns the watch now; this one's failure is not its to clear or name.
 		if s.ending == mine {
-			// The receiver's code belongs to this Play only while it still owns the watch.
 			err = s.watch.named(err)
 			s.watch.disarm()
 		}

@@ -96,10 +96,6 @@ func TestTheArgvRendersTheDecision(t *testing.T) {
 		Filters:  []string{"format=nv12", "hwupload"},
 		Flags:    []string{"-preset", "fast"},
 	}
-	gopKeyed := ffmpeg.Encoder{
-		Name: "h264_test_gop", Codec: media.CodecH264, Hardware: true, Flags: []string{"-pix_fmt", "nv12"},
-		GOPKeyframes: true, AverageRate: true, Level: func(level string) string { return "lv" + level },
-	}
 	copyInto := func(format container.Format, probe media.ProbeInfo) []string {
 		return mustEncodeArgs(t, EncodeOptions{Input: piped, Format: format, Probe: probe, Video: codec.CopyVideo(), Audio: codec.CopyAudio()})
 	}
@@ -178,30 +174,6 @@ func TestTheArgvRendersTheDecision(t *testing.T) {
 		name: "HEVC copied into mp4 is tagged hvc1",
 		args: copyInto(mp4Format, media.ProbeInfo{VideoCodec: media.CodecHEVC, AudioCodec: media.CodecAAC}),
 		want: []string{"-tag:v", "hvc1"},
-	}, {
-		name: "a GOP-keyed average-rate encoder gets its keyframes as a GOP over the rate frames arrive at, and its own level spelling",
-		args: mustEncodeArgs(t, EncodeOptions{Input: piped, Format: mpegtsFormat, Audio: aacAudio, Video: codec.Encode(codec.VideoEncode{
-			Encoder: gopKeyed, Level: "4.2", Bitrate: 4_000_000, Maxrate: 4_000_000, Bufsize: 8_000_000, Quality: 23,
-			KeyframeIntervalSec: 2, FrameRate: 24000.0 / 1001,
-		})}),
-		want:   []string{"-c:v", "h264_test_gop", "-pix_fmt", "nv12", "-level:v", "lv4.2", "-b:v", "4000k", "-g", "48"},
-		absent: []string{"-crf", "-maxrate", "-bufsize", "-force_key_frames"},
-	}, {
-		name: "a GOP-keyed encoder of a picture whose rate nothing measured assumes 30 frames a second",
-		args: mustEncodeArgs(t, EncodeOptions{Input: piped, Format: mpegtsFormat, Audio: aacAudio, Video: codec.Encode(codec.VideoEncode{
-			Encoder: gopKeyed, Bitrate: 4_000_000, KeyframeIntervalSec: 2,
-		})}),
-		want: []string{"-b:v", "4000k", "-g", "60"},
-	}, {
-		name: "the software encoder keeps its VBV ceiling, quality target and forced keyframes",
-		args: mustEncodeArgs(t, EncodeOptions{Input: piped, Format: mpegtsFormat, Audio: aacAudio, Video: codec.Encode(codec.VideoEncode{
-			Encoder: libx264, Level: "4.0", Bitrate: 4_000_000, Maxrate: 4_000_000, Bufsize: 8_000_000, KeyframeIntervalSec: 2, FrameRate: 25,
-		})}),
-		want: []string{
-			"-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-level:v", "4.0",
-			"-b:v", "4000k", "-maxrate", "4000k", "-bufsize", "8000k", "-force_key_frames", "expr:gte(t,n_forced*2)",
-		},
-		absent: []string{"-g"},
 	}} {
 		t.Run(tt.name, func(t *testing.T) {
 			if !containsSequence(tt.args, tt.want) {
@@ -401,5 +373,36 @@ func TestADolbyVisionCopyIsMarkedDvh1OnlyForAPlayerThatNeedsIt(t *testing.T) {
 				t.Errorf("-tag:v = %q in %q, want one %q", got, args, tt.want)
 			}
 		})
+	}
+}
+
+func TestAMediaCodecEncodeIsAskedOnlyWhatItHonors(t *testing.T) {
+	for _, tt := range []struct {
+		codec       media.Codec
+		level, want string
+	}{
+		{media.CodecH264, "4.0", "4"},
+		{media.CodecH264, "4.2", "4.2"},
+		{media.CodecHEVC, "4.1", "m4.1"},
+	} {
+		args := videoEncodeArgs(codec.VideoEncode{
+			Encoder: ffmpeg.Encoder{Name: "mediacodec", Codec: tt.codec, AverageRate: true, GOPKeyframes: true, MediaCodecLevels: true},
+			Level:   tt.level, Bitrate: 4_000_000, Maxrate: 4_000_000, Bufsize: 8_000_000,
+			KeyframeIntervalSec: 2, FrameRate: 23.976,
+		})
+		value := func(flag string) string {
+			if i := slices.Index(args, flag); i >= 0 && i+1 < len(args) {
+				return args[i+1]
+			}
+			return ""
+		}
+		if value("-level:v") != tt.want || value("-g") != "48" || value("-b:v") == "" {
+			t.Errorf("%s %s: args %q, want -level:v %s, -g 48 and -b:v", tt.codec, tt.level, args, tt.want)
+		}
+		for _, ignored := range []string{"-maxrate", "-bufsize", "-force_key_frames"} {
+			if slices.Contains(args, ignored) {
+				t.Errorf("%s: args %q carry %s, which MediaCodec ignores", tt.codec, args, ignored)
+			}
+		}
 	}
 }

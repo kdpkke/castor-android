@@ -132,12 +132,12 @@ func TestAPlayTimeoutNeedsConfirmationOfTheRequestedStream(t *testing.T) {
 func TestTheTransportStateEndsTheCastOnlyOncePlaybackBegan(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
-		states []string
+		states []transportState
 		want   bool
 	}{
-		{"stop before playback is ignored", []string{"STOPPED", "TRANSITIONING", "STOPPED"}, false},
-		{"stop after playing ends", []string{"PLAYING", "STOPPED"}, true},
-		{"pause remains active", []string{"PLAYING", "PAUSED_PLAYBACK"}, false},
+		{"stop before playback is ignored", []transportState{"STOPPED", "TRANSITIONING", "STOPPED"}, false},
+		{"stop after playing ends", []transportState{"PLAYING", "STOPPED"}, true},
+		{"pause remains active", []transportState{"PLAYING", "PAUSED_PLAYBACK"}, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var watch transportWatch
@@ -229,7 +229,7 @@ func TestADeviceThatStaysStoppedNeverPlayedTheStream(t *testing.T) {
 
 func TestADeviceBufferingBeforeItPlaysIsNotRefusing(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		script := []string{"STOPPED", "STOPPED", "TRANSITIONING", "STOPPED", "PLAYING", "STOPPED"}
+		script := []transportState{"STOPPED", "STOPPED", "TRANSITIONING", "STOPPED", "PLAYING", "STOPPED"}
 		i := 0
 		poll := func(context.Context) (transportInfo, error) {
 			state := script[i]
@@ -353,8 +353,180 @@ func TestAStopRefusedWithNothingLoadedHasNothingToStop(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 		})
 		s := &session{transport: goupnp.ServiceClient{SOAPClient: client, Service: &goupnp.Service{ServiceType: "urn:schemas-upnp-org:service:AVTransport:1"}}}
-		if err := s.Stop(t.Context()); (err != nil) != refused || refused && !upnpError(err, transitionUnavailable) {
+		if err := s.stop(t.Context()); (err != nil) != refused || refused && !upnpError(err, transitionUnavailable) {
 			t.Errorf("Stop while %s = %v, want a refusal %v", state, err, refused)
 		}
+	}
+}
+
+func TestACancelWhileTheTransportStaysLockedCarriesItsCause(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cause := errors.New("viewer stopped")
+		ctx, cancel := context.WithCancelCause(t.Context())
+		locked := &soap.SOAPFaultError{}
+		locked.Detail.UPnPError.Errorcode = transportLocked
+		err := retryTransportLocked(ctx, func() error { cancel(cause); return locked })
+		if !errors.Is(err, cause) {
+			t.Errorf("a cancel while the transport stayed locked ended with %v, want its cause", err)
+		}
+	})
+}
+
+func TestAStreamAnotherSenderHandedTheRendererIsNotStopped(t *testing.T) {
+	const ours = "http://192.0.2.1:8080/media/stream"
+	for current, stops := range map[string]bool{ours: true, "": true, "http://192.0.2.99/other.mp4": false} {
+		var stopped atomic.Bool
+		s := renderer(func(action string) string {
+			switch action {
+			case "GetMediaInfo":
+				return "<CurrentURI>" + current + "</CurrentURI>"
+			case "Stop":
+				stopped.Store(true)
+			}
+			return ""
+		})
+		_, s.sinks = parseSinkProtocolInfo("http-get:*:video/mp2t:*")
+		u, _ := url.Parse(ours)
+		if err := s.Play(t.Context(), device.Playback{URL: u, Play: devicetest.Source(mediav1.Container_CONTAINER_MPEGTS)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Stop(t.Context()); err != nil || stopped.Load() != stops {
+			t.Errorf("renderer holding %q: Stop = %v, stopped %t, want stopped %t", current, err, stopped.Load(), stops)
+		}
+	}
+}
+
+func TestAPlayheadAskedOfTheStreamBeforeAPlayDoesNotTickTheNewOne(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rel := "0:00:42"
+		held := make(chan struct{})
+		var holding atomic.Bool
+		holding.Store(true)
+		s := renderer(func(action string) string {
+			switch action {
+			case "GetPositionInfo":
+				return "<RelTime>" + rel + "</RelTime>"
+			case "GetTransportInfo":
+				if holding.CompareAndSwap(true, false) {
+					<-held
+				}
+				return "<CurrentTransportState>PLAYING</CurrentTransportState><CurrentTransportStatus>OK</CurrentTransportStatus>"
+			}
+			return ""
+		})
+		_, s.sinks = parseSinkProtocolInfo("http-get:*:video/mp2t:*")
+		u, _ := url.Parse("http://192.0.2.1:8080/media/first")
+		_ = s.Play(t.Context(), device.Playback{URL: u, Play: devicetest.Source(mediav1.Container_CONTAINER_MPEGTS)})
+		asked := make(chan struct{})
+		go func() { _, _ = s.Position(t.Context()); close(asked) }()
+		synctest.Wait()
+		u, _ = url.Parse("http://192.0.2.1:8080/media/second")
+		if err := s.Play(t.Context(), device.Playback{URL: u, Play: devicetest.Source(mediav1.Container_CONTAINER_MPEGTS)}); err != nil {
+			t.Fatal(err)
+		}
+		close(held)
+		<-asked
+		rel = "0:00:00"
+		if head, err := s.Position(t.Context()); !errors.Is(err, device.ErrNoPosition) {
+			t.Errorf("a 0:00:00 of the second stream = %v, %v; want no position: the tick seen belonged to the first", head, err)
+		}
+	})
+}
+
+func TestAPlayheadOfTheStreamPlayedUntilPlayLandsDoesNotTickTheNewOne(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		track, rel := "http://192.0.2.1:8080/media/first", "0:00:42"
+		s := renderer(func(action string) string {
+			switch action {
+			case "GetPositionInfo":
+				return "<TrackURI>" + track + "</TrackURI><RelTime>" + rel + "</RelTime>"
+			case "GetTransportInfo":
+				return "<CurrentTransportState>PLAYING</CurrentTransportState><CurrentTransportStatus>OK</CurrentTransportStatus>"
+			}
+			return ""
+		})
+		_, s.sinks = parseSinkProtocolInfo("http-get:*:video/mp2t:*")
+		for _, stream := range []string{track, "http://192.0.2.1:8080/media/second"} {
+			u, _ := url.Parse(stream)
+			if err := s.Play(t.Context(), device.Playback{URL: u, Play: devicetest.Source(mediav1.Container_CONTAINER_MPEGTS)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		u, _ := url.Parse("http://192.0.2.1:8080/media/second")
+		if head, err := s.Position(t.Context()); !errors.Is(err, device.ErrNoPosition) {
+			t.Errorf("the first stream's playhead = %v, %v; want no position of the second", head, err)
+		}
+		track, rel = u.String(), "0:00:00"
+		if head, err := s.Position(t.Context()); !errors.Is(err, device.ErrNoPosition) {
+			t.Errorf("a 0:00:00 of the second stream = %v, %v; want no position: only the first was seen moving", head, err)
+		}
+		rel = "0:00:03"
+		if head, err := s.Position(t.Context()); err != nil || head.At != 3*time.Second {
+			t.Errorf("the second stream moving = %v, %v; want 3s", head, err)
+		}
+	})
+}
+
+func TestALateAnswerAboutAReplacedStreamKeepsTheNewStreamsTick(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rel := "0:00:42"
+		held := make(chan struct{})
+		var holding atomic.Bool
+		holding.Store(true)
+		s := renderer(func(action string) string {
+			switch action {
+			case "GetPositionInfo":
+				return "<RelTime>" + rel + "</RelTime>"
+			case "GetTransportInfo":
+				if holding.CompareAndSwap(true, false) {
+					<-held
+				}
+				return "<CurrentTransportState>PLAYING</CurrentTransportState><CurrentTransportStatus>OK</CurrentTransportStatus>"
+			}
+			return ""
+		})
+		_, s.sinks = parseSinkProtocolInfo("http-get:*:video/mp2t:*")
+		u, _ := url.Parse("http://192.0.2.1:8080/media/first")
+		_ = s.Play(t.Context(), device.Playback{URL: u, Play: devicetest.Source(mediav1.Container_CONTAINER_MPEGTS)})
+		late := make(chan struct{})
+		go func() { _, _ = s.Position(t.Context()); close(late) }()
+		synctest.Wait()
+		u, _ = url.Parse("http://192.0.2.1:8080/media/second")
+		_ = s.Play(t.Context(), device.Playback{URL: u, Play: devicetest.Source(mediav1.Container_CONTAINER_MPEGTS)})
+		if _, err := s.Position(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		close(held)
+		<-late
+		rel = "0:00:00"
+		if head, err := s.Position(t.Context()); err != nil {
+			t.Errorf("the second stream back at 0:00:00 after it moved = %v, %v; the first's late answer erased its tick", head, err)
+		}
+	})
+}
+
+func TestARendererNamingItsTrackOtherwiseStillReportsWhereItPlays(t *testing.T) {
+	for _, track := range []string{"", "NOT_IMPLEMENTED", " http://192.0.2.1:8080/media/second ", "HTTP://192.0.2.1:8080/MEDIA/second"} {
+		synctest.Test(t, func(t *testing.T) {
+			s := renderer(func(action string) string {
+				switch action {
+				case "GetPositionInfo":
+					return "<TrackURI>" + track + "</TrackURI><RelTime>0:00:07</RelTime>"
+				case "GetTransportInfo":
+					return "<CurrentTransportState>PLAYING</CurrentTransportState><CurrentTransportStatus>OK</CurrentTransportStatus>"
+				}
+				return ""
+			})
+			_, s.sinks = parseSinkProtocolInfo("http-get:*:video/mp2t:*")
+			for _, stream := range []string{"http://192.0.2.1:8080/media/first", "http://192.0.2.1:8080/media/second"} {
+				u, _ := url.Parse(stream)
+				if err := s.Play(t.Context(), device.Playback{URL: u, Play: devicetest.Source(mediav1.Container_CONTAINER_MPEGTS)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if head, err := s.Position(t.Context()); err != nil || head.At != 7*time.Second {
+				t.Errorf("a renderer naming its track %q = %v, %v; want 7s", track, head, err)
+			}
+		})
 	}
 }

@@ -37,7 +37,7 @@ func originalRefusals(rules []refusalRule, in Inputs) []Reason {
 	if in.Caps.NativePlaybackTrial {
 		refused = slices.DeleteFunc(refused, func(reason Reason) bool {
 			switch reason {
-			case reasonDeviceVideo, reasonDeviceAudio, reasonHDRPolicy, reasonInterlaced, reasonSampleRate:
+			case reasonDeviceVideo, reasonDeviceAudio, reasonHDRPolicy, reasonInterlaced:
 				return true
 			default:
 				return false
