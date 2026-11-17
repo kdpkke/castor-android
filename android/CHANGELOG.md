@@ -3,7 +3,7 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
-## 2.0.0 — Unreleased
+## 2.0.0 — 2026-11-17
 
 - The TV picker lists each TV once with its IP address and the protocols it answers on. Selecting a TV opens those protocols with their ports, with Back below the choices.
 
@@ -57,6 +57,7 @@ English one.
 - When a web page's player waits for a tap, Castor starts it: after a few seconds without a stream it taps the middle of the page's largest player, as you would, or clicks the player's play control when the page is not on screen, and tries again a couple of times. A video that already plays is left alone, a link is never tapped, and the page cannot be taken elsewhere just after the tap.
 - A TV keeps its own name whichever protocol you choose, FCast included, and the protocol with its address and port shows beneath it, also during a cast.
 - An AirPlay TV already playing a live stream that asks Castor for a playlist it could not fetch no longer ends the cast at once: the cast ends only if the TV itself gives up with an error. Before, an LG could stop after a few seconds with "the receiver could not fetch … itself".
+- **Debug mode** in the menu writes what Castor does to `Download/Castor/castor-debug.txt`, with the phone's model, chip and Android version at the top. Turn it on, repeat what went wrong, then **Share log** sends the file. The log includes the addresses of the pages, videos and TVs used, and leaves the phone only when you share it.
 
 ### Italiano
 
@@ -112,6 +113,7 @@ English one.
 - Quando il player di una pagina web aspetta un tocco, Castor lo avvia: dopo qualche secondo senza stream tocca il centro del player più grande della pagina, come faresti tu, oppure fa clic sul pulsante play del player se la pagina non è sullo schermo, e riprova un paio di volte. Un video che sta già andando non viene toccato, un link non viene mai toccato e subito dopo il tocco la pagina non può portare altrove.
 - Una TV mantiene il proprio nome qualunque protocollo si scelga, FCast compreso, e sotto compaiono il protocollo con indirizzo e porta, anche durante una trasmissione.
 - Una TV AirPlay che sta già riproducendo una diretta e chiede a Castor una playlist che non è riuscita a scaricare non fa più chiudere subito la trasmissione: finisce solo se la TV stessa rinuncia con un errore. Prima una LG poteva fermarsi dopo pochi secondi con «the receiver could not fetch … itself».
+- **Modalità debug** nel menu scrive quello che fa Castor in `Download/Castor/castor-debug.txt`, con in cima modello, chip e versione Android del telefono. Attivala, rifai quello che non ha funzionato, poi **Condividi log** invia il file. Il log contiene gli indirizzi delle pagine, dei video e delle TV usati, ed esce dal telefono solo quando lo condividi.
 
 ## 1.3.0 — 2026-10-27
 
