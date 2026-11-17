@@ -10,6 +10,7 @@ import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
+import com.muratoreware.castorandroid.data.DataRepository
 import com.muratoreware.castorandroid.data.Rpc
 import com.muratoreware.castorandroid.ui.main.CastOptions
 import java.io.File
@@ -47,6 +48,8 @@ class CastorService : Service() {
   private var bridge: BrowserServer? = null
   private var multicast: WifiManager.MulticastLock? = null
   private var wake: PowerManager.WakeLock? = null
+  // The newest cast's controls in the notification and on the lock screen.
+  private lateinit var media: CastMediaSession
   var generation = 0
     private set
   @Volatile private var closed = false
@@ -59,33 +62,19 @@ class CastorService : Service() {
     generation = EngineHost.created(this)
     val notifications = getSystemService(NotificationManager::class.java)
     notifications.createNotificationChannel(
-      NotificationChannel("casting", "Casting", NotificationManager.IMPORTANCE_LOW)
+      NotificationChannel(CHANNEL, getString(R.string.notification_channel), NotificationManager.IMPORTANCE_LOW)
     )
-    val stop =
-      PendingIntent.getService(
+    startForeground(NOTIFICATION, engineNotification())
+    val castOptions = CastOptions(this)
+    media =
+      CastMediaSession(
         this,
-        0,
-        Intent(this, CastorService::class.java).setAction("STOP"),
-        PendingIntent.FLAG_IMMUTABLE,
+        scope,
+        ::engineNotification,
+        { notifications.notify(NOTIFICATION, it) },
+        { videos?.name(it) },
+        { device -> tvName(device, castOptions.television()) },
       )
-    val open =
-      PendingIntent.getActivity(
-        this,
-        0,
-        Intent(this, MainActivity::class.java),
-        PendingIntent.FLAG_IMMUTABLE,
-      )
-    startForeground(
-      1,
-      Notification.Builder(this, "casting")
-        .setSmallIcon(android.R.drawable.ic_media_play)
-        .setContentTitle("Castor")
-        .setContentText("Casting engine running on this phone")
-        .setContentIntent(open)
-        .setOngoing(true)
-        .addAction(Notification.Action.Builder(null, "Stop Castor", stop).build())
-        .build(),
-    )
     browser = BrowserHost.acquire(this, this)
     val scrapingToken = UUID.randomUUID().toString()
     val apiToken = UUID.randomUUID().toString()
@@ -178,6 +167,14 @@ class CastorService : Service() {
           val rpc = Rpc(url, apiToken)
           endpoint.value = rpc
           EngineHost.ready(this@CastorService, rpc)
+          media.attach(DataRepository(rpc))
+          // The newest cast's controls follow the engine's word on it, for the notification and the lock screen.
+          launch {
+            while (currentCoroutineContext().isActive) {
+              media.refresh()
+              kotlinx.coroutines.delay(1000)
+            }
+          }
           while (true) {
             val event = output.readLine() ?: break
             val active = JSONObject(event).getBoolean("active")
@@ -204,10 +201,31 @@ class CastorService : Service() {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    when (intent?.action) {
+    when (val action = intent?.action) {
       "STOP" -> stopByUser()
+      null -> {}
+      else -> media.command(action)
     }
     return START_NOT_STICKY
+  }
+
+  // The engine's own notification, shown while no cast is playing.
+  private fun engineNotification(): Notification {
+    val stop =
+      PendingIntent.getService(
+        this,
+        0,
+        Intent(this, CastorService::class.java).setAction("STOP"),
+        PendingIntent.FLAG_IMMUTABLE,
+      )
+    return Notification.Builder(this, CHANNEL)
+      .setSmallIcon(android.R.drawable.ic_media_play)
+      .setContentTitle(getString(R.string.app_name))
+      .setContentText(getString(R.string.notification_engine_running))
+      .setContentIntent(openApp(this))
+      .setOngoing(true)
+      .addAction(Notification.Action.Builder(null, getString(R.string.stop_castor), stop).build())
+      .build()
   }
 
   // The user asked for the engine to stop: work still held does not start it again by itself.
@@ -239,6 +257,7 @@ class CastorService : Service() {
     BrowserHost.release(this)
     if (multicast?.isHeld == true) multicast?.release()
     if (wake?.isHeld == true) wake?.release()
+    media.release()
     stopForeground(STOP_FOREGROUND_REMOVE)
     stopSelf()
   }
@@ -247,5 +266,29 @@ class CastorService : Service() {
     shutdown()
     EngineHost.stopped(this, failure.value, restart)
     super.onDestroy()
+  }
+
+  companion object {
+    internal const val CHANNEL = "casting"
+    private const val NOTIFICATION = 1
+
+    // A cast's TV as the screen names it: the engine's name, else the saved TV's at the same host, else its host.
+    // A TV pinned by address reaches the engine with no name of its own.
+    internal fun tvName(device: castor.v1.DeviceOuterClass.Device, saved: com.muratoreware.castorandroid.ui.main.SavedTv?): String {
+      if (device.name.isNotBlank()) return device.name
+      val host = com.muratoreware.castorandroid.ui.main.receiverHost(device.address)
+      val savedHost = saved?.address?.let { com.muratoreware.castorandroid.ui.main.receiverHost(it) }
+      if (host != null && savedHost != null && com.muratoreware.castorandroid.ui.main.sameHost(host, savedHost) && saved.name.isNotBlank())
+        return saved.name
+      return host ?: device.address
+    }
+
+    internal fun openApp(context: android.content.Context): PendingIntent =
+      PendingIntent.getActivity(
+        context,
+        0,
+        Intent(context, MainActivity::class.java),
+        PendingIntent.FLAG_IMMUTABLE,
+      )
   }
 }

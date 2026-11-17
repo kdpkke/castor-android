@@ -31,6 +31,7 @@ Native Android emulator previews with sample input.
 - Cast several videos to different TVs at the same time, and restart a cast from where it was.
 - Keep casting in the background through an Android foreground service.
 - Pause, resume and seek from the app when supported by the TV. Tap a circular **10** arrow for a ten-second step, or hold it to keep seeking.
+- Control the newest cast from the notification and the lock screen: pause, resume, ten-second steps and stop.
 - Native playback without re-encoding, or Optimized playback for receiver compatibility; separate subtitle preferences.
 - English and Italian; System, Light and Dark appearance, with Dark as the default.
 - Settings remain open while choices update immediately; diagnostic details are selectable and copyable.

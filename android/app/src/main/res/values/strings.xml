@@ -228,4 +228,7 @@
     <string name="debug_log_file">Log file: %1$s</string>
     <string name="debug_log_privacy">The log includes your phone’s model and Android version, and the addresses of the pages, videos and TVs you use. Share it only with someone you trust.</string>
     <string name="debug_share">Share log</string>
+    <string name="notification_channel">Casting</string>
+    <string name="notification_engine_running">Casting engine running on this phone</string>
+    <string name="notification_casting_to">Casting to %1$s</string>
 </resources>

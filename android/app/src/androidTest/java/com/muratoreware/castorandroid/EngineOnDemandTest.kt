@@ -209,6 +209,67 @@ class EngineOnDemandTest {
     }
   }
 
+  // The newest cast is the notification's media session: it names the TV, and its pause and stop reach that TV.
+  @Test
+  fun theNewestCastIsControlledFromItsMediaSession() = runBlocking<Unit> {
+    val sample = encodeLongSample()
+    val media = mediaServer(sample.readBytes())
+    val heard = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val tv = receiver("Fixture TV", "uuid:castor-android-fixture-media", heard)
+    // The TV is the user's saved one, entered by hand: the engine knows it only by its address.
+    CastOptions(context)
+      .television(SavedTv("Fixture TV", tv.url("/description.xml").toString(), DeviceType.DEVICE_TYPE_DLNA, manual = true))
+    try {
+      ActivityScenario.launch(MainActivity::class.java).use {
+        val hold = EngineHost.hold()
+        try {
+          until(30_000, "The engine did not start for the cast") { running() }
+          val api = DataRepository(EngineHost.endpoint.value!!)
+          val id = api.cast(castRequest(tv, media.url("/clip.mp4").toString()))
+          var token: android.media.session.MediaSession.Token? = null
+          until(45_000, "The notification never became the cast's media session") {
+            token = mediaToken()
+            token != null
+          }
+          val controller = android.media.session.MediaController(context, token!!)
+          until(15_000, "The media session never named the TV") {
+            controller.metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST).orEmpty().contains("Fixture TV")
+          }
+          until(15_000, "The media session never offered pause") {
+            (controller.playbackState?.actions ?: 0L) and android.media.session.PlaybackState.ACTION_PAUSE != 0L
+          }
+
+          controller.transportControls.pause()
+          until(15_000, "The pause pressed in the media session never reached the TV") { "Pause" in heard }
+          until(15_000, "The media session never showed the cast paused") {
+            controller.playbackState?.state == android.media.session.PlaybackState.STATE_PAUSED
+          }
+
+          controller.transportControls.stop()
+          until(15_000, "The stop pressed in the media session did not end the cast") { id !in listedCastIds() }
+          until(15_000, "The notification still controls an ended cast") { mediaToken() == null }
+        } finally {
+          hold.close()
+        }
+      }
+    } finally {
+      tv.shutdown()
+      media.shutdown()
+      sample.delete()
+    }
+  }
+
+  // The media session of the engine's notification, while it controls a cast.
+  @Suppress("DEPRECATION")
+  private fun mediaToken(): android.media.session.MediaSession.Token? =
+    context
+      .getSystemService(NotificationManager::class.java)
+      .activeNotifications
+      .firstOrNull { it.id == 1 }
+      ?.notification
+      ?.extras
+      ?.getParcelable<android.media.session.MediaSession.Token>(android.app.Notification.EXTRA_MEDIA_SESSION)
+
   // An engine that dies is reported, and it is not restarted by the request still held; only a new request starts one.
   @Test
   fun anEngineThatDiesIsReportedAndOnlyANewRequestStartsAnother() = runBlocking<Unit> {
@@ -654,8 +715,9 @@ class EngineOnDemandTest {
       start()
     }
 
-  // A DLNA receiver with its own identity. It plays for as long as it is asked to, and reads the media it is given.
-  private fun receiver(name: String, udn: String): MockWebServer {
+  // A DLNA receiver with its own identity. It plays for as long as it is asked to, and reads the media it is given;
+  // heard, where given, records each AVTransport action it is asked.
+  private fun receiver(name: String, udn: String, heard: MutableList<String>? = null): MockWebServer {
     val server = MockWebServer()
     var uri = ""
     val playing = AtomicLong()
@@ -666,6 +728,7 @@ class EngineOnDemandTest {
           val soap = request.getHeader("SOAPAction").orEmpty().trim('"')
           val action = soap.substringAfter('#')
           val type = soap.substringBefore('#')
+          heard?.add(action)
           val body =
             when (action) {
               "GetProtocolInfo" ->

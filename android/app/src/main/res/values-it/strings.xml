@@ -228,4 +228,7 @@
     <string name="debug_log_file">File di log: %1$s</string>
     <string name="debug_log_privacy">Il log contiene il modello del telefono, la versione di Android e gli indirizzi delle pagine, dei video e delle TV che usi. Condividilo solo con persone di cui ti fidi.</string>
     <string name="debug_share">Condividi log</string>
+    <string name="notification_channel">Trasmissione</string>
+    <string name="notification_engine_running">Motore di trasmissione attivo su questo telefono</string>
+    <string name="notification_casting_to">In trasmissione su %1$s</string>
 </resources>
