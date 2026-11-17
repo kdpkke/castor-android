@@ -52,6 +52,9 @@ func (c *Config) backend() func(*mediav1.PlaybackSettings) cast.Caster {
 		Encoders:   retirement.Encoders(ffmpeg.Encoders(ffmpegBinary, c.Servers.Media.FFmpeg.HardwareEncoders)),
 		Probes:     probe.FFprobe(ffprobeBinary),
 		InputArgs:  formats.InputArgs,
+		Retire:     retirement.Retire,
+		// Android extension: a DLNA stream goes on in software when its hardware encoder fails.
+		CarryOn: true,
 	}
 	resolverConfig, whisperConfig := c.Servers.Media.Resolver.Config, c.Servers.Media.Whisper
 	return func(asked *mediav1.PlaybackSettings) cast.Caster {

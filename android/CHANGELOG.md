@@ -13,7 +13,7 @@ English one.
   - Ending a cast on a DLNA TV stops only Castor's video, not something the TV moved on to, and a Roku stays on the channel you switched to.
   - A newer Chromecast cast keeps playing when an earlier one is cancelled while it loads.
   - Sound at a higher sample rate than TVs play is converted instead of sent as it is.
-  - If the phone's hardware video encoder fails during a cast, Castor restarts the cast in software from where you were, or from the live edge of a live stream; this now also covers live streams the phone converts while reading them. On DLNA TVs the TV now reloads the video instead of continuing in the same stream. A hardware encoder that crashed or hung is still kept out of later casts until Castor's engine restarts; one that only refused a picture, such as a very small one, is tried again on the next cast.
+  - If the phone's hardware video encoder fails during a cast, Castor restarts the cast in software from where you were, or from the live edge of a live stream; this now also covers live streams the phone converts while reading them. On DLNA TVs fed MPEG-TS it still continues in the same stream, without the TV reloading. A hardware encoder that crashed or hung is still kept out of later casts until Castor's engine restarts; one that only refused a picture, such as a very small one, is tried again on the next cast.
 
 ### Italiano
 
@@ -25,7 +25,7 @@ English one.
   - Chiudere un cast su una TV DLNA ferma solo il video di Castor, non quello a cui la TV è passata, e un Roku resta sul canale su cui sei passato.
   - Un cast Chromecast più recente continua quando uno precedente viene annullato mentre carica.
   - L'audio con una frequenza di campionamento più alta di quella che le TV riproducono viene convertito invece di essere inviato così com'è.
-  - Se l'encoder video hardware del telefono si guasta durante un cast, Castor riavvia il cast in software da dove eri, o dal punto attuale di una diretta; ora vale anche per le dirette che il telefono converte mentre le legge. Sulle TV DLNA la TV ora ricarica il video invece di proseguire nello stesso flusso. Un encoder hardware andato in crash o bloccato resta escluso dai cast successivi finché il motore di Castor non si riavvia; uno che ha solo rifiutato un'immagine, per esempio molto piccola, viene riprovato al cast successivo.
+  - Se l'encoder video hardware del telefono si guasta durante un cast, Castor riavvia il cast in software da dove eri, o dal punto attuale di una diretta; ora vale anche per le dirette che il telefono converte mentre le legge. Sulle TV DLNA che ricevono MPEG-TS continua ancora nello stesso flusso, senza ricaricare la TV. Un encoder hardware andato in crash o bloccato resta escluso dai cast successivi finché il motore di Castor non si riavvia; uno che ha solo rifiutato un'immagine, per esempio molto piccola, viene riprovato al cast successivo.
 
 ## 2.0.0 — 2026-11-17
 

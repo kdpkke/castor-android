@@ -40,10 +40,17 @@ type retiring struct {
 func (t retiring) Run(ctx context.Context, a recovery.Attempt) recovery.Outcome {
 	o := t.run.Run(ctx, a)
 	e := o.Evidence
-	if e.Hardware && e.EncodeErr != nil && (e.Verdict == health.Wedged || crashed(e.EncodeErr)) && !t.r.retired.Swap(true) {
-		slog.WarnContext(ctx, "hardware video encoding retired until the engine restarts", "error", e.EncodeErr)
+	if e.Hardware && e.EncodeErr != nil && (e.Verdict == health.Wedged || crashed(e.EncodeErr)) {
+		t.r.Retire(ctx, e.EncodeErr)
 	}
 	return o
+}
+
+// Retire keeps hardware video out of later casts, as when a chain carried a hardware encoder that crashed or hung on.
+func (r *Retirement) Retire(ctx context.Context, why error) {
+	if !r.retired.Swap(true) {
+		slog.WarnContext(ctx, "hardware video encoding retired until the engine restarts", "error", why)
+	}
 }
 
 // crashed is an ffmpeg ended by a signal; castor's own kills never reach an encode's failure.

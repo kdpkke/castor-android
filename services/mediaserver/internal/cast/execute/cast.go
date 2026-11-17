@@ -35,6 +35,12 @@ type Machinery struct {
 
 	// InputArgs is how ffmpeg opens an input, as its source format says.
 	InputArgs encoding.InputArgs
+
+	// Retire keeps hardware video out of later casts, nil where nothing does (Android extension, retire.go).
+	Retire func(ctx context.Context, why error)
+	// CarryOn carries a chain on in software in the same stream when its hardware encoder fails, instead of making the
+	// cast again (Android extension, carryon.go).
+	CarryOn bool
 }
 
 // Cast is what one cast's attempts run with, on the machinery every cast shares.
