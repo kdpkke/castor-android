@@ -135,7 +135,8 @@ func (s *session) settle(p *playback) {
 	}
 }
 
-// Play returns once the receiver echoes the media back, so a refused one fails the hand-off; a dropped connection is gone.
+// Play returns once the receiver plays the media it echoed back, so one it refuses or never starts fails the
+// hand-off, which a Native cast falls back from; a dropped connection is gone.
 func (s *session) Play(ctx context.Context, playback device.Playback) error {
 	if err := s.play(ctx, playback); err != nil {
 		select {
@@ -179,7 +180,7 @@ func (s *session) play(ctx context.Context, playback device.Playback) error {
 }
 
 func (s *session) verdict(ctx context.Context, p *playback) error {
-	ctx, cancel := context.WithTimeoutCause(ctx, answerWithin, fmt.Errorf("the fcast receiver did not take the media within %s: %w", answerWithin, context.DeadlineExceeded))
+	ctx, cancel := context.WithTimeoutCause(ctx, startupTimeout, fmt.Errorf("the fcast receiver did not take the media and start playing it within %s: %w", startupTimeout, context.DeadlineExceeded))
 	defer cancel()
 	select {
 	case err := <-p.verdict:
@@ -220,14 +221,25 @@ func (s *session) Close() error {
 }
 
 // Capabilities is what every FCast receiver app is expected to play; v3 carries no subtitle tracks, so captions are burnt in.
+// Receiver apps differ (ExoPlayer on Android TV, a browser on the desktop and on webOS), so a Native cast leaves the
+// tracks to the receiver's verdict: Play waits for the receiver to play. Matroska and WebM are named only so an original
+// in them can be handed over; castor never serves them.
 func (s *session) Capabilities() *mediav1.Capabilities {
-	caps := &mediav1.Capabilities{Provenance: "FCast v3 receiver family envelopes; receiver app and device limits unverified", SelfFetch: true}
+	caps := &mediav1.Capabilities{
+		Provenance: "FCast v3 receiver family envelopes; receiver app and device limits unverified; Native uses the receiver's playback verdict",
+		SelfFetch:  true, NativePlaybackTrial: true,
+	}
+	containers := []mediav1.ProgressiveSupport_Container{
+		mediav1.ProgressiveSupport_CONTAINER_MP4, mediav1.ProgressiveSupport_CONTAINER_MKV, mediav1.ProgressiveSupport_CONTAINER_WEBM,
+	}
 	for _, audio := range []mediav1.AudioCodec{mediav1.AudioCodec_AUDIO_CODEC_AAC, mediav1.AudioCodec_AUDIO_CODEC_MP3} {
 		tracks := &mediav1.FormatSupport_Av{Av: &mediav1.AVSupport{Video: device.H264Support(), Audio: &mediav1.AudioSupport{Codec: audio, MaxChannels: 2}}}
-		caps.Formats = append(caps.Formats,
-			&mediav1.FormatSupport{Transport: &mediav1.FormatSupport_Hls{Hls: &mediav1.HLSSupport{}}, Tracks: tracks},
-			&mediav1.FormatSupport{Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: mediav1.ProgressiveSupport_CONTAINER_MP4}}, Tracks: tracks},
-		)
+		caps.Formats = append(caps.Formats, &mediav1.FormatSupport{Transport: &mediav1.FormatSupport_Hls{Hls: &mediav1.HLSSupport{}}, Tracks: tracks})
+		for _, container := range containers {
+			caps.Formats = append(caps.Formats, &mediav1.FormatSupport{
+				Transport: &mediav1.FormatSupport_Progressive{Progressive: &mediav1.ProgressiveSupport{Container: container}}, Tracks: tracks,
+			})
+		}
 	}
 	return caps
 }
