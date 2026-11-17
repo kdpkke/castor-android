@@ -84,6 +84,8 @@ type playback struct {
 	// head is the last position reported, placed while it stands.
 	head   device.Playhead
 	placed bool
+	// updates counts the receiver's reports of this media, so a seek tells a report made after it.
+	updates int
 
 	ending *ending
 }
@@ -129,6 +131,7 @@ func (p *playback) observe(op opcode, body []byte) bool {
 		case statePlaying, statePaused:
 			p.active, p.idle = true, false
 			p.head, p.placed = playhead(update)
+			p.updates++
 			p.answer(nil)
 		case stateIdle:
 			p.placed = false
@@ -177,10 +180,11 @@ func (s *session) AwaitEnd(ctx context.Context) error {
 	if p == nil {
 		return errors.New("nothing has been played on this fcast receiver")
 	}
+	ch := s.link()
 	select {
 	case <-p.ending.done:
 		return p.ending.err
-	case <-s.ch.gone:
+	case <-ch.gone:
 		// An end read before the connection dropped still decides it.
 		select {
 		case <-p.ending.done:
