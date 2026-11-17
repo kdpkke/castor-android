@@ -93,8 +93,9 @@ internal fun FCastScanner(
   encrypted: (FCastQr.Receiver) -> Unit,
   cancel: () -> Unit,
   access: CameraAccess = rememberCameraAccess(),
+  zoom: CameraZoom = remember { CameraZoom() },
   camera: @Composable (onText: (String) -> Unit) -> Unit = { onText ->
-    QrCamera(onText, Modifier.fillMaxSize())
+    QrCamera(onText, Modifier.fillMaxSize(), zoom = zoom)
   },
 ) {
   BackHandler { cancel() }
@@ -172,6 +173,11 @@ internal fun FCastScanner(
             modifier = Modifier.padding(16.dp).testTag("fcast-instruction"),
           )
         }
+        // Zoom for a code across the room, between the square and the X; pinching the picture zooms too.
+        ZoomSteps(
+          zoom,
+          Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 104.dp),
+        )
         when (val shown = result) {
           is FCastScanResult.Wrong ->
             FCastJudgement(stringResource(R.string.fcast_wrong_code), "fcast-wrong")
@@ -207,14 +213,14 @@ internal fun FCastScanner(
   }
 }
 
-// What the camera read, said aloud as it changes; it sits between the square and the X.
+// What the camera read, said aloud as it changes; it sits between the square and the zoom above the X.
 @Composable
 private fun BoxScope.FCastJudgement(text: String, tag: String) {
   Surface(
     modifier =
       Modifier.align(Alignment.BottomCenter)
         .safeDrawingPadding()
-        .padding(bottom = 112.dp, start = 24.dp, end = 24.dp),
+        .padding(bottom = 176.dp, start = 24.dp, end = 24.dp),
     color = MaterialTheme.colorScheme.errorContainer,
     shape = RoundedCornerShape(16.dp),
   ) {

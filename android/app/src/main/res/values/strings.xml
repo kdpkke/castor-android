@@ -175,6 +175,7 @@
     <string name="fcast_paired">Paired with its QR code</string>
     <string name="fcast_rescan">Scan another QR code</string>
     <string name="fcast_scan_title">Point the camera at the QR code shown by FCast Receiver on your TV</string>
+    <string name="camera_zoom">Zoom %1$s</string>
     <string name="fcast_wrong_code">This is not an FCast code. Point at the QR code shown by FCast Receiver.</string>
     <string name="fcast_other_device">This code belongs to %1$s, which is not this TV. Open FCast Receiver on the TV you chose.</string>
     <string name="fcast_encrypted">%1$s asks for an encrypted FCast connection (version 4), which Castor does not support yet.</string>
