@@ -49,5 +49,4 @@ func (s *segmentStore) landed() (int64, error) {
 	return int64(len(playlist)), nil
 }
 
-
 func (s *segmentStore) Close() error { return s.root.Close() }
