@@ -228,4 +228,6 @@
     <string name="debug_log_file">File di log: %1$s</string>
     <string name="debug_log_privacy">Il log contiene il modello del telefono, la versione di Android e gli indirizzi delle pagine, dei video e delle TV che usi. Condividilo solo con persone di cui ti fidi.</string>
     <string name="debug_share">Condividi log</string>
+    <string name="privacy_policy">Informativa sulla privacy</string>
+    <string name="privacy_policy_detail">Cosa fa Castor con i tuoi dati</string>
 </resources>
