@@ -650,7 +650,7 @@ class MainScreenViewModel : ViewModel() {
                 .toBuilder()
                 .setSource(source)
                 .apply {
-                  if (source.hasStream())
+                  if (source.hasStream() && servesDirectLink(device))
                     setPreferences(
                       request.preferences
                         .toBuilder()
@@ -1009,5 +1009,12 @@ class MainScreenViewModel : ViewModel() {
         )
         .build()
     }
+
+    // A TV handed a recognized download link might not read it, so Castor serves the video itself. A DLNA TV never
+    // fetches the link: asking Castor to serve it would only stop Castor forwarding the original file, which keeps
+    // Dolby Vision and lets the TV seek by bytes. An FCast receiver tries the link and the engine waits for it to play,
+    // so one it cannot play falls back to a video Castor serves.
+    internal fun servesDirectLink(device: Device): Boolean =
+      device.type != DeviceType.DEVICE_TYPE_DLNA && device.type != DeviceType.DEVICE_TYPE_FCAST
   }
 }

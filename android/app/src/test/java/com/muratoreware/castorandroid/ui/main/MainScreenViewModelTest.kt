@@ -10,6 +10,22 @@ class MainScreenViewModelTest {
   private val target = Target.newBuilder().setDeviceId("living-room").build()
 
   @Test
+  fun aDirectLinkIsLeftToTheEngineOnDlnaAndFCastAndServedElsewhere() {
+    fun tv(type: DeviceType) = Device.newBuilder().setId("tv").setType(type).build()
+    assertFalse(MainScreenViewModel.servesDirectLink(tv(DeviceType.DEVICE_TYPE_DLNA)))
+    assertFalse(MainScreenViewModel.servesDirectLink(tv(DeviceType.DEVICE_TYPE_FCAST)))
+    val fetching =
+      listOf(
+        DeviceType.DEVICE_TYPE_CHROMECAST,
+        DeviceType.DEVICE_TYPE_AIRPLAY,
+        DeviceType.DEVICE_TYPE_ROKU,
+      )
+    for (type in fetching) assertTrue(type.name, MainScreenViewModel.servesDirectLink(tv(type)))
+    // A TV whose kind the screen does not know yet is still served.
+    assertTrue(MainScreenViewModel.servesDirectLink(Device.newBuilder().setId("tv").build()))
+  }
+
+  @Test
   fun savedReceiverRequiresCurrentEvidenceAndRefreshesItsAddressByIdentity() {
     val device =
       Device.newBuilder()
