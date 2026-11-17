@@ -97,7 +97,7 @@ func (d *Declared) UnmarshalText(name []byte) error {
 
 // candidates is the declared encoders, then encoders plus VA-API on every other render node this host has.
 func candidates(declared []Encoder) []Encoder {
-	out := slices.Concat(declared, encoders)
+	out := slices.Concat(declared, forHost(declared, encoders))
 	nodes, _ := filepath.Glob("/dev/dri/renderD*")
 	for _, node := range nodes {
 		if node == vaapiRenderNode {
