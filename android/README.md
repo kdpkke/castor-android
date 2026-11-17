@@ -107,7 +107,7 @@ This waits for boot completion and checks fresh XML test results. Some Android G
 To verify discovery on a physical Android 16+ phone, connect a powered-on DLNA TV to its hotspot, install the debug app and test APK, then run:
 
 ```powershell
-adb -s <phone-serial> shell am instrument -w -e class io.github.stupside.castor.DeviceDiscoveryHotspotTest -e hotspot true com.muratoreware.castorandroid.debug.test/androidx.test.runner.AndroidJUnitRunner
+adb -s <phone-serial> shell am instrument -w -e class com.muratoreware.castorandroid.DeviceDiscoveryHotspotTest -e hotspot true com.muratoreware.castorandroid.debug.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 These opt-in tests require a real TV. They verify discovery and connection through the native engine using the receiver's identity even with a deliberately stale saved URL. An invalid local video source ends the connection test before playback; no external streaming site is used. Stop active casts before running them. Gradle excludes classes marked `@ManualDiagnostic` from its fixture suite, through one `notAnnotation` runner argument, so they do not appear as skipped tests in CI.
@@ -115,7 +115,7 @@ These opt-in tests require a real TV. They verify discovery and connection throu
 To inspect a specific public webpage in the embedded browser without casting to a TV, run this manual diagnostic instead:
 
 ```powershell
-adb -s <device-serial> shell am instrument -w -e class io.github.stupside.castor.ui.main.BrowserSiteDiagnosticTest -e publicPage "https://example.org/watch" com.muratoreware.castorandroid.debug.test/androidx.test.runner.AndroidJUnitRunner
+adb -s <device-serial> shell am instrument -w -e class com.muratoreware.castorandroid.ui.main.BrowserSiteDiagnosticTest -e publicPage "https://example.org/watch" com.muratoreware.castorandroid.debug.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 It records the page document, an available browser screenshot, and the number of captured candidates under the app's external files directory. Capturing a candidate is not proof of TV playback. Normal tests use a local page and real touchscreen input to verify rendering, late Play interactions, retry without reloading, HTTP failures, dismissal, and cancellation.

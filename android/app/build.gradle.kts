@@ -12,11 +12,11 @@ require(targetAbi == null || targetAbi in listOf("arm64-v8a", "x86_64")) {
 }
 
 android {
-    namespace = "io.github.stupside.castor"
+    namespace = "com.muratoreware.castorandroid"
     buildToolsVersion = "37.0.0"
     compileSdk { version = release(37) { minorApiLevel = 2 } }
     defaultConfig {
-        // The app's identity on Android and Google Play since 2.0.0. The code keeps upstream's namespace.
+        // The app's identity on Android and Google Play since 2.0.0; 1.x was io.github.stupside.castor.
         applicationId = "com.muratoreware.castorandroid"
         minSdk = 28
         ndk { abiFilters += targetAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "x86_64") }
@@ -28,7 +28,7 @@ android {
         // Manual diagnostics need real hardware or an explicitly supplied external URL.
         // Exclude them from Gradle/CI rather than reporting skipped tests as a successful run.
         // One annotation, not a comma-separated notClass list: Gradle excluded only its first class.
-        testInstrumentationRunnerArguments["notAnnotation"] = "io.github.stupside.castor.ManualDiagnostic"
+        testInstrumentationRunnerArguments["notAnnotation"] = "com.muratoreware.castorandroid.ManualDiagnostic"
     }
 
     buildTypes {

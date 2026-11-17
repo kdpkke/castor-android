@@ -1,0 +1,1090 @@
+package com.muratoreware.castorandroid.ui.main
+
+import android.content.ClipData
+import android.util.Log
+import androidx.annotation.DrawableRes
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import castor.v1.DeviceOuterClass.DeviceType
+import com.muratoreware.castorandroid.AppUpdates
+import com.muratoreware.castorandroid.BrowserResolver
+import com.muratoreware.castorandroid.DebugLog
+import com.muratoreware.castorandroid.R
+import com.muratoreware.castorandroid.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MainScreen(
+  viewModel: MainScreenViewModel,
+  browser: BrowserResolver?,
+  sharedUrl: String,
+  close: () -> Unit,
+  restart: () -> Unit = {},
+  language: AppLanguage = AppLanguage.English,
+  selectLanguage: (AppLanguage) -> Unit = {},
+  theme: AppTheme = AppTheme.Dark,
+  selectTheme: (AppTheme) -> Unit = {},
+  pickVideo: () -> Unit = {},
+) {
+  val state by viewModel.uiState.collectAsStateWithLifecycle()
+  val lifecycle = LocalLifecycleOwner.current
+  LaunchedEffect(lifecycle, state.castId, state.phase) {
+    val id = state.castId
+    if (id != null && state.phase == CastPhase.Casting) {
+      lifecycle.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+        while (isActive) {
+          viewModel.refreshPlayback(id)
+          delay(1000)
+        }
+      }
+    }
+  }
+  val selectedVideo by viewModel.selectedVideo.collectAsStateWithLifecycle()
+  val selectingVideo by viewModel.selectingVideo.collectAsStateWithLifecycle()
+  val context = LocalContext.current
+  val compact = LocalConfiguration.current.screenHeightDp < 480
+  val options = remember(context) { CastOptions(context) }
+  // What an engine said of each protocol while it ran for a cast is kept: the picker shows it with no engine.
+  var savedVerdicts by remember(options) { mutableStateOf(options.verdicts()) }
+  LaunchedEffect(state.verdicts) {
+    if (state.verdicts.isNotEmpty()) {
+      options.verdicts(state.verdicts)
+      savedVerdicts = options.verdicts()
+    }
+  }
+  val clipboard = LocalClipboard.current
+  val scope = rememberCoroutineScope()
+  val snackbar = remember { SnackbarHostState() }
+  val clipboardEmpty = stringResource(R.string.clipboard_empty)
+  val errorCopied = stringResource(R.string.error_copied)
+  val encryptedReceiver = stringResource(R.string.fcast_encrypted_blocked)
+  var url by rememberSaveable(sharedUrl) { mutableStateOf(sharedUrl) }
+  var mode by rememberSaveable(sharedUrl) { mutableStateOf(VideoSourceMode.Automatic) }
+  var tvName by rememberSaveable { mutableStateOf(options.television()?.name.orEmpty()) }
+  var tvAddress by rememberSaveable { mutableStateOf(options.television()?.address.orEmpty()) }
+  var tvType by rememberSaveable { mutableIntStateOf(options.television()?.type?.number ?: 1) }
+  var tvId by rememberSaveable { mutableStateOf(options.television()?.id.orEmpty()) }
+  var tvManual by rememberSaveable { mutableStateOf(options.television()?.manual == true) }
+  var tvPairedFor by rememberSaveable { mutableStateOf(options.television()?.pairedFor.orEmpty().joinToString("\n")) }
+  var tvOnce by rememberSaveable { mutableStateOf(false) }
+  var fcastPairings by remember { mutableStateOf(options.fcastPairings()) }
+  // Codes scanned for TVs that have no identity to remember them by: kept for this run of the app only, so a
+  // receiver seen to need encryption stays refused after the picker closes.
+  var fcastSession by
+    rememberSaveable(
+      stateSaver =
+        Saver<List<FCastPairing>, String>(
+          save = { encodePairings(it) },
+          restore = { decodePairings(it, anonymous = true) },
+        )
+    ) {
+      mutableStateOf(emptyList())
+    }
+  val knownPairings = fcastPairings + fcastSession
+  val tv =
+    if (tvAddress.isBlank()) null
+    else
+      SavedTv(
+        tvName,
+        tvAddress,
+        DeviceType.forNumber(tvType),
+        tvId,
+        tvManual,
+        tvPairedFor.split("\n").filter { it.isNotEmpty() }.toSet(),
+        tvOnce,
+      )
+  fun saveTv(selected: SavedTv) {
+    tvName = selected.name
+    tvAddress = selected.address
+    tvType = selected.type.number
+    tvId = selected.id
+    tvManual = selected.manual
+    tvPairedFor = selected.pairedFor.joinToString("\n")
+    tvOnce = selected.once
+    options.television(selected)
+  }
+  // A saved TV is only a hint until the current search finds it again. Manual addresses are used
+  // as entered; discovered ones must reappear, and come back with their current address.
+  val searched = state.discoveryComplete && !state.discovering
+  val found =
+    when {
+      tv == null || !searched -> null
+      // An FCast receiver paired by its code is found where its TV answers now, by the TV's identity.
+      tv.pairedFor.isNotEmpty() -> pairedReceiver(tv, state.devices, fcastPairings)
+      tv.manual -> null
+      else -> tv.available(state.devices)
+    }
+      // Found again under the TV's own name, never the protocol's: the choice keeps the name it was made with.
+      ?.let { it.copy(name = tvNameAt(it.address, state.devices) ?: tv?.name ?: it.name) }
+  // A receiver under the name its TV goes by, as discovery finds the TV, or as the chosen TV is named when it is
+  // the same one.
+  fun tvNameOf(receiver: SavedTv): String =
+    tvNameAt(receiver.address, state.devices)
+      ?: tv
+        ?.takeIf { saved ->
+          val host = receiverHost(saved.address)
+          host != null && receiverHost(receiver.address)?.let { sameHost(it, host) } == true
+        }
+        ?.name
+      ?: receiver.name
+  val tvMissing = tv != null && !tv.manual && searched && found == null
+  // Receivers saved before identities only have an address that may be stale: wait for a search. A choice anchored
+  // to its TV's identity waits too: its own id proves nothing until that TV is found.
+  val tvUnconfirmed =
+    tv != null && !tv.manual && (tv.id.isBlank() || tv.pairedFor.isNotEmpty()) && found == null
+  LaunchedEffect(state.ready, tv?.manual) {
+    if (state.ready && tv != null && !tv.manual && !state.discoveryComplete) viewModel.discover()
+  }
+  LaunchedEffect(found) { found?.takeIf { it != tv }?.let(::saveTv) }
+  var height by rememberSaveable { mutableStateOf(options.height()) }
+  var subtitles by rememberSaveable { mutableStateOf(options.subtitles()) }
+  var sheet by rememberSaveable { mutableStateOf<String?>(null) }
+  var menu by remember { mutableStateOf(false) }
+  var debugMode by remember { mutableStateOf(DebugLog.enabled(context)) }
+  var debugLog by remember { mutableStateOf<String?>(null) }
+  // What the user is told went wrong is in Android's log, and so in the debug log.
+  val shownError = state.error ?: state.playback.error
+  LaunchedEffect(shownError) { shownError?.let { Log.w("Castor", "Error shown: $it") } }
+  val release by AppUpdates.release.collectAsStateWithLifecycle()
+  val readNotices by AppUpdates.read.collectAsStateWithLifecycle()
+  val updateStatus by AppUpdates.status.collectAsStateWithLifecycle()
+  val notices = listOfNotNull(release?.let { Notice.Update(it) })
+  var updatePage by rememberSaveable { mutableStateOf(false) }
+  val busy = state.castId != null || state.submitting
+  val tvOccupied = tv?.let(state::occupying)
+  val validUrl =
+    selectedVideo != null || (BrowserResolver.isHttp(url.trim()) && url.trim().length <= 8192)
+  val extracting = browser?.active?.collectAsStateWithLifecycle()?.value == true
+  val browserPage = browser?.page?.collectAsStateWithLifecycle()?.value
+  val subtitleLabel =
+    when (subtitles) {
+      "off" -> stringResource(R.string.subtitles_off)
+      "auto" -> stringResource(R.string.subtitles_auto)
+      else -> subtitles.uppercase(java.util.Locale.ROOT)
+    }
+
+  Scaffold(
+    containerColor = Color.Transparent,
+    snackbarHost = { SnackbarHost(snackbar) },
+    topBar = {
+      Column {
+        TopAppBar(
+          title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Image(painterResource(R.drawable.ic_launcher_foreground), null, Modifier.size(40.dp))
+              Spacer(Modifier.width(6.dp))
+              Text("Castor", style = MaterialTheme.typography.titleLarge)
+            }
+          },
+          actions = {
+            Text(
+              stringResource(
+                if (state.ready) R.string.engine_ready
+                else if (state.phase == CastPhase.Preparing) R.string.engine_preparing
+                else R.string.engine_unavailable
+              ),
+              modifier =
+                Modifier.widthIn(max = 170.dp)
+                  .glassMaterial(RoundedCornerShape(50))
+                  .padding(horizontal = 12.dp, vertical = 8.dp),
+              style = MaterialTheme.typography.labelMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            NoticeBell(
+              unread = notices.count { it.id !in readNotices },
+              onClick = { sheet = "notices" },
+              modifier = Modifier.padding(start = 8.dp),
+            )
+            Box {
+              IconButton(
+                onClick = { menu = true },
+                modifier =
+                  Modifier.padding(start = 8.dp, end = 12.dp).glassMaterial(RoundedCornerShape(50)),
+              ) {
+                CastIcon(R.drawable.ic_more, stringResource(R.string.more_options))
+              }
+            }
+          },
+          colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+        )
+        // Fixed under the header, outside the scrolling content, until battery optimization is off.
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+          BatteryOptimizationBanner(
+            Modifier.widthIn(max = 680.dp).fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 4.dp)
+          )
+        }
+      }
+    },
+    bottomBar = {
+      Surface(color = Color.Transparent) {
+        Box(
+          Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
+          contentAlignment = Alignment.Center,
+        ) {
+          Column(
+            Modifier.widthIn(max = 680.dp)
+              .fillMaxWidth()
+              .padding(horizontal = 24.dp, vertical = if (compact) 8.dp else 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+          ) {
+            if (!busy) {
+              Text(
+                stringResource(
+                  when {
+                    !state.ready -> R.string.engine_help
+                    !validUrl -> R.string.need_url
+                    tv == null -> R.string.need_tv
+                    tvOccupied != null -> R.string.tv_busy_help
+                    else -> R.string.local_only
+                  }
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp),
+              )
+            }
+            // With several casts, the buttons say which TV they act on.
+            val controlled =
+              state.activeCast?.device?.takeIf { state.castId != null && state.sessions.size > 1 }
+            if (controlled != null) {
+              Text(
+                stringResource(
+                  R.string.controls_for,
+                  tvNameOf(SavedTv(controlled)).ifBlank { controlled.address },
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(bottom = 8.dp).testTag("controls-for"),
+              )
+            }
+            if (state.castId != null) {
+              FlowRow(
+                Modifier.fillMaxWidth(),
+                maxItemsInEachRow =
+                  if (
+                    LocalDensity.current.fontScale > 1.25f ||
+                      LocalConfiguration.current.screenWidthDp < 360
+                  )
+                    1
+                  else 2,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+              ) {
+                GlassButton(
+                  onClick = viewModel::restartCasting,
+                  enabled = !state.stopping && !state.restarting,
+                  modifier = Modifier.weight(1f).heightIn(min = 64.dp).testTag("restart-casting"),
+                ) {
+                  CastIcon(R.drawable.ic_refresh)
+                  Spacer(Modifier.width(8.dp))
+                  Text(
+                    stringResource(
+                      if (state.restarting) R.string.restarting_casting
+                      else R.string.restart_casting
+                    )
+                  )
+                }
+                GlassButton(
+                  prominent = true,
+                  onClick = { viewModel.stop() },
+                  enabled = !state.stopping,
+                  modifier = Modifier.weight(1f).heightIn(min = 64.dp).testTag("cast-action"),
+                ) {
+                  CastIcon(R.drawable.ic_stop)
+                  Spacer(Modifier.width(10.dp))
+                  Text(
+                    stringResource(if (state.stopping) R.string.stopping else R.string.stop_casting)
+                  )
+                }
+              }
+            } else if (!state.ready && state.error != null) {
+              GlassButton(
+                prominent = true,
+                onClick = restart,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+              ) {
+                Text(stringResource(R.string.restart_castor))
+              }
+            } else {
+              GlassButton(
+                prominent = true,
+                onClick = {
+                  tv?.let {
+                    // A receiver scanned as needing encryption is never cast to in the clear.
+                    if (fcastBlocked(it, discoveredTvs(state.devices, null), knownPairings))
+                      viewModel.fail(IllegalStateException(encryptedReceiver))
+                    else {
+                      if (selectedVideo != null || !mode.isPage(url.trim())) browser?.dismissPage()
+                      viewModel.cast(
+                        url.trim(),
+                        mode.isPage(url.trim()),
+                        it.target(),
+                        height,
+                        subtitles,
+                        receiverName = it.name,
+                        subtitleLanguage = options.language().tag,
+                        localVideo = selectedVideo,
+                        automatic = mode == VideoSourceMode.Automatic,
+                      )
+                    }
+                  }
+                },
+                enabled =
+                  state.ready &&
+                    !state.recovering &&
+                    !state.submitting &&
+                    !selectingVideo &&
+                    validUrl &&
+                    tv != null &&
+                    tvOccupied == null &&
+                    !tvMissing &&
+                    !tvUnconfirmed,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("cast-action"),
+              ) {
+                if (state.submitting)
+                  CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                else CastIcon(R.drawable.ic_cast)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                  stringResource(
+                    when {
+                      state.submitting -> R.string.connecting
+                      // Beside casts already running: this one is added, the others go on.
+                      state.sessions.isNotEmpty() -> R.string.cast_video_too
+                      else -> R.string.cast_video
+                    }
+                  )
+                )
+              }
+            }
+          }
+        }
+      }
+    },
+  ) { padding ->
+    Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
+      Column(
+        Modifier.widthIn(max = 680.dp)
+          .fillMaxWidth()
+          .verticalScroll(rememberScrollState())
+          .padding(horizontal = 24.dp)
+          .padding(top = 12.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+      ) {
+        if (state.sessions.isNotEmpty()) {
+          CastSessions(
+            state,
+            viewModel::videoName,
+            viewModel::selectCast,
+            viewModel::newCast,
+            receiverName = { device -> tvNameOf(SavedTv(device)) },
+          )
+        }
+        if (busy) {
+          val active = state.activeCast
+          val source = active?.source
+          val activeUrl =
+            when {
+              source?.hasStream() == true -> source.stream.url
+              source?.hasPages() == true -> source.pages.urlsList.firstOrNull().orEmpty()
+              else -> ""
+            }
+          val receiver =
+            active
+              ?.device
+              ?.takeIf { it.address.isNotBlank() && it.type in receiverTypes }
+              ?.let { SavedTv(it) }
+              ?.let { it.copy(name = tvNameOf(it)) }
+          // The page this cast came from, to check by hand whether it still plays.
+          val pageUrl =
+            activeUrl.takeIf { browser != null && source?.hasPages() == true && !extracting }
+          key(state.castId) {
+            ActiveCast(
+              state.phase,
+              state.sessions.size <= 1,
+              activeUrl,
+              receiver,
+              viewModel.videoName(activeUrl),
+              state.playback,
+              active?.status?.casting?.optimizedLive == true,
+              !state.stopping && !state.restarting,
+              viewModel::togglePlaybackPause,
+              viewModel::seekBy,
+              viewModel::seekTo,
+              pageShown = pageUrl?.let { browserPage != null },
+              togglePage = {
+                if (browserPage != null) browser?.dismissPage()
+                else pageUrl?.let { scope.launch { browser?.showPage(it) } }
+              },
+            )
+            if ((active?.status?.casting?.automaticRestarts ?: 0) > 0) {
+              Text(
+                stringResource(R.string.live_restarted_automatically),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+          }
+        } else {
+          if (!compact && state.sessions.isEmpty())
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+              Text(
+                stringResource(R.string.app_tagline),
+                style = MaterialTheme.typography.headlineLarge,
+                modifier = Modifier.semantics { heading() },
+              )
+              Text(
+                stringResource(R.string.app_intro),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+          Column(verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)) {
+            Row(
+              Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+              Text(
+                stringResource(R.string.video_heading),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+              )
+              if (selectedVideo == null) SourceModePicker(mode) { mode = it }
+            }
+            val inputDescription = stringResource(R.string.video_url)
+            if (selectedVideo != null) {
+              GlassPanel(Modifier.fillMaxWidth().testTag("selected-video")) {
+                Row(
+                  Modifier.padding(start = 20.dp, top = 16.dp, bottom = 16.dp, end = 8.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                  CastIcon(R.drawable.ic_video)
+                  Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(selectedVideo!!.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                      stringResource(R.string.on_this_device),
+                      style = MaterialTheme.typography.bodySmall,
+                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                  }
+                  IconButton(
+                    onClick = {
+                      viewModel.clearVideo()
+                      url = ""
+                    }
+                  ) {
+                    CastIcon(R.drawable.ic_close, stringResource(R.string.remove_video))
+                  }
+                }
+              }
+            } else
+              GlassPanel(Modifier.fillMaxWidth()) {
+                TextField(
+                  url,
+                  {
+                    viewModel.clearVideo()
+                    url = it
+                  },
+                  placeholder = { Text(stringResource(R.string.video_hint)) },
+                  modifier =
+                    Modifier.fillMaxWidth()
+                      .heightIn(min = if (compact) 64.dp else 88.dp)
+                      .testTag("video-url")
+                      .semantics { contentDescription = inputDescription },
+                  shape = MaterialTheme.shapes.large,
+                  colors =
+                    TextFieldDefaults.colors(
+                      focusedContainerColor = Color.Transparent,
+                      unfocusedContainerColor = Color.Transparent,
+                      errorContainerColor = Color.Transparent,
+                      focusedIndicatorColor = Color.Transparent,
+                      unfocusedIndicatorColor = Color.Transparent,
+                      errorIndicatorColor = Color.Transparent,
+                    ),
+                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                  maxLines = 3,
+                  isError = url.isNotBlank() && !validUrl,
+                  supportingText =
+                    if (url.isNotBlank() && !validUrl) {
+                      { Text(stringResource(R.string.video_invalid)) }
+                    } else null,
+                  trailingIcon = {
+                    if (url.isNotEmpty())
+                      IconButton(
+                        onClick = {
+                          viewModel.clearVideo()
+                          url = ""
+                        }
+                      ) {
+                        CastIcon(R.drawable.ic_close, stringResource(R.string.clear_link))
+                      }
+                  },
+                )
+              }
+            FlowRow(
+              Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(16.dp),
+              verticalArrangement = Arrangement.spacedBy(8.dp),
+              itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+              GlassButton(
+                onClick = {
+                  val clip =
+                    context
+                      .getSystemService(android.content.ClipboardManager::class.java)
+                      .primaryClip
+                  val text =
+                    if (clip != null && clip.itemCount > 0)
+                      clip.getItemAt(0).coerceToText(context)?.toString()
+                    else null
+                  if (text.isNullOrBlank()) scope.launch { snackbar.showSnackbar(clipboardEmpty) }
+                  else {
+                    viewModel.clearVideo()
+                    url = text.trim()
+                    mode = VideoSourceMode.Automatic
+                  }
+                }
+              ) {
+                CastIcon(R.drawable.ic_paste)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.paste_link))
+              }
+              GlassButton(onClick = pickVideo, enabled = !selectingVideo) {
+                if (selectingVideo)
+                  CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                else CastIcon(R.drawable.ic_video)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.choose_video))
+              }
+              if (validUrl && selectedVideo == null)
+                Text(
+                  stringResource(
+                    if (mode == VideoSourceMode.Automatic && mode.isPage(url.trim()))
+                      R.string.detect_on_cast
+                    else if (mode.isPage(url.trim())) R.string.recognized_page
+                    else R.string.recognized_direct
+                  ),
+                  style = MaterialTheme.typography.bodyMedium,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+          }
+          Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ActionRow(
+              R.drawable.ic_tv,
+              tv?.name ?: stringResource(R.string.choose_tv),
+              when {
+                tv == null -> stringResource(R.string.tv_help)
+                tvMissing -> stringResource(R.string.tv_not_found)
+                !tv.manual && found == null && state.ready -> stringResource(R.string.tv_checking)
+                else -> receiverDetail(tv)
+              },
+              if (tv == null) R.string.choose_tv else R.string.change_tv,
+            ) {
+              sheet = "tv"
+              if (state.ready) viewModel.discover()
+            }
+            ActionRow(
+              R.drawable.ic_tune,
+              stringResource(R.string.playback_settings),
+              stringResource(
+                R.string.preferences_summary,
+                if (height == NATIVE_QUALITY) stringResource(R.string.quality_native)
+                else stringResource(R.string.quality_optimized),
+                subtitleLabel,
+              ),
+              R.string.playback_settings,
+            ) {
+              sheet = "settings"
+            }
+          }
+          if (state.phase == CastPhase.Completed || state.phase == CastPhase.Stopped)
+            Text(
+              stringResource(
+                if (state.phase == CastPhase.Stopped) R.string.cast_stopped
+                else R.string.cast_completed
+              ),
+              style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        (state.error ?: state.playback.error)?.let { error ->
+          val controlError = state.error == null
+          ErrorPanel(
+            error,
+            state.nativeIncompatible,
+            {
+              height = OPTIMIZED_QUALITY
+              options.playback(height, subtitles)
+              viewModel.dismissError()
+              sheet = "settings"
+            },
+            { if (controlError) viewModel.dismissPlaybackError() else viewModel.dismissError() },
+            controlError = controlError,
+          ) {
+            scope.launch {
+              clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Castor error", error)))
+              snackbar.showSnackbar(errorCopied)
+            }
+          }
+        }
+        if (browserPage != null && browser != null) {
+          PageBrowser(browser, browserPage, extracting, compact, busy)
+        }
+      }
+    }
+  }
+  if (menu)
+    GlassSheet({ menu = false }) {
+      Column(
+        Modifier.fillMaxWidth()
+          .verticalScroll(rememberScrollState())
+          .padding(horizontal = 24.dp)
+          .padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+      ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Text(
+            "Castor",
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.weight(1f),
+          )
+          IconButton(
+            onClick = { menu = false },
+            modifier = Modifier.glassMaterial(RoundedCornerShape(50)),
+          ) {
+            CastIcon(R.drawable.ic_close, stringResource(R.string.close))
+          }
+        }
+        ActionRow(
+          R.drawable.ic_language,
+          stringResource(R.string.app_language),
+          language.nativeName,
+          R.string.app_language,
+        ) {
+          menu = false
+          sheet = "language"
+        }
+        ActionRow(
+          R.drawable.ic_theme,
+          stringResource(R.string.appearance),
+          stringResource(themeLabel(theme)),
+          R.string.appearance,
+        ) {
+          menu = false
+          sheet = "theme"
+        }
+        ActionRow(
+          R.drawable.ic_bug,
+          stringResource(R.string.debug_mode),
+          stringResource(if (debugMode) R.string.debug_on else R.string.debug_off),
+          R.string.debug_mode,
+        ) {
+          menu = false
+          sheet = "debug"
+        }
+        GlassButton(
+          onClick = {
+            menu = false
+            restart()
+          },
+          enabled = !state.ready,
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          CastIcon(R.drawable.ic_refresh)
+          Spacer(Modifier.width(10.dp))
+          Text(stringResource(R.string.restart_castor))
+        }
+        GlassButton(
+          onClick = {
+            menu = false
+            close()
+          },
+          modifier = Modifier.fillMaxWidth(),
+        ) {
+          CastIcon(R.drawable.ic_stop)
+          Spacer(Modifier.width(10.dp))
+          Text(stringResource(R.string.stop_castor))
+        }
+      }
+    }
+  if (sheet == "notices")
+    NoticesSheet(
+      notices,
+      readNotices,
+      open = { notice ->
+        AppUpdates.markRead(context.applicationContext, notice.id)
+        sheet = null
+        when (notice) {
+          is Notice.Update -> updatePage = true
+        }
+      },
+      dismiss = { sheet = null },
+    )
+  val offered = release
+  if (updatePage && offered != null)
+    UpdatePage(
+      offered,
+      updateStatus,
+      remember { AppUpdates.installedVersion(context) },
+      language.tag,
+      dismiss = { updatePage = false },
+    )
+  if (sheet == "language") AppLanguagePicker(language, { sheet = null }, selectLanguage)
+  if (sheet == "theme") AppThemePicker(theme, { sheet = null }, selectTheme)
+  if (sheet == "debug") {
+    val app = context.applicationContext
+    LaunchedEffect(Unit) { debugLog = withContext(Dispatchers.IO) { DebugLog.location(app) } }
+    DebugModeSheet(
+      debugMode,
+      debugLog,
+      { sheet = null },
+      select = { on ->
+        if (on != debugMode) {
+          debugMode = on
+          scope.launch {
+            debugLog =
+              withContext(Dispatchers.IO) {
+                DebugLog.enable(app, on)
+                DebugLog.location(app)
+              }
+          }
+        }
+      },
+      share = {
+        scope.launch {
+          withContext(Dispatchers.IO) { DebugLog.share(app) }?.let(context::startActivity)
+        }
+      },
+    )
+  }
+  if (sheet == "tv")
+    TvPicker(
+      state.copy(verdicts = savedVerdicts + state.verdicts),
+      tv,
+      { sheet = null },
+      { host ->
+        host?.let(options::searchedHost)
+        viewModel.discover(restart = host != null)
+      },
+      viewModel::describe,
+      select = { selected ->
+        saveTv(selected)
+        sheet = null
+      },
+      pairings = knownPairings,
+      pair = { made ->
+        if (made.identities.isEmpty()) fcastSession = withPairing(fcastSession, made)
+        else {
+          options.pairFCast(made)
+          fcastPairings = options.fcastPairings()
+          // The new scan settles what this run of the app read at that address before.
+          fcastSession = fcastSession.filterNot { known -> sameHost(known.host, made.host) }
+        }
+      },
+    )
+  state.pairing?.let {
+    PairingDialog(it, viewModel::startPairing, viewModel::finishPairing, viewModel::cancelPairing)
+  }
+  if (sheet == "settings")
+    PlaybackSettings(height, subtitles, { sheet = null }) { newHeight, newSubtitles ->
+      height = newHeight
+      subtitles = newSubtitles
+      options.playback(height, subtitles)
+      sheet = null
+    }
+}
+
+@Composable
+internal fun CastIcon(@DrawableRes resource: Int, description: String? = null) {
+  Icon(painterResource(resource), description, Modifier.size(24.dp))
+}
+
+internal fun protocolName(type: DeviceType): String =
+  when (type) {
+    DeviceType.DEVICE_TYPE_CHROMECAST -> "Chromecast"
+    DeviceType.DEVICE_TYPE_ROKU -> "Roku"
+    DeviceType.DEVICE_TYPE_AIRPLAY -> "AirPlay"
+    DeviceType.DEVICE_TYPE_FCAST -> "FCast"
+    else -> "DLNA"
+  }
+
+// Under a TV's name: the protocol it is reached by and where, with the port that protocol uses.
+internal fun receiverDetail(tv: SavedTv): String = "${protocolName(tv.type)} · ${receiverEndpoint(tv)}"
+
+@Composable
+internal fun ActionRow(
+  @DrawableRes icon: Int,
+  title: String,
+  detail: String,
+  action: Int,
+  click: () -> Unit,
+) {
+  GlassPanel(onClick = click, modifier = Modifier.fillMaxWidth()) {
+    Row(
+      Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+      CastIcon(icon)
+      Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Text(
+          detail,
+          style = MaterialTheme.typography.bodyMedium,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          maxLines = 2,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
+      CastIcon(R.drawable.ic_next, stringResource(action))
+    }
+  }
+}
+
+@Composable
+private fun SourceModePicker(mode: VideoSourceMode, select: (VideoSourceMode) -> Unit) {
+  var expanded by remember { mutableStateOf(false) }
+  fun label(value: VideoSourceMode) =
+    when (value) {
+      VideoSourceMode.Automatic -> R.string.mode_auto
+      VideoSourceMode.WebPage -> R.string.mode_page
+      VideoSourceMode.DirectStream -> R.string.mode_direct
+    }
+  Box {
+    TextButton(onClick = { expanded = true }) {
+      Text(stringResource(label(mode)))
+      Spacer(Modifier.width(4.dp))
+      CastIcon(R.drawable.ic_chevron_down, stringResource(R.string.mode_description))
+    }
+    if (expanded)
+      GlassSheet({ expanded = false }) {
+        Column(
+          Modifier.fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp)
+            .padding(bottom = 24.dp),
+          verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+              stringResource(R.string.mode_description),
+              style = MaterialTheme.typography.headlineMedium,
+              modifier = Modifier.weight(1f),
+            )
+            IconButton(
+              onClick = { expanded = false },
+              modifier = Modifier.glassMaterial(RoundedCornerShape(50)),
+            ) {
+              CastIcon(R.drawable.ic_close, stringResource(R.string.close))
+            }
+          }
+          Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            VideoSourceMode.entries.forEach { value ->
+              Row(
+                Modifier.fillMaxWidth()
+                  .glassMaterial(MaterialTheme.shapes.medium, value == mode)
+                  .selectable(
+                    value == mode,
+                    role = Role.RadioButton,
+                    onClick = {
+                      select(value)
+                      expanded = false
+                    },
+                  )
+                  .heightIn(min = 60.dp)
+                  .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+              ) {
+                Text(
+                  stringResource(label(value)),
+                  modifier = Modifier.weight(1f),
+                  style = MaterialTheme.typography.titleMedium,
+                  color =
+                    if (value == mode) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.onSurface,
+                )
+                if (value == mode)
+                  CompositionLocalProvider(
+                    LocalContentColor provides MaterialTheme.colorScheme.onPrimary
+                  ) {
+                    CastIcon(R.drawable.ic_check)
+                  }
+              }
+            }
+          }
+        }
+      }
+  }
+}
+
+@Composable
+private fun ErrorPanel(
+  error: String,
+  nativeIncompatible: Boolean,
+  optimize: () -> Unit,
+  dismiss: () -> Unit,
+  controlError: Boolean = false,
+  copy: () -> Unit,
+) {
+  var details by rememberSaveable(error) { mutableStateOf(false) }
+  GlassPanel(Modifier.testTag("cast-error")) {
+    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      Text(
+        stringResource(if (controlError) R.string.playback_error else R.string.cast_error),
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.error,
+      )
+      Text(
+        stringResource(
+          if (controlError) R.string.playback_error_help
+          else if (nativeIncompatible) R.string.native_incompatible_help else R.string.error_help
+        ),
+        style = MaterialTheme.typography.bodyMedium,
+      )
+      if (nativeIncompatible) {
+        GlassButton(onClick = optimize) { Text(stringResource(R.string.use_optimized)) }
+      }
+      FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(onClick = copy) {
+          Text(stringResource(R.string.copy_error), color = MaterialTheme.colorScheme.error)
+        }
+        TextButton(onClick = { details = !details }) {
+          Text(
+            stringResource(if (details) R.string.hide_details else R.string.show_details),
+            color = MaterialTheme.colorScheme.error,
+          )
+        }
+        TextButton(onClick = dismiss) {
+          Text(stringResource(R.string.dismiss), color = MaterialTheme.colorScheme.error)
+        }
+      }
+      if (details) SelectionContainer { Text(error, style = MaterialTheme.typography.bodySmall) }
+    }
+  }
+}
+
+@Composable
+private fun ActiveCast(
+  phase: CastPhase,
+  showIntroduction: Boolean,
+  url: String,
+  tv: SavedTv?,
+  sourceName: String?,
+  playback: PlaybackUiState,
+  optimizedLive: Boolean,
+  controlsEnabled: Boolean,
+  togglePause: () -> Unit,
+  seekBy: (Long) -> Unit,
+  seekTo: (Long) -> Unit,
+  pageShown: Boolean? = null,
+  togglePage: () -> Unit = {},
+) {
+  val (title, help) =
+    when (phase) {
+      CastPhase.Extracting -> R.string.phase_extracting to R.string.phase_extracting_help
+      CastPhase.Measuring -> R.string.phase_measuring to R.string.phase_measuring_help
+      CastPhase.Casting -> R.string.phase_casting to R.string.phase_casting_help
+      CastPhase.Restarting -> R.string.restarting_casting to R.string.phase_restarting_help
+      CastPhase.Failed -> R.string.phase_failed to R.string.phase_failed_help
+      else -> R.string.phase_connecting to R.string.phase_connecting_help
+    }
+  Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+    if (showIntroduction) {
+      Text(
+        stringResource(title),
+        style = MaterialTheme.typography.headlineLarge,
+        modifier =
+          Modifier.semantics {
+            heading()
+            liveRegion = LiveRegionMode.Polite
+          },
+      )
+      Text(stringResource(help), color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    GlassPanel {
+      Column(
+        Modifier.fillMaxWidth().padding(28.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+      ) {
+        CastIcon(R.drawable.ic_cast)
+        Text(
+          tv?.name ?: stringResource(R.string.current_tv),
+          style = MaterialTheme.typography.headlineMedium,
+        )
+        tv?.let { Text(receiverDetail(it), style = MaterialTheme.typography.bodyMedium) }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Text(
+          sourceName
+            ?: runCatching { java.net.URI(url).host }.getOrNull()
+            ?: stringResource(R.string.video_source),
+          style = MaterialTheme.typography.bodyLarge,
+        )
+        if (optimizedLive) {
+          Text(
+            stringResource(R.string.live_optimized_automatically),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+          )
+        }
+        pageShown?.let { shown ->
+          GlassButton(onClick = togglePage, modifier = Modifier.testTag("page-toggle")) {
+            CastIcon(R.drawable.ic_video)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(if (shown) R.string.hide_page else R.string.show_page))
+          }
+        }
+        if (phase == CastPhase.Casting) {
+          HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+          PlaybackControls(playback, controlsEnabled, togglePause, seekBy, seekTo)
+        }
+      }
+    }
+    if (phase != CastPhase.Casting && phase != CastPhase.Failed)
+      LinearProgressIndicator(Modifier.fillMaxWidth())
+  }
+}

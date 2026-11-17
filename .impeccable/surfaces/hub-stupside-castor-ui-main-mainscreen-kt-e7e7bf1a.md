@@ -1,8 +1,8 @@
 ---
 version: 1
 slug: "hub-stupside-castor-ui-main-mainscreen-kt-e7e7bf1a"
-primary_target: "android/app/src/main/java/io/github/stupside/castor/ui/main/MainScreen.kt"
-related_targets: ["android/app/src/main/java/io/github/stupside/castor/theme/Theme.kt","android/app/src/main/java/io/github/stupside/castor/MainActivity.kt","android/app/src/main/java/io/github/stupside/castor/ui/main/PlaybackControls.kt"]
+primary_target: "android/app/src/main/java/com/muratoreware/castorandroid/ui/main/MainScreen.kt"
+related_targets: ["android/app/src/main/java/com/muratoreware/castorandroid/theme/Theme.kt","android/app/src/main/java/com/muratoreware/castorandroid/MainActivity.kt","android/app/src/main/java/com/muratoreware/castorandroid/ui/main/PlaybackControls.kt"]
 ---
 
 # Android casting

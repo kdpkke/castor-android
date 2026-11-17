@@ -5,7 +5,7 @@
   "height": 2400,
   "versionCode": 12,
   "origin": "android-emulator-screenshot",
-  "producer": "android/app/src/androidTest/java/io/github/stupside/castor/ui/main/AppLanguageTest.kt",
+  "producer": "android/app/src/androidTest/java/com/muratoreware/castorandroid/ui/main/AppLanguageTest.kt",
   "syntheticState": true,
   "description": "Actual MainActivity with synthetic example.org draft, captured on Android17 /16KB; no physical TV.",
   "sourceCapture": "home-en.png"
