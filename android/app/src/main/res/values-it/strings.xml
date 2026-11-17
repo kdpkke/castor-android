@@ -220,4 +220,12 @@
     <string name="update_failed_title">Aggiornamento di Castor non riuscito</string>
     <string name="battery_title">Ottimizzazione batteria attiva</string>
     <string name="battery_body">Android può rallentare Castor in background: lo stream può bloccarsi o perdere qualità. Tocca per disattivarla per Castor.</string>
+    <string name="debug_mode">Modalità debug</string>
+    <string name="debug_mode_help">Se qualcosa non funziona, attivala, rifai quello che non ha funzionato, poi condividi il log con lo sviluppatore.</string>
+    <string name="debug_off">Disattivata</string>
+    <string name="debug_on">Attivata</string>
+    <string name="debug_on_detail">Castor scrive in un file di log quello che fa</string>
+    <string name="debug_log_file">File di log: %1$s</string>
+    <string name="debug_log_privacy">Il log contiene il modello del telefono, la versione di Android e gli indirizzi delle pagine, dei video e delle TV che usi. Condividilo solo con persone di cui ti fidi.</string>
+    <string name="debug_share">Condividi log</string>
 </resources>

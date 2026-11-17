@@ -15,6 +15,7 @@
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <application
+        android:name=".CastorApplication"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -52,6 +53,16 @@
             </intent-filter>
         </receiver>
         <receiver android:name=".UpdateInstallReceiver" android:exported="false" />
+        <!-- Shares the debug log on Android 9, where it stays in the app's own folder. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.logs"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/debug_log_paths" />
+        </provider>
     </application>
 
 </manifest>

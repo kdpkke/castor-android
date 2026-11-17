@@ -1,6 +1,7 @@
 package io.github.stupside.castor.ui.main
 
 import android.content.ClipData
+import android.util.Log
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
@@ -42,11 +43,14 @@ import androidx.lifecycle.repeatOnLifecycle
 import castor.v1.DeviceOuterClass.DeviceType
 import io.github.stupside.castor.AppUpdates
 import io.github.stupside.castor.BrowserResolver
+import io.github.stupside.castor.DebugLog
 import io.github.stupside.castor.R
 import io.github.stupside.castor.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -176,6 +180,11 @@ fun MainScreen(
   var subtitles by rememberSaveable { mutableStateOf(options.subtitles()) }
   var sheet by rememberSaveable { mutableStateOf<String?>(null) }
   var menu by remember { mutableStateOf(false) }
+  var debugMode by remember { mutableStateOf(DebugLog.enabled(context)) }
+  var debugLog by remember { mutableStateOf<String?>(null) }
+  // What the user is told went wrong is in Android's log, and so in the debug log.
+  val shownError = state.error ?: state.playback.error
+  LaunchedEffect(shownError) { shownError?.let { Log.w("Castor", "Error shown: $it") } }
   val release by AppUpdates.release.collectAsStateWithLifecycle()
   val readNotices by AppUpdates.read.collectAsStateWithLifecycle()
   val updateStatus by AppUpdates.status.collectAsStateWithLifecycle()
@@ -708,6 +717,15 @@ fun MainScreen(
           menu = false
           sheet = "theme"
         }
+        ActionRow(
+          R.drawable.ic_bug,
+          stringResource(R.string.debug_mode),
+          stringResource(if (debugMode) R.string.debug_on else R.string.debug_off),
+          R.string.debug_mode,
+        ) {
+          menu = false
+          sheet = "debug"
+        }
         GlassButton(
           onClick = {
             menu = false
@@ -757,6 +775,32 @@ fun MainScreen(
     )
   if (sheet == "language") AppLanguagePicker(language, { sheet = null }, selectLanguage)
   if (sheet == "theme") AppThemePicker(theme, { sheet = null }, selectTheme)
+  if (sheet == "debug") {
+    val app = context.applicationContext
+    LaunchedEffect(Unit) { debugLog = withContext(Dispatchers.IO) { DebugLog.location(app) } }
+    DebugModeSheet(
+      debugMode,
+      debugLog,
+      { sheet = null },
+      select = { on ->
+        if (on != debugMode) {
+          debugMode = on
+          scope.launch {
+            debugLog =
+              withContext(Dispatchers.IO) {
+                DebugLog.enable(app, on)
+                DebugLog.location(app)
+              }
+          }
+        }
+      },
+      share = {
+        scope.launch {
+          withContext(Dispatchers.IO) { DebugLog.share(app) }?.let(context::startActivity)
+        }
+      },
+    )
+  }
   if (sheet == "tv")
     TvPicker(
       state.copy(verdicts = savedVerdicts + state.verdicts),

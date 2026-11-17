@@ -125,7 +125,11 @@ class CastorService : Service() {
           "The APK does not contain the native engine for this device. Build its ABI first."
         }
         val builder = ProcessBuilder(executable.path).directory(filesDir)
-        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+        // Debug mode asks the engine for its detailed log too.
+        if (
+          applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 ||
+            DebugLog.enabled(this@CastorService)
+        ) {
           builder.command().add("--debug")
         }
         val certificates = nativeCaBundle(cacheDir)
@@ -157,11 +161,14 @@ class CastorService : Service() {
         launch {
           try {
             child.errorStream.bufferedReader().useLines { lines ->
-              lines.forEach { android.util.Log.i("CastorEngine", it) }
+              lines.forEach {
+                android.util.Log.i(DebugLog.ENGINE_TAG, it)
+                DebugLog.engine(it)
+              }
             }
           } catch (error: java.io.IOException) {
             if (currentCoroutineContext().isActive)
-              android.util.Log.w("CastorEngine", "Engine log closed", error)
+              android.util.Log.w(DebugLog.ENGINE_TAG, "Engine log closed", error)
           }
         }
         child.inputStream.bufferedReader().use { output ->

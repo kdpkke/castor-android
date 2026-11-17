@@ -117,6 +117,13 @@ class CastOptions(private val context: Context) {
     preferences.edit().putString("theme", value.preference).apply()
   }
 
+  // Debug mode: Castor writes what it logs to a file the user can send.
+  fun debugMode(): Boolean = preferences.getBoolean("debug-mode", false)
+
+  fun debugMode(on: Boolean) {
+    preferences.edit().putBoolean("debug-mode", on).apply()
+  }
+
   fun localizedContext(): Context =
     context.createConfigurationContext(
       Configuration(context.resources.configuration).apply {

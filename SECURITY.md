@@ -51,6 +51,17 @@ refuses an APK not signed with the installed app's key. The download-complete
 receiver is exported for the system download manager and acts only on the
 download Castor started; installer results go to a receiver no other app can reach.
 
+## Debug mode
+
+Off by default. While it is on, Castor writes its own Android log lines and the
+engine's detailed log to `Download/Castor/castor-debug.txt` (Android 10 and later)
+or to the app's folder on shared storage (Android 9), under a header with the
+phone model, chip, memory, hardware encoders and Android build. Android lets an app
+read only its own log, so other apps' lines are not included. The engine redacts
+credentials, but page, video and receiver addresses remain; the setting says so
+and the file leaves the phone only when the user shares it. The file restarts past
+32 MB and stays after debug mode is turned off.
+
 ## Distribution and secrets
 
 Never commit signing keys, passwords, access tokens or `local.properties`. Revoke

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The debug log on Android 9: in the app's folder on shared storage, or in its private files without one. -->
+<paths>
+    <external-files-path name="logs" path="logs/" />
+    <files-path name="private-logs" path="logs/" />
+</paths>

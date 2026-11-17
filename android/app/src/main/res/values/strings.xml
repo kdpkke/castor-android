@@ -220,4 +220,12 @@
     <string name="update_failed_title">Castor update failed</string>
     <string name="battery_title">Battery optimization is on</string>
     <string name="battery_body">Android may slow Castor down in the background, so the stream can freeze or drop in quality. Tap to turn it off for Castor.</string>
+    <string name="debug_mode">Debug mode</string>
+    <string name="debug_mode_help">If something goes wrong, turn this on, do again what went wrong, then share the log with the developer.</string>
+    <string name="debug_off">Off</string>
+    <string name="debug_on">On</string>
+    <string name="debug_on_detail">Castor writes what it does to a log file</string>
+    <string name="debug_log_file">Log file: %1$s</string>
+    <string name="debug_log_privacy">The log includes your phone’s model and Android version, and the addresses of the pages, videos and TVs you use. Share it only with someone you trust.</string>
+    <string name="debug_share">Share log</string>
 </resources>

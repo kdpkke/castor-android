@@ -120,6 +120,62 @@ internal fun AppThemePicker(selected: AppTheme, dismiss: () -> Unit, select: (Ap
   }
 }
 
+// Debug mode: turning it on and off, where the log is, and sharing it.
+@Composable
+internal fun DebugModeSheet(
+  on: Boolean,
+  // Where the log is; null while there is none.
+  location: String?,
+  dismiss: () -> Unit,
+  select: (Boolean) -> Unit,
+  share: () -> Unit,
+) {
+  GlassSheet(dismiss) {
+    Column(
+      Modifier.fillMaxWidth()
+        .verticalScroll(rememberScrollState())
+        .padding(horizontal = 24.dp)
+        .padding(bottom = 28.dp),
+      verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+          stringResource(R.string.debug_mode),
+          style = MaterialTheme.typography.headlineMedium,
+          modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = dismiss, modifier = Modifier.glassMaterial(RoundedCornerShape(50))) {
+          CastIcon(R.drawable.ic_close, stringResource(R.string.close))
+        }
+      }
+      Text(
+        stringResource(R.string.debug_mode_help),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+      Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        AppChoiceRow(!on, stringResource(R.string.debug_off), stringResource(R.string.theme_default)) {
+          select(false)
+        }
+        AppChoiceRow(on, stringResource(R.string.debug_on), stringResource(R.string.debug_on_detail)) {
+          select(true)
+        }
+      }
+      Text(
+        stringResource(R.string.debug_log_privacy),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+      if (location != null) {
+        Text(stringResource(R.string.debug_log_file, location), style = MaterialTheme.typography.bodyMedium)
+        GlassButton(onClick = share, prominent = true, modifier = Modifier.fillMaxWidth()) {
+          Text(stringResource(R.string.debug_share))
+        }
+      }
+    }
+  }
+}
+
 @Composable
 private fun AppChoiceRow(chosen: Boolean, label: String, detail: String?, select: () -> Unit) {
   Row(
