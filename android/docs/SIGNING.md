@@ -31,9 +31,17 @@ That key is retired: it is no longer available to the maintainer. Starting with
 signer, so a 1.0.0 installation must be uninstalled before installing 1.1.0;
 uninstalling removes its saved app preferences. Later updates install normally.
 
+## Package change in 2.0.0
+
+Starting with 2.0.0 the app's identity on Android and Google Play is
+`com.muratoreware.castorandroid`; 1.x releases used `io.github.stupside.castor`.
+Android treats them as two different apps: 2.0.0 installs beside 1.x and does not
+update it or receive its saved preferences. Install 2.0.0, then uninstall the old
+Castor. The release key is unchanged, and later releases update 2.0.0 normally.
+
 ## Moving from development builds
 
-Current development builds use `io.github.stupside.castor.debug` and appear as
+Current development builds use `com.muratoreware.castorandroid.debug` and appear as
 **Castor (test)**. They install alongside the stable app and have separate preferences.
 They do not update the stable installation or require its removal.
 

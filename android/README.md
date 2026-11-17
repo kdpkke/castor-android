@@ -80,7 +80,7 @@ The Gradle wrapper pins Gradle 9.8.1; the version catalog pins AGP 9.4.1 and Kot
 
 Client generation is part of a normal Gradle build on Windows and Linux; no separate Buf installation is needed. To regenerate explicitly, run `:client:bufGenerate` with the Gradle wrapper from `android/`. Buf CLI 1.74.0, its Gradle plugin 0.11.2 and Connect-Kotlin 0.9.0 are pinned. The generator template is `client/buf.gen.yaml`; keep its Connect version aligned with the runtime in the version catalog. Generation uses the public Buf remote plugin and requires network access when it runs. Buf is a build tool and is not included in the APK.
 
-After building native binaries, open `android/` in Android Studio. The development APK is at `app/build/outputs/apk/debug/app-debug.apk`. It is signed with the local Android development key. The debug variant uses the separate `io.github.stupside.castor.debug` application ID and the launcher name **Castor (test)**, so it can be installed beside the stable app without uninstalling it or losing its preferences. It is not an update for the stable APK.
+After building native binaries, open `android/` in Android Studio. The development APK is at `app/build/outputs/apk/debug/app-debug.apk`. It is signed with the local Android development key. The debug variant uses the separate `com.muratoreware.castorandroid.debug` application ID and the launcher name **Castor (test)**, so it can be installed beside the stable app without uninstalling it or losing its preferences. It is not an update for the stable APK.
 
 For distribution, use Android Studio's **Build > Generate Signed App Bundle or APK > APK**, select the **release** variant and a dedicated release keystore stored outside the repository. Alternatively, `:app:assembleRelease` produces an unsigned APK at `app/build/outputs/apk/release/app-release-unsigned.apk`; sign it with the Android SDK's `apksigner`. Keep an encrypted backup of the keystore and store its password separately. Future updates must preserve the signing identity and increase `versionCode`.
 
@@ -107,7 +107,7 @@ This waits for boot completion and checks fresh XML test results. Some Android G
 To verify discovery on a physical Android 16+ phone, connect a powered-on DLNA TV to its hotspot, install the debug app and test APK, then run:
 
 ```powershell
-adb -s <phone-serial> shell am instrument -w -e class io.github.stupside.castor.DeviceDiscoveryHotspotTest -e hotspot true io.github.stupside.castor.test/androidx.test.runner.AndroidJUnitRunner
+adb -s <phone-serial> shell am instrument -w -e class io.github.stupside.castor.DeviceDiscoveryHotspotTest -e hotspot true com.muratoreware.castorandroid.debug.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 These opt-in tests require a real TV. They verify discovery and connection through the native engine using the receiver's identity even with a deliberately stale saved URL. An invalid local video source ends the connection test before playback; no external streaming site is used. Stop active casts before running them. Gradle excludes classes marked `@ManualDiagnostic` from its fixture suite, through one `notAnnotation` runner argument, so they do not appear as skipped tests in CI.
@@ -115,7 +115,7 @@ These opt-in tests require a real TV. They verify discovery and connection throu
 To inspect a specific public webpage in the embedded browser without casting to a TV, run this manual diagnostic instead:
 
 ```powershell
-adb -s <device-serial> shell am instrument -w -e class io.github.stupside.castor.ui.main.BrowserSiteDiagnosticTest -e publicPage "https://example.org/watch" io.github.stupside.castor.test/androidx.test.runner.AndroidJUnitRunner
+adb -s <device-serial> shell am instrument -w -e class io.github.stupside.castor.ui.main.BrowserSiteDiagnosticTest -e publicPage "https://example.org/watch" com.muratoreware.castorandroid.debug.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 It records the page document, an available browser screenshot, and the number of captured candidates under the app's external files directory. Capturing a candidate is not proof of TV playback. Normal tests use a local page and real touchscreen input to verify rendering, late Play interactions, retry without reloading, HTTP failures, dismissal, and cancellation.

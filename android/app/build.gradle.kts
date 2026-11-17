@@ -16,7 +16,8 @@ android {
     buildToolsVersion = "37.0.0"
     compileSdk { version = release(37) { minorApiLevel = 2 } }
     defaultConfig {
-        applicationId = "io.github.stupside.castor"
+        // The app's identity on Android and Google Play since 2.0.0. The code keeps upstream's namespace.
+        applicationId = "com.muratoreware.castorandroid"
         minSdk = 28
         ndk { abiFilters += targetAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "x86_64") }
         targetSdk = 37

@@ -5,6 +5,8 @@ English one.
 
 ## 2.0.0 — 2026-11-17
 
+**Before updating:** Castor 2.0.0 is a new app for Android, `com.muratoreware.castorandroid`, ready for Google Play; 1.x was `io.github.stupside.castor`. It installs beside the old Castor instead of updating it, so choose your TV and settings again, then uninstall the old Castor. Later versions update 2.0.0 normally.
+
 - **Now compatible with AirPlay and FCast v3.** Besides Chromecast, DLNA and Roku, Castor now casts to AirPlay TVs (Apple TV and TVs with AirPlay built in, such as LG webOS models) and to FCast receivers using version 3 of the FCast protocol.
 - The TV picker lists each TV once with its IP address and the protocols it answers on. Selecting a TV opens those protocols with their ports, with Back below the choices.
 
@@ -61,6 +63,8 @@ English one.
 - **Debug mode** in the menu writes what Castor does to `Download/Castor/castor-debug.txt`, with the phone's model, chip and Android version at the top. Turn it on, repeat what went wrong, then **Share log** sends the file. The log includes the addresses of the pages, videos and TVs used, and leaves the phone only when you share it.
 
 ### Italiano
+
+**Prima di aggiornare:** Castor 2.0.0 per Android è una nuova app, `com.muratoreware.castorandroid`, pronta per Google Play; la 1.x era `io.github.stupside.castor`. Si installa accanto al vecchio Castor invece di aggiornarlo: scegli di nuovo TV e impostazioni, poi disinstalla il vecchio Castor. Le versioni successive aggiornano la 2.0.0 normalmente.
 
 - **Ora compatibile con AirPlay e FCast v3.** Oltre a Chromecast, DLNA e Roku, Castor ora trasmette alle TV AirPlay (Apple TV e TV con AirPlay integrato, come i modelli LG webOS) e ai ricevitori FCast che usano la versione 3 del protocollo FCast.
 - La ricerca mostra ogni TV una sola volta con il suo IP e i protocolli su cui risponde. Selezionandola si apre la pagina dei protocolli con le loro porte, con Indietro sotto le opzioni.

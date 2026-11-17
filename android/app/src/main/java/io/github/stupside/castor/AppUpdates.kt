@@ -145,7 +145,7 @@ internal sealed interface UpdateStatus {
 // Finds new releases on GitHub, downloads one through Android's download manager and hands it to Android's
 // package installer. The download and the installation go on while Castor is in the background.
 internal object AppUpdates {
-  private const val RELEASE_PACKAGE = "io.github.stupside.castor"
+  private const val RELEASE_PACKAGE = "com.muratoreware.castorandroid"
   // SHA-256 of the release signing certificate, android/docs/signing/release-cert.pem.
   private const val RELEASE_CERTIFICATE = "8b0859493ccab43565a719d2e867be815d651c49603e707f1e8e82309acd9dbb"
   private const val PLAY_STORE = "com.android.vending"
@@ -153,7 +153,7 @@ internal object AppUpdates {
   private const val CHANNEL = "updates"
   private const val NOTIFICATION = 2
   private const val UPDATES = "updates"
-  internal const val INSTALL_STATUS = "io.github.stupside.castor.action.UPDATE_INSTALL_STATUS"
+  internal const val INSTALL_STATUS = "com.muratoreware.castorandroid.action.UPDATE_INSTALL_STATUS"
 
   val release = MutableStateFlow<Release?>(null)
   // The notices the user has opened, by notice id.
