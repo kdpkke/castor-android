@@ -42,7 +42,8 @@ func (s *preparation) encode(f feed, burn burnRenderer) (encodePlan, error) {
 		runtime = s.attempt.Runtime()
 	}
 	selections := s.Outputs.Selections(caps, captions, runtime)
-	if runtime > 0 {
+	// Android extension: a live cast prefers HLS too, whose playlist lists complete fragments, over a growing progressive file a receiver stalls on.
+	if runtime > 0 || f.live() {
 		// A growing, unindexed progressive MP4 is not seekable in Chromium.
 		// HLS indexes complete fragments without waiting for the whole download.
 		slices.SortStableFunc(selections, func(a, b output.Selection) int {
@@ -219,11 +220,11 @@ func encoderResult(ctx context.Context, proc *ffmpeg.Process, hardware, buffered
 		// The cast's fault quotes the encoder's lines itself.
 		return &encoderFailed{err: err, hardware: hardware, lines: evidence.Lines}
 	}
-	return quoting(err, evidence.Lines)
 	// Android extension: over the source, the hardware encoder's own errors still make the exit its own (read_hardware.go).
 	if hardware && evidence.ExitStatus > 0 && hardwareFailedItself(evidence.Lines) {
 		return &encoderFailed{err: err, hardware: hardware, lines: evidence.Lines}
 	}
+	return quoting(err, evidence.Lines)
 }
 
 // quoting is err followed by the encoder's last lines, where no fault quotes them beside it.

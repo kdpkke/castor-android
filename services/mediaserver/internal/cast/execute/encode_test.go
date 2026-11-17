@@ -107,7 +107,7 @@ func bufferedCast(t *testing.T, ffmpegPath, ffprobePath string) (*preparation, *
 	return s, &buffered{reader: &pull{spool: sp, done: make(chan struct{})}}
 }
 
-func TestNativeFiniteDownloadPrefersSeekableHLSWithoutChangingLiveOrOptimized(t *testing.T) {
+func TestLiveAndFiniteNativeDownloadsPreferSegmentedDelivery(t *testing.T) {
 	ffmpegPath, ffprobePath := requireFFmpegTools(t)
 	body, err := os.ReadFile(generateFixture(t, ffmpegPath, "seekable.ts", 1,
 		[]string{"-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2", "-shortest", "-f", "mpegts"}))
@@ -121,7 +121,8 @@ func TestNativeFiniteDownloadPrefersSeekableHLSWithoutChangingLiveOrOptimized(t 
 		want                string
 	}{
 		{"finite native", true, true, false, time.Hour, media.HLS},
-		{"live native", true, true, true, time.Hour, media.MP4},
+		{"live native", true, true, true, time.Hour, media.HLS},
+		{"live optimized", false, true, true, 0, media.HLS},
 		{"unknown duration", true, true, false, 0, media.MP4},
 		{"optimized", false, true, false, time.Hour, media.MP4},
 		{"other receiver", true, false, false, time.Hour, media.MP4},
