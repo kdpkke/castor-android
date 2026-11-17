@@ -89,3 +89,30 @@ commands replace the previous generated release outputs.
 Publish the verified APK with its checksum, signer fingerprint, project source
 snapshot and the corresponding native-source archive required by FFmpeg's GPL
 components. Tag Android releases independently, for example `android-v1.0.0`.
+
+## Google Play bundle
+
+Google Play takes an Android App Bundle, not an APK, and does not allow the GitHub
+updater. The `play` build type is the release build without it:
+`app/src/play/AndroidManifest.xml` removes `REQUEST_INSTALL_PACKAGES` and the
+updater's two receivers, and a build without that permission never offers a GitHub
+release. The bundle carries both ABIs; Play gives each device only its own.
+
+Sign the bundle with `jarsigner`, from `android/` after the native build:
+
+```powershell
+.\gradlew.bat ':app:bundlePlay'
+$signing = Join-Path $env:USERPROFILE '.android/castor-android-signing'
+$bundle = 'app/build/outputs/bundle/play'
+& "$env:JAVA_HOME/bin/jarsigner.exe" -keystore "$signing/castor-android-release.p12" -storetype PKCS12 -storepass:file "$signing/release-password.txt" -sigalg SHA256withRSA -digestalg SHA-256 -signedjar "$bundle/castor-android-play.aab" "$bundle/app-play.aab" castor-android-release
+if ($LASTEXITCODE -ne 0) { throw 'Bundle signing failed' }
+& "$env:JAVA_HOME/bin/jarsigner.exe" -verify "$bundle/castor-android-play.aab"
+if ($LASTEXITCODE -ne 0) { throw 'Bundle signature verification failed' }
+```
+
+`jarsigner -verify -strict` fails on any self-signed certificate, which Android
+keys are; plain `-verify` checks the signature. The key that signs the first
+upload is the bundle's upload key. Play App Signing then signs what Play delivers
+with its own key, unless the Play Console is told before the first open-testing or
+production release to use a copy of the release key. With Play's key, installations
+from Play and from GitHub have different signers and cannot update each other.

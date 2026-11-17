@@ -40,6 +40,12 @@ android {
         release {
             isMinifyEnabled = false
         }
+        // The Google Play bundle: the release build without the GitHub updater, which Play does not allow.
+        // src/play/AndroidManifest.xml takes the install permission and the updater's receivers out.
+        create("play") {
+            initWith(getByName("release"))
+            matchingFallbacks += "release"
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -109,7 +115,7 @@ val checkNativeRuntime by tasks.registering {
   }
 }
 
-tasks.matching { it.name in setOf("packageDebug", "packageRelease") }.configureEach {
+tasks.matching { it.name in setOf("packageDebug", "packageRelease", "packagePlay", "buildPlayPreBundle") }.configureEach {
   dependsOn(checkNativeRuntime)
 }
 

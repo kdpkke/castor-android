@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Google Play build: Play delivers Castor's updates, so the GitHub updater and what it needs are left out. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove" />
+
+    <application>
+        <receiver android:name=".UpdateReceiver" tools:node="remove" />
+        <receiver android:name=".UpdateInstallReceiver" tools:node="remove" />
+    </application>
+
+</manifest>
