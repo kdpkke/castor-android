@@ -199,6 +199,7 @@ class AppLanguageTest {
       context.createConfigurationContext(
         Configuration(context.resources.configuration).apply { setLocale(Locale.ITALIAN) }
       )
+    // With no choice saved Castor follows the phone's language, not one a screen was set to: this emulator's is English.
     assertEquals(AppLanguage.English, CastOptions(italianContext).language())
     assertEquals(
       "App language",

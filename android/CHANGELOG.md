@@ -61,6 +61,7 @@ English one.
 - A TV keeps its own name whichever protocol you choose, FCast included, and the protocol with its address and port shows beneath it, also during a cast.
 - An AirPlay TV already playing a live stream that asks Castor for a playlist it could not fetch no longer ends the cast at once: the cast ends only if the TV itself gives up with an error. Before, an LG could stop after a few seconds with "the receiver could not fetch … itself".
 - **Debug mode** in the menu writes what Castor does to `Download/Castor/castor-debug.txt`, with the phone's model, chip and Android version at the top. Turn it on, repeat what went wrong, then **Share log** sends the file. The log includes the addresses of the pages, videos and TVs used, and leaves the phone only when you share it.
+- Castor starts in Italian on a phone set to Italian and in English on any other. **App language** in the menu still switches it, and marks the phone's language.
 
 ### Italiano
 
@@ -120,6 +121,7 @@ English one.
 - Una TV mantiene il proprio nome qualunque protocollo si scelga, FCast compreso, e sotto compaiono il protocollo con indirizzo e porta, anche durante una trasmissione.
 - Una TV AirPlay che sta già riproducendo una diretta e chiede a Castor una playlist che non è riuscita a scaricare non fa più chiudere subito la trasmissione: finisce solo se la TV stessa rinuncia con un errore. Prima una LG poteva fermarsi dopo pochi secondi con «the receiver could not fetch … itself».
 - **Modalità debug** nel menu scrive quello che fa Castor in `Download/Castor/castor-debug.txt`, con in cima modello, chip e versione Android del telefono. Attivala, rifai quello che non ha funzionato, poi **Condividi log** invia il file. Il log contiene gli indirizzi delle pagine, dei video e delle TV usati, ed esce dal telefono solo quando lo condividi.
+- Castor parte in italiano su un telefono impostato in italiano e in inglese su tutti gli altri. **Lingua dell’app** nel menu permette ancora di cambiarla e indica la lingua del telefono.
 
 ## 1.3.0 — 2026-10-27
 

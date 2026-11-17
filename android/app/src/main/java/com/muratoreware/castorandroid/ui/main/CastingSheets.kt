@@ -62,7 +62,7 @@ internal fun AppLanguagePicker(
           AppChoiceRow(
             selected == language,
             language.nativeName,
-            if (language == AppLanguage.English) stringResource(R.string.language_default)
+            if (language == AppLanguage.system()) stringResource(R.string.language_default)
             else null,
           ) {
             select(language)

@@ -2,7 +2,7 @@
     <string name="app_name">Castor</string>
     <string name="app_language">Lingua dell’app</string>
     <string name="language_help">Scegli la lingua. La modifica viene applicata subito.</string>
-    <string name="language_default">Predefinita</string>
+    <string name="language_default">Lingua del telefono</string>
     <string name="app_tagline">Il tuo video.\nSulla tua TV.</string>
     <string name="app_intro">Incolla un link o scegli un video sul telefono. Castor lo porta sulla tua TV e può riprodurre video diversi su più TV insieme.</string>
     <string name="video_heading">Video</string>

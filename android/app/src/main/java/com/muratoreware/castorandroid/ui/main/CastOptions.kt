@@ -2,6 +2,7 @@ package com.muratoreware.castorandroid.ui.main
 
 import android.content.Context
 import android.content.res.Configuration
+import android.content.res.Resources
 import castor.v1.DeviceOuterClass.Device
 import castor.v1.DeviceOuterClass.DeviceType
 import castor.v1.DeviceOuterClass.Fidelity
@@ -94,7 +95,15 @@ data class SavedTv(
 
 enum class AppLanguage(val tag: String, val nativeName: String) {
   English("en", "English"),
-  Italian("it", "Italiano"),
+  Italian("it", "Italiano");
+
+  companion object {
+    // Until the user chooses, Castor speaks Italian on a phone set to Italian and English everywhere else.
+    fun forLocale(locale: Locale): AppLanguage = if (locale.language == Italian.tag) Italian else English
+
+    // The phone's own language, whatever an app's screen was set to.
+    fun system(): AppLanguage = forLocale(Resources.getSystem().configuration.locales[0])
+  }
 }
 
 // Only app preferences persist here; video URLs are not written to these preferences.
@@ -102,8 +111,8 @@ class CastOptions(private val context: Context) {
   private val preferences = context.getSharedPreferences("casting-options", Context.MODE_PRIVATE)
 
   fun language(): AppLanguage =
-    AppLanguage.entries.firstOrNull { it.tag == preferences.getString("language", "en") }
-      ?: AppLanguage.English
+    AppLanguage.entries.firstOrNull { it.tag == preferences.getString("language", null) }
+      ?: AppLanguage.system()
 
   fun language(value: AppLanguage) {
     preferences.edit().putString("language", value.tag).apply()
