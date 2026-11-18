@@ -3,7 +3,7 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
-## 2.1.0 — 2026-11-17
+## 2.1.0 — 2026-11-18
 
 - **Control a cast from the notification and the lock screen.** While a video plays on a TV, Castor's notification shows the video and the TV with Pause/Resume, the 10-second steps and **Stop casting**, and the lock screen shows the same controls. With several casts they act on the newest one.
 - TVs whose Wi-Fi drops the network's search messages now also appear as DLNA TVs when they announce themselves as Chromecast, AirPlay or FCast: Castor asks each of those TVs directly for its DLNA receiver while it searches.

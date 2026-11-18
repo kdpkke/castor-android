@@ -37,7 +37,7 @@ Native Android emulator previews with sample input.
 - Settings remain open while choices update immediately; diagnostic details are selectable and copyable.
 - Live-stream delivery follows future bytes; captured HLS access can renew through the original page when tokens expire.
 
-Android 9+; arm64-v8a phones and x86_64 emulators. Previous casting builds were manually tested on **OPPO Find X8 Pro / ColorOS 16 → LG C2 in Chromecast mode**; see current validation coverage below. Roku remains experimental and requires upstream's developer-channel setup.
+Android 9+; arm64-v8a phones and x86_64 emulators. Previous casting builds were manually tested on **OPPO Find X8 Pro / ColorOS 16 → LG C2 in Chromecast mode**; 2.1.0 test builds were tested by hand from an OPPO Find X8 Pro and a Samsung Galaxy Tab S9 to an **LG C1** over DLNA, AirPlay and FCast. See current validation coverage below. Roku remains experimental and requires upstream's developer-channel setup.
 
 ## Supported TVs and formats
 
@@ -47,7 +47,7 @@ Android 9+; arm64-v8a phones and x86_64 emulators. Previous casting builds were 
   - In Native, a finished MKV, MP4, MPEG-TS or WebM file in a container the TV lists is sent unchanged, Dolby Vision included.
   - Otherwise Castor streams MPEG-TS (H.264 and AAC on TVs that list nothing more).
   - Pause and seek work where the TV allows them.
-  - Tested on an LG C2.
+  - Tested on an LG C2 and an LG C1. A C1 shows a Dolby Vision file sent this way as HDR.
 - **Chromecast**: Google Cast devices and TVs with Chromecast built in.
   - The TV fetches the video itself when it can play it.
   - Otherwise Castor streams HLS, MP4, MPEG-TS or WebM to it.
@@ -55,10 +55,14 @@ Android 9+; arm64-v8a phones and x86_64 emulators. Previous casting builds were 
 - **AirPlay**: Apple TV, and TVs with AirPlay built in such as LG webOS models.
   - The first cast asks for the PIN the TV shows; the pairing is kept on the phone.
   - The TV gets HLS, or the original MP4 file. In Native, Dolby Vision is kept both for MP4 files and for MKV files Castor converts to HLS.
-  - Tested on an LG C2. Apple TVs are supported but not yet tested on hardware; old Apple TVs that need the legacy PIN pairing are not supported.
-- **FCast v3**: the FUTO receiver app and desktop receiver.
-  - HLS or MP4 with H.264 video and AAC or MP3 audio; subtitles are burnt into the picture.
-  - Tested on an LG C2 with the FCast Receiver app, found on the network and speaking version 3 of the protocol (the version of the app itself was not recorded). Other FCast receivers and pairing by QR code are not yet tested on hardware; a receiver that asks for the encrypted version 4 is refused.
+  - An older TV that plays a video handed as a file but not as a stream, such as an LG C1, gets the HLS as a file. A C1 shows Dolby Vision this way, but no subtitles.
+  - Tested on an LG C2 and an LG C1. Apple TVs are supported but not yet tested on hardware; old Apple TVs that need the legacy PIN pairing are not supported.
+- **FCast v3**: the FUTO receiver app and desktop receiver, and [Castor Receiver for FCast-V4](https://github.com/kdpkke/WebOS-Receiver-for-FCast-V4) on LG webOS TVs.
+  - In Native the TV first gets the original video; if it cannot play it, Castor serves the video's tracks itself.
+  - Otherwise Castor streams HLS or MP4 with H.264 video and AAC or MP3 audio; subtitles are burnt into the picture.
+  - Tested on an LG C2 with the FCast Receiver app, found on the network and speaking version 3 of the protocol (the version of the app itself was not recorded).
+  - Tested on an LG C1 with Castor Receiver for FCast-V4 3.0.0, which speaks version 3 on webOS 6: live and on-demand videos, pause, seek and stop. On the same C1 the FCast Receiver app from the LG store restarts as it takes a video, which Castor follows, but after some casts it stops obeying commands such as pause and stop until it is reopened; FUTO no longer maintains its webOS receiver.
+  - Other FCast receivers and pairing by QR code are not yet tested on hardware; a receiver that asks for the encrypted version 4 is refused.
 - **Roku** (experimental): Castor's developer channel plays HLS, MP4 and MKV with H.264. It needs upstream's developer-channel setup and is not yet tested on hardware.
 
 ### What you can cast
