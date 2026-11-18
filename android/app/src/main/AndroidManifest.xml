@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <!-- Implied by the multicast permission, but a device on a wired network reaches its TVs without Wi-Fi. -->
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
 
     <application
         android:name=".CastorApplication"

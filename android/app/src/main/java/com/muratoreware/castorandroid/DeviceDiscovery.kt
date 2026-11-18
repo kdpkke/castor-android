@@ -61,19 +61,19 @@ class DeviceDiscovery(private val context: Context) {
   // The same search run by the app itself, so that finding a TV never starts the engine. Its devices are listed
   // as the engine lists them, so a TV found here is the one the engine casts to, and it is given the time the
   // engine gives it (its network timeout, 5 s). Android may hold back multicast replies from an app without a
-  // multicast lock, so the search holds one, as the engine's service does.
+  // multicast lock, so the search holds one, as the engine's service does; a device without Wi-Fi has none to hold.
   suspend fun search(options: CastOptions): List<Device> {
     val lock =
       context.applicationContext
         .getSystemService(WifiManager::class.java)
-        .createMulticastLock("castor-search")
-        .apply { setReferenceCounted(false) }
-    lock.acquire()
+        ?.createMulticastLock("castor-search")
+        ?.apply { setReferenceCounted(false) }
+    lock?.acquire()
     try {
       return withTimeoutOrNull(5_000) { listed(find(options)) }
         ?: throw java.io.IOException("The search for TVs took too long.")
     } finally {
-      lock.release()
+      lock?.release()
     }
   }
 

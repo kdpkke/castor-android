@@ -89,10 +89,11 @@ class CastorService : Service() {
         scrapingToken,
         contentResolver,
       )
+    // A device without Wi-Fi has no Wi-Fi service, and no multicast lock to take: its wired network needs none.
     multicast =
-      (applicationContext.getSystemService(WIFI_SERVICE) as WifiManager)
-        .createMulticastLock("castor")
-        .apply {
+      (applicationContext.getSystemService(WIFI_SERVICE) as? WifiManager)
+        ?.createMulticastLock("castor")
+        ?.apply {
           setReferenceCounted(false)
           acquire()
         }

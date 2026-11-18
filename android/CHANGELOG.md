@@ -3,6 +3,14 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
+## Unreleased
+
+- Castor no longer requires Wi-Fi hardware. Google Play also offers it to Android devices without Wi-Fi, such as some on a wired network, and Castor no longer stops on them when it starts or looks for TVs.
+
+### Italiano
+
+- Castor non richiede più l'hardware Wi-Fi. Google Play lo propone anche ai dispositivi Android senza Wi-Fi, come alcuni collegati via cavo, e su questi Castor non si ferma più all'avvio o quando cerca le TV.
+
 ## 2.1.0 — 2026-11-18
 
 - **Control a cast from the notification and the lock screen.** While a video plays on a TV, Castor's notification shows the video and the TV with Pause/Resume, the 10-second steps and **Stop casting**, and the lock screen shows the same controls. With several casts they act on the newest one.
