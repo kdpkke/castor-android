@@ -264,7 +264,17 @@ func (p Program) whole() bool {
 	if len(p.Inputs) != 1 || p.Start != 0 || p.NeedsTrackSelection {
 		return false
 	}
-	return !slices.ContainsFunc(p.Tracks, func(track TrackRef) bool { return track.Index != 0 })
+	for _, track := range p.Tracks {
+		if track.Index == 0 {
+			continue
+		}
+		// The file itself can select a later audio track when the container marks it as default.
+		info, measured := p.Measurement()
+		if track.Kind != TrackAudio || !measured || track.Index != DefaultAudioIndex(info.AudioTracks) {
+			return false
+		}
+	}
+	return true
 }
 
 // Clone returns a deep enough copy for independent planning (URL, header, offset copies).
