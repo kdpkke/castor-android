@@ -56,6 +56,28 @@ class FCastPickerTest {
   }
 
   @Test
+  fun switchingFromAnEncryptedCodeRequiresAnAnnouncementAndConfirmation() {
+    val chromecast = device("living", "Living room TV", "192.0.2.10:8009", DeviceType.DEVICE_TYPE_CHROMECAST)
+    val receiver = device("receiver", "Receiver", "192.0.2.10:46900", DeviceType.DEVICE_TYPE_FCAST)
+    val qr = FCastPairing(setOf("${chromecast.type.number}|living"), "Old QR", 46899, 4, null, "192.0.2.99")
+    val other = qr.copy(identities = setOf("${chromecast.type.number}|other"), host = "192.0.2.20")
+    val discovery = compose.activity.getString(R.string.fcast_use_discovery)
+    start(listOf(chromecast), listOf(qr, other))
+    compose.onNodeWithText("Living room TV").performClick()
+    compose.onNodeWithText(discovery).assertDoesNotExist()
+    compose.runOnIdle { deviceList.value = listOf(chromecast, receiver) }
+    compose.onNodeWithText(discovery).performScrollTo().performClick()
+    compose.onNodeWithText(compose.activity.getString(R.string.pair_cancel)).performClick()
+    assertNull(selected)
+    assertEquals(listOf(qr, other), pairingList.value)
+
+    compose.onNodeWithText(discovery).performScrollTo().performClick()
+    compose.onNodeWithText(compose.activity.getString(R.string.fcast_forget_confirm)).performClick()
+    assertEquals(listOf(other), pairingList.value)
+    assertEquals(SavedTv(receiver).copy(name = "Living room TV"), selected)
+  }
+
+  @Test
   fun aScannedCodePairsTheTVAndChoosesFCast() {
     val chromecast = device("chromecast:living", "Living room TV", "192.0.2.10:8009", DeviceType.DEVICE_TYPE_CHROMECAST)
     start(listOf(chromecast))
@@ -363,6 +385,7 @@ class FCastPickerTest {
             select = { selected = it },
             pairings = pairingList.value,
             pair = { pairs += it },
+            forget = { pairingList.value = pairingList.value - it },
             scanner = { host, onPaired, onEncrypted, onCancel ->
               scannerHost = host
               paired = onPaired

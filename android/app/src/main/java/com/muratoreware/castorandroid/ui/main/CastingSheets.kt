@@ -221,6 +221,7 @@ internal fun TvPicker(
   // The FCast receivers paired by their codes, and how a new pairing is kept.
   pairings: List<FCastPairing> = emptyList(),
   pair: (FCastPairing) -> Unit = {},
+  forget: (FCastPairing) -> Unit = {},
   // The scanner for the TV at a host; tests put their own in its place.
   scanner: @Composable (
     host: String,
@@ -370,6 +371,32 @@ internal fun TvPicker(
                 leadingContent = { CastIcon(R.drawable.ic_cast) },
                 trailingContent = { CastIcon(R.drawable.ic_next) },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+              )
+            }
+          }
+          if (choice is FCastChoice.Unsupported && pairing != null &&
+            selected.protocols.any { it.type == DeviceType.DEVICE_TYPE_FCAST }
+          ) {
+            var confirming by remember(selected.host, pairing) { mutableStateOf(false) }
+            TextButton(onClick = { confirming = true }, modifier = Modifier.fillMaxWidth()) {
+              Text(stringResource(R.string.fcast_use_discovery))
+            }
+            if (confirming) {
+              AlertDialog(
+                onDismissRequest = { confirming = false },
+                title = { Text(stringResource(R.string.fcast_forget_title, selected.name)) },
+                text = { Text(stringResource(R.string.fcast_forget_details)) },
+                dismissButton = {
+                  TextButton(onClick = { confirming = false }) { Text(stringResource(R.string.pair_cancel)) }
+                },
+                confirmButton = {
+                  TextButton(onClick = {
+                    confirming = false
+                    forget(pairing)
+                    val next = fcastChoice(selected, pairings - pairing)
+                    if (next is FCastChoice.Ready) select(next.tv.copy(name = selected.name))
+                  }) { Text(stringResource(R.string.fcast_forget_confirm)) }
+                },
               )
             }
           }

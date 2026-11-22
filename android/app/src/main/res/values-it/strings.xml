@@ -178,8 +178,12 @@
     <string name="camera_zoom">Zoom %1$s</string>
     <string name="fcast_wrong_code">Questo non è un codice FCast. Inquadra il codice QR mostrato da FCast Receiver.</string>
     <string name="fcast_other_device">Questo codice è di %1$s, che non è questa TV. Apri FCast Receiver sulla TV che hai scelto.</string>
-    <string name="fcast_encrypted">%1$s richiede una connessione FCast cifrata (versione 4), che Castor non supporta ancora.</string>
-    <string name="fcast_encrypted_blocked">Questo ricevitore FCast richiede una connessione cifrata (versione 4), che Castor non supporta ancora. Scegli un altro protocollo.</string>
+    <string name="fcast_encrypted">Il QR di %1$s indica FCast v4 con cifratura. Castor supporta FCast v3.</string>
+    <string name="fcast_encrypted_blocked">Questa TV è associata con un QR FCast cifrato. Apri il selettore TV per vedere le connessioni disponibili.</string>
+    <string name="fcast_use_discovery">Usa FCast v3 tramite scoperta automatica</string>
+    <string name="fcast_forget_title">Scollegare il QR FCast di %1$s?</string>
+    <string name="fcast_forget_details">Castor rimuoverà questa associazione QR e userà il ricevitore trovato sul Wi-Fi. FCast v3 invia i comandi e i link ai video senza cifratura né verifica del certificato.</string>
+    <string name="fcast_forget_confirm">Scollega il QR e usa v3</string>
     <string name="fcast_camera_permission">Castor usa la fotocamera solo per leggere il codice QR di FCast Receiver.</string>
     <string name="fcast_camera_allow">Consenti fotocamera</string>
     <string name="fcast_no_camera">Questo dispositivo non ha una fotocamera per inquadrare il codice QR.</string>

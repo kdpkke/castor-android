@@ -840,6 +840,13 @@ fun MainScreen(
           fcastSession = fcastSession.filterNot { known -> sameHost(known.host, made.host) }
         }
       },
+      forget = { pairing ->
+        if (pairing.identities.isEmpty()) fcastSession = fcastSession - pairing
+        else {
+          options.forgetFCast(pairing)
+          fcastPairings = options.fcastPairings()
+        }
+      },
     )
   state.pairing?.let {
     PairingDialog(it, viewModel::startPairing, viewModel::finishPairing, viewModel::cancelPairing)

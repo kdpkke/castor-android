@@ -219,6 +219,12 @@ class CastOptions(private val context: Context) {
       .apply()
   }
 
+  internal fun forgetFCast(pairing: FCastPairing) {
+    preferences.edit()
+      .putString("fcast-pairings", encodePairings(fcastPairings() - pairing))
+      .apply()
+  }
+
   // Existing numeric ceilings belong to Optimized; Native now forbids any re-encoding.
   fun height(): String = playbackQuality(preferences.getString("height", NATIVE_QUALITY).orEmpty())
 

@@ -54,6 +54,19 @@ class FCastPairingStoreTest {
   }
 
   @Test
+  fun forgettingOnlyRemovesTheConfirmedPairing() {
+    val options = CastOptions(context)
+    val first = pairing(setOf(CHROMECAST_LIVING)).copy(version = 4)
+    val other = first.copy(identities = setOf("bedroom"), host = "192.0.2.20")
+    options.pairFCast(first)
+    options.pairFCast(other)
+    options.forgetFCast(first.copy(port = 46900))
+    assertEquals(listOf(first, other), options.fcastPairings())
+    options.forgetFCast(first)
+    assertEquals(listOf(other), CastOptions(context).fcastPairings())
+  }
+
+  @Test
   fun aPairingWithoutIdentitiesIsNotKept() {
     CastOptions(context).pairFCast(pairing(emptySet()))
     preferences.edit().commit()

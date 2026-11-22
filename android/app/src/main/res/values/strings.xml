@@ -178,8 +178,12 @@
     <string name="camera_zoom">Zoom %1$s</string>
     <string name="fcast_wrong_code">This is not an FCast code. Point at the QR code shown by FCast Receiver.</string>
     <string name="fcast_other_device">This code belongs to %1$s, which is not this TV. Open FCast Receiver on the TV you chose.</string>
-    <string name="fcast_encrypted">%1$s asks for an encrypted FCast connection (version 4), which Castor does not support yet.</string>
-    <string name="fcast_encrypted_blocked">This FCast receiver asks for an encrypted connection (version 4), which Castor does not support yet. Choose another protocol.</string>
+    <string name="fcast_encrypted">The QR code for %1$s specifies encrypted FCast v4. Castor supports FCast v3.</string>
+    <string name="fcast_encrypted_blocked">This TV has an encrypted FCast QR pairing. Open the TV picker to see the available connections.</string>
+    <string name="fcast_use_discovery">Use FCast v3 via network discovery</string>
+    <string name="fcast_forget_title">Forget the FCast QR pairing for %1$s?</string>
+    <string name="fcast_forget_details">Castor will remove this QR pairing and use the receiver found on your Wi-Fi. FCast v3 sends playback commands and video links without encryption or certificate verification.</string>
+    <string name="fcast_forget_confirm">Forget QR and use v3</string>
     <string name="fcast_camera_permission">Castor needs the camera only to read the QR code of FCast Receiver.</string>
     <string name="fcast_camera_allow">Allow camera</string>
     <string name="fcast_no_camera">This device has no camera to scan the QR code.</string>

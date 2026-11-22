@@ -62,7 +62,8 @@ Android 9+; arm64-v8a phones and x86_64 emulators. Previous casting builds were 
   - Otherwise Castor streams HLS or MP4 with H.264 video and AAC or MP3 audio; subtitles are burnt into the picture.
   - Tested on an LG C2 with the FCast Receiver app, found on the network and speaking version 3 of the protocol (the version of the app itself was not recorded).
   - Tested on an LG C1 with Castor Receiver for FCast-V4 3.0.0, which speaks version 3 on webOS 6: live and on-demand videos, pause, seek and stop. On the same C1 the FCast Receiver app from the LG store restarts as it takes a video, which Castor follows, but after some casts it stops obeying commands such as pause and stop until it is reopened; FUTO no longer maintains its webOS receiver.
-  - Other FCast receivers and pairing by QR code are not yet tested on hardware; a receiver that asks for the encrypted version 4 is refused.
+  - On an LG C2, Castor Receiver for FCast-V4 3.0.0 also accepts v3 through network discovery. Local MP4 playback, seeking, pause and resume were tested on this TV.
+  - A saved v4 QR pairing requires encryption. If the TV also advertises FCast, choose **Use FCast v3 via network discovery** in the TV picker and confirm to forget that pairing. Castor then connects to the advertised receiver in cleartext.
 - **Roku** (experimental): Castor's developer channel plays HLS, MP4 and MKV with H.264. It needs upstream's developer-channel setup and is not yet tested on hardware.
 
 ### What you can cast
