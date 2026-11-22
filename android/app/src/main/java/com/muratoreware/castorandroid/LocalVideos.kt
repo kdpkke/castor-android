@@ -11,6 +11,8 @@ import java.net.Socket
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class LocalVideo(val uri: Uri, val name: String, val contentType: String)
 
@@ -57,6 +59,12 @@ class LocalVideos(private val resolver: ContentResolver, private val baseUrl: St
   }
 
   fun name(url: String): String? = videos[url.removePrefix(baseUrl)]?.name
+
+  // serve() can answer byte ranges only when the provider gives it a length.
+  suspend fun supportsByteRanges(video: LocalVideo): Boolean =
+    withContext(Dispatchers.IO) {
+      resolver.openAssetFileDescriptor(video.uri, "r")?.use { it.length > 0 } == true
+    }
 
   fun retainSelection(uri: Uri) =
     retainSelection(resolver, uri, videos.values.map { it.uri }.toSet())

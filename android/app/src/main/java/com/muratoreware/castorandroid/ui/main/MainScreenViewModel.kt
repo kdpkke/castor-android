@@ -589,6 +589,10 @@ class MainScreenViewModel : ViewModel() {
               subtitleLanguage,
             )
           if (localVideo != null) {
+            // A compatible Native file can reach the TV through the engine's byte-range forward.
+            // Providers without a length still need the stream the engine prepares.
+            val forwardable =
+              request.preferences.preserveSource && videos?.supportsByteRanges(localVideo) == true
             request =
               request
                 .toBuilder()
@@ -598,11 +602,14 @@ class MainScreenViewModel : ViewModel() {
                     localVideo.contentType.takeUnless { it == "application/octet-stream" }.orEmpty(),
                   )
                 )
-                .setPreferences(
-                  request.preferences
-                    .toBuilder()
-                    .setDelivery(castor.v1.StreamOuterClass.Delivery.DELIVERY_SERVE)
-                )
+                .apply {
+                  if (!forwardable)
+                    setPreferences(
+                      request.preferences
+                        .toBuilder()
+                        .setDelivery(castor.v1.StreamOuterClass.Delivery.DELIVERY_SERVE)
+                    )
+                }
                 .setMediaInfo(MediaInfo.newBuilder().setTitle(localVideo.name.take(256)))
                 .build()
           }

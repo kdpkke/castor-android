@@ -134,8 +134,8 @@ class CastorRuntimeTest {
 
   @Test
   @androidx.test.filters.SdkSuppress(minSdkVersion = 29)
-  fun selectedPhoneVideoCastsThroughTheEngineAndSurvivesActivityRecreation() =
-    castFixture(false, local = true)
+  fun nativePhoneVideoKeepsItsByteRangesAcrossActivityRecreation() =
+    castFixture(false, local = true, quality = "native")
 
   @Test
   fun extensionlessDownloadStartsCastingBeforeTheOriginFinishes() =
@@ -151,6 +151,7 @@ class CastorRuntimeTest {
     restart: Boolean = false,
     stalledLive: Boolean = false,
     playerPrepared: Boolean = false,
+    quality: String = "90",
   ) = runBlocking {
     grantPermissions()
     ActivityScenario.launch(MainActivity::class.java).use { activity ->
@@ -503,7 +504,7 @@ class CastorRuntimeTest {
                   server.url(if (download) "/download" else "/video.mp4").toString(),
                   download,
                   request.target,
-                  "90",
+                  quality,
                   "off",
                   localVideo = selected,
                   automatic = download,
@@ -563,6 +564,22 @@ class CastorRuntimeTest {
                 assertSame(api, service.endpoint.value)
                 assertFalse(service.stopped.value)
               }
+            }
+          }
+          if (local && quality == "native") {
+            val range = URL(uri).openConnection() as HttpURLConnection
+            try {
+              range.setRequestProperty("Range", "bytes=-16")
+              range.readTimeout = 5000
+              assertEquals("The receiver can seek in the original file", 206, range.responseCode)
+              val size = sample.length()
+              assertEquals("bytes ${size - 16}-${size - 1}/$size", range.getHeaderField("Content-Range"))
+              assertArrayEquals(
+                sample.readBytes().takeLast(16).toByteArray(),
+                range.inputStream.use { it.readBytes() },
+              )
+            } finally {
+              range.disconnect()
             }
           }
           if (restart) {

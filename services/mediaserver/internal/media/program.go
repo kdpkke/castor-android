@@ -232,14 +232,15 @@ func (p Program) SelfFetchable() bool {
 		return false
 	}
 	input := p.Inputs[0]
-	return len(input.Headers) == 0 && !input.RequiresRelaxedInput && hasRemoteHost(input.URL)
+	return len(input.Headers) == 0 && !input.RequiresRelaxedInput && input.HasRemoteHost()
 }
 
-func hasRemoteHost(address *url.URL) bool {
-	if address == nil {
+// HasRemoteHost reports whether the URL names a host other than the local listener.
+func (i Input) HasRemoteHost() bool {
+	if i.URL == nil {
 		return false
 	}
-	host := strings.TrimSuffix(strings.ToLower(address.Hostname()), ".")
+	host := strings.TrimSuffix(strings.ToLower(i.URL.Hostname()), ".")
 	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return false
 	}

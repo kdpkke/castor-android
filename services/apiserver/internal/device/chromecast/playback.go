@@ -79,10 +79,12 @@ func (s *session) watchMessage(h messageHeader, payload []byte) {
 
 // playback follows the one Play the device was last handed, from its load to its end.
 type playback struct {
-	armed        bool
-	content      string
-	mediaSession int
-	active       bool
+	armed           bool
+	content         string
+	mediaSession    int
+	active          bool
+	playerState     string
+	finiteMP4Source bool
 	// commands is the receiver's supportedMediaCommands for this media session, which the controls follow.
 	commands uint64
 	// receiverCode is the detailed code of the last error the receiver sent since begin, zero when it sent none.
@@ -112,6 +114,7 @@ func (w *playback) observe(status castmedia.Media) (bool, error) {
 		return false, nil
 	}
 
+	w.playerState = status.PlayerState
 	switch status.PlayerState {
 	case "BUFFERING", "PLAYING", "PAUSED":
 		w.active = true
