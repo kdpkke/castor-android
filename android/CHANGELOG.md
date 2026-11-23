@@ -3,13 +3,23 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
-## Unreleased
+## 2.2.0 — 2026-11-23
 
-- Castor no longer requires Wi-Fi hardware. Google Play also offers it to Android devices without Wi-Fi, such as some on a wired network, and Castor no longer stops on them when it starts or looks for TVs.
+- **Original videos keep their timeline.** In Native, Castor can send compatible, seekable videos from your Android device as the original file. Castor recovers Chromecast playback if it stays buffering after a seek. AirPlay confirms the new position on the TV and keeps a paused video paused. Compatible originals, including MKV, can keep their audio and subtitle tracks when the default audio track is later in the file.
+- **FCast v3 can be selected after a QR pairing.** When Castor discovers a v3 receiver for the same TV, you can explicitly forget a QR pairing that requires encrypted v4 and use the discovered v3 receiver. FCast v3 is unencrypted.
+- **Live streams recover from more encoder failures.** The engine prefers a segmented stream such as HLS for live casts. If hardware encoding fails, Castor retries in software. For a live stream it resumes at the live edge, and for an on-demand HLS video it uses the receiver’s position when available. Seeking no longer pauses playback just because the new stream is still preparing its first data. On Android devices with MediaCodec encoders, the software fallback uses a faster preset.
+- **Subtitles are easier to read.** Chromecast enables a playlist’s subtitle track when it first becomes available and respects later changes you make on the TV. Generated subtitles carry a language label. Transcription uses Whisper Base by default, with a one-time download of about 148 MB. It produces shorter, two-line cues with fewer repeats and drops fewer words when the recognizer revises a sentence.
+- **Wired networks and TV discovery.** Castor can install and start on Android devices without Wi-Fi hardware and search for TVs over the wired network. When a TV advertises several addresses, Castor prefers one it can reach on the local network.
+- The casting engine incorporates upstream changes through `47fcf56`, including shared playback tracking for Chromecast, DLNA and Roku, clearer diagnostics and regression tests. The upstream stable release workflow now runs on demand.
 
 ### Italiano
 
-- Castor non richiede più l'hardware Wi-Fi. Google Play lo propone anche ai dispositivi Android senza Wi-Fi, come alcuni collegati via cavo, e su questi Castor non si ferma più all'avvio o quando cerca le TV.
+- **I video originali mantengono l’intera timeline.** In modalità Nativa, Castor può inviare come file originali i video compatibili del dispositivo Android in cui è possibile spostarsi. Castor ripristina la riproduzione se Chromecast resta in caricamento dopo un salto. AirPlay verifica sulla TV la nuova posizione e mantiene in pausa i video già in pausa. I file originali compatibili, inclusi gli MKV, possono conservare le tracce audio e i sottotitoli anche quando l’audio predefinito si trova dopo la prima traccia.
+- **FCast v3 si può scegliere anche dopo un’associazione QR.** Se Castor trova un ricevitore v3 per la stessa TV, puoi rimuovere esplicitamente l’associazione QR che richiede la cifratura v4 e usare il ricevitore v3 trovato in rete. FCast v3 è privo di cifratura.
+- **Le dirette si riprendono dopo più tipi di guasto dell’encoder.** Il motore preferisce un flusso a segmenti come HLS per le dirette. Se la codifica hardware si interrompe, Castor riprova in software. Una diretta riparte dal punto in onda, mentre un video HLS on demand riparte dalla posizione comunicata dalla TV, se disponibile. Dopo un salto nella timeline, Castor evita una pausa aggiuntiva mentre il nuovo flusso prepara i primi dati. Sui dispositivi Android con encoder MediaCodec, il ripiego software usa un’impostazione più veloce.
+- **Sottotitoli più leggibili.** Chromecast attiva la traccia sottotitoli della playlist quando diventa disponibile e rispetta le scelte successive fatte sulla TV. I sottotitoli generati indicano la lingua. La trascrizione usa di default Whisper Base, con un download iniziale di circa 148 MB. Mostra al massimo due righe brevi, con meno ripetizioni e meno parole perse quando il riconoscimento corregge una frase.
+- **Rete via cavo e ricerca delle TV.** Castor si installa e si avvia anche sui dispositivi Android privi di hardware Wi-Fi e può cercare le TV dalla rete cablata. Quando una TV annuncia più indirizzi, Castor ne preferisce uno raggiungibile sulla rete locale.
+- Il motore di trasmissione integra le modifiche upstream fino a `47fcf56`, tra cui la gestione condivisa della riproduzione per Chromecast, DLNA e Roku, diagnostica più chiara e test di regressione. Il workflow per importare le release stabili upstream ora parte su richiesta.
 
 ## 2.1.0 — 2026-11-18
 
