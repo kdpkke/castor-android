@@ -16,9 +16,9 @@ For a Native cast of a seekable phone video, Android leaves delivery to the engi
 
 AirPlay video v2 seeks within the original finite MP4 by addressing the queued item. The receiver confirms its position in a fresh playback report. A seek during pause keeps the item paused.
 
-## Automatic updates
+## Starting a core update
 
-The `upstream-releases.yml` workflow runs at minute 23 every six hours (UTC) and supports Run workflow. It pages through GitHub's published releases, ignores drafts/prereleases/non-version tags and selects the lowest stable version above the recorded tag. Branch commits and standalone tags without a published release never trigger an update. Historical `castor-vX.Y.Z` and `castor-X.Y.Z` tags are recognized. Several waiting releases are integrated over successive runs.
+Start an integration when you are ready to take the next upstream release. Open **Actions → Upstream releases → Run workflow** on `main`. Each manual run selects the lowest published stable version above the recorded tag. It ignores drafts, prereleases and non-version tags, and recognizes the historical `castor-vX.Y.Z` and `castor-X.Y.Z` tags. To integrate another waiting release, start the workflow again.
 
 1. Verify that the recorded upstream tag has not moved.
 2. Fetch the selected upstream tag and resolve it to a commit; create or reuse `upstream-release/<tag>` and merge main and that release, preserving history.
@@ -30,15 +30,13 @@ The `upstream-releases.yml` workflow runs at minute 23 every six hours (UTC) and
 
 Checks failing leave the PR open. Conflicts outside the documentation rule produce an issue. A manually closed update PR pauses that release until reopened. The workflow does not close user issues or send messages to the upstream maintainer. Source integration does not publish an Android release.
 
-The six-hour check is not a release-event subscription to another repository. Once a release is detected, the workflow commits its integration automatically and validates it before advancing main. Incompatible changes and changes to automation still require repair/review; an arbitrary future major release cannot be promised to work without Android changes.
-
 Android compilation depends on `:client:bufGenerate`: each changed contract regenerates the official Connect-Kotlin client from the same checkout used to build the engine. Java message generation uses those same Protobuf sources. Generated clients are build outputs rather than merged snapshots. Generation updates the communication code; new UI controls or incompatible contract changes still require Android development and tests. The current core source/history integration remains in place; adopting Buf alone does not extract the Android Go host into a separate dependency.
 
 The WebView bridge emits Castor's canonical HLS identity, `application/x-mpegURL`, in `Stream.content_type`. HTTP response MIME headers can still use `application/vnd.apple.mpegurl`.
 
 The two core fixes the 2.0.0 integration carried, proposed in stupside/castor#71 (HLS MIME aliases and a recognized MIME type kept authoritative; errors a Stop provokes no longer reported as `FAILED: cast stopped` or `file already closed`), are upstream since stupside/castor#74. That integration took upstream's implementation of every file the two fixes had touched and removed Android's own copies, including `output/interrupted.go`, which upstream's `teardown` package replaces. Their regression tests are upstream's.
 
-GitHub schedules run on the default branch, can be delayed, and may be disabled after 60 days without repository activity. Check Actions occasionally or use Run workflow. Authentication uses the repository's short-lived GITHUB_TOKEN, scoped separately for preparation, read-only testing and final publication. Repository Actions settings must allow workflow-created PRs. A repository policy disallowing direct main updates will stop the final push; do not silently bypass such a policy.
+Authentication uses the repository's short-lived GITHUB_TOKEN, scoped separately for preparation, read-only testing and final publication. Repository Actions settings must allow workflow-created PRs. A repository policy disallowing direct main updates will stop the final push; do not silently bypass such a policy.
 
 ## Manual repair
 
