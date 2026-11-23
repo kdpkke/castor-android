@@ -21,6 +21,8 @@ import (
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output/storage"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder/software"
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"github.com/stupside/castor/services/mediaserver/internal/probe"
@@ -147,6 +149,7 @@ func (m *fakeMechanism) Artifact() output.Artifact {
 
 // observedDevice is a device whose playback lifecycle a case states.
 type observedDevice struct {
+	noPlayhead
 	wait func(context.Context) error
 }
 
@@ -406,7 +409,7 @@ func programHead(t *testing.T, ffmpegPath string) []byte {
 func servingAttempt(t *testing.T, ffmpegPath string) *preparation {
 	t.Helper()
 	s := testPreparation(t.Context(),
-		Cast{FFmpegPath: ffmpegPath, Encoders: ffmpeg.Encoders(ffmpegPath, nil), InputArgs: formats.InputArgs, Outputs: testOutputs(), Publisher: loopback{}, Timelines: direct{}},
+		Cast{FFmpegPath: ffmpegPath, Encoders: encoder.Best(ffmpegPath, nil, software.Family{Preset: software.Veryfast}), InputArgs: formats.InputArgs, Outputs: testOutputs(), Publisher: loopback{}, Timelines: direct{}},
 		recovery.Attempt{})
 	t.Cleanup(func() { _ = s.releases.release() })
 	return s
@@ -418,7 +421,7 @@ func openFixture(t *testing.T, contentType, workDir string) delivery {
 	ffmpegPath, _ := requireFFmpegTools(t)
 	origin := serveFixture(t, ffmpegPath)
 	s := servingAttempt(t, ffmpegPath)
-	selected, err := testOutputs().Select(chromecastLike(contentType), nil, 0)
+	selected, err := testOutputs().Select(chromecastLike(contentType), nil, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +442,7 @@ func openFixture(t *testing.T, contentType, workDir string) delivery {
 }
 
 // probingDevice accepts the URL, probes it like a real firmware, and never takes a byte.
-type probingDevice struct{}
+type probingDevice struct{ noPlayhead }
 
 func (probingDevice) Play(ctx context.Context, p Playback) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, p.URL.String(), nil)
@@ -491,7 +494,7 @@ func (probingDevice) Resume(context.Context) error { return nil }
 
 func testEncoding(t *testing.T, opts encoding.EncodeOptions) encodePlan {
 	t.Helper()
-	selected, err := testOutputs().Select(chromecastLike(opts.Format.ContentType), nil, 0)
+	selected, err := testOutputs().Select(chromecastLike(opts.Format.ContentType), nil, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}

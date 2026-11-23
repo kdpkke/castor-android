@@ -106,6 +106,20 @@ func TestCaptionRenditionsWaitForCommittedCues(t *testing.T) {
 	}
 }
 
+func TestTheMasterNamesTheLanguageTheCaptionsAreIn(t *testing.T) {
+	cues := &subtitle.Cues{}
+	cues.Commit([]subtitle.Word{{Start: 1, End: 2, Text: "Bonjour."}}, 12)
+	cues.Close()
+	c, _ := captionWriter(t, cues, 0)
+	c.language = "fr"
+	if err := c.write(t.Context(), bytes.NewReader(captionSource(t))); err != nil {
+		t.Fatal(err)
+	}
+	if master := captionRequest(t, c, "master.m3u8").Body.String(); !strings.Contains(master, `LANGUAGE="fr",NAME="Transcription"`) {
+		t.Fatalf("the track is not labelled with its language: %s", master)
+	}
+}
+
 func TestACueAcrossAFragmentBoundaryPlaysWithBoth(t *testing.T) {
 	data := captionSource(t)
 	cues := &subtitle.Cues{}
@@ -209,7 +223,7 @@ func TestCaptionTimelinePreservesAudioBeforeVideo(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := captionRequest(t, c, "caption-0.vtt").Body.String()
-	if !strings.Contains(text, "00:00:00.450 --> 00:00:01.400") || !strings.Contains(text, "Before the picture.") || !strings.Contains(text, "00:00:02.650 --> 00:00:03.300") {
+	if !strings.Contains(text, "00:00:00.450 --> 00:00:01.400") || !strings.Contains(text, "Before the picture.") || !strings.Contains(text, "00:00:02.650 --> 00:00:03.698") {
 		t.Fatalf("cue lost source clock: %s", text)
 	}
 	var ticks int64

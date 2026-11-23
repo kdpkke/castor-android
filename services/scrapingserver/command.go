@@ -4,9 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"time"
 
 	"github.com/stupside/castor/internal/settings"
 	"github.com/stupside/castor/internal/transport"
+	"github.com/stupside/castor/services/scrapingserver/internal/extract"
 	"github.com/urfave/cli/v3"
 )
 
@@ -22,13 +24,16 @@ type ServiceConfig struct {
 }
 
 type ScrapingConfig struct {
-	ServerConfig `yaml:",inline"`
-	Config       `yaml:",inline"`
+	ServerConfig   `yaml:",inline"`
+	extract.Config `yaml:",inline"`
 }
 
 func defaults() ServiceConfig {
 	c := ServiceConfig{}
-	c.Servers.Scraping = ScrapingConfig{Listen: ":8412", Config: Defaults()}
+	c.Servers.Scraping = ScrapingConfig{
+		Listen:  ":8412",
+		Browser: extract.BrowserConfig{Timeout: 30 * time.Second, Headless: true}, Capture: extract.CaptureConfig{MaxConcurrency: 4},
+	}
 	return c
 }
 
@@ -42,7 +47,7 @@ func Command() *cli.Command {
 		if err != nil {
 			return err
 		}
-		srv := New(newExtractor(cfg.Servers.Scraping.Config))
+		srv := New(extract.New(cfg.Servers.Scraping.Config))
 		slog.InfoContext(ctx, "scraping serving", "address", listener.Addr().String())
 		return transport.Serve(ctx, listener, srv.Authorized(cfg.Servers.Scraping.Token), srv.Shutdown)
 	}}
@@ -54,7 +59,7 @@ func Embedded(ctx context.Context, cmd *cli.Command) (transport.Endpoint, func()
 	if err != nil {
 		return transport.Endpoint{}, nil, err
 	}
-	srv := New(newExtractor(cfg.Servers.Scraping.Config))
+	srv := New(extract.New(cfg.Servers.Scraping.Config))
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return transport.Endpoint{}, nil, err

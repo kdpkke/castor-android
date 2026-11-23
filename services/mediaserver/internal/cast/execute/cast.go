@@ -78,6 +78,9 @@ type Cast struct {
 
 // Device is what a cast plays on, connected for the whole cast by whoever lent it, who also closes it.
 type Device interface {
+	// Playhead is where the device says it plays; a device that cannot say answers with ok false.
+	health.Playhead
+
 	Play(ctx context.Context, p Playback) error
 
 	AwaitEnd(ctx context.Context) error
@@ -135,6 +138,8 @@ type Playlist struct {
 	Segments string
 	// Live is a playlist with no end, which has no Runtime.
 	Live bool
+	// EmbeddedCaptions is a playlist that lists the generated captions itself, for the device to show.
+	EmbeddedCaptions bool
 }
 
 func (s Source) Length() time.Duration   { return s.Runtime }
@@ -172,6 +177,8 @@ type Transcript interface {
 	SampleRate() int
 	Run(ctx context.Context, pcm io.ReadCloser)
 	Cues() *subtitle.Cues
+	// Language is the tag the cues are in.
+	Language() string
 }
 
 // burnRenderer draws committed cues into video for receivers without native delivery.

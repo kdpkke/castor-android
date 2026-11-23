@@ -42,6 +42,7 @@ func TestVerdicts(t *testing.T) {
 		{"a silent producer while an unholdable device has media is not stalled", Playing, Vitals{Landed: 8 << 20, handed: 4 << 20, sinceGrowth: past, Position: 45 * time.Minute, played: 15 * time.Minute}, healthy},
 		{"a silent producer once an unholdable device played it out is stalled", Playing, Vitals{Landed: 8 << 20, handed: 4 << 20, sinceGrowth: past, Position: 15 * time.Minute, played: 16 * time.Minute}, Stalled},
 		{"a holdable device about to outrun its read is lean", Playing, Vitals{holdable: true, Landed: 8 << 20, handed: 4 << 20, Position: 10 * time.Minute, played: 10*time.Minute - lowWater + time.Second}, Lean},
+		{"the first reading of a read the device asked for again is not held, whatever it has made", Playing, Vitals{holdable: true, restarted: true, Landed: 8 << 20, handed: 4 << 20, Position: 10 * time.Minute, played: 10*time.Minute - lowWater + time.Second}, healthy},
 		{"a holdable device with the cushion ahead is healthy", Playing, Vitals{holdable: true, Landed: 8 << 20, handed: 4 << 20, Position: 10 * time.Minute, played: 9 * time.Minute}, healthy},
 		{"a holdable device that fetched nothing yet is not held", Playing, Vitals{holdable: true, Landed: 8 << 20, Position: 10 * time.Minute, played: 10 * time.Minute}, healthy},
 		{"a holdable device outrunning a finished read is left to play out", Playing, Vitals{holdable: true, ended: true, Landed: 8 << 20, handed: 4 << 20, Position: 10 * time.Minute, played: 10 * time.Minute}, healthy},
@@ -137,25 +138,26 @@ func roomy() Vitals {
 
 func TestACastNotLiftedSaysWhy(t *testing.T) {
 	for _, tt := range []struct {
-		name         string
-		change       func(*Vitals)
-		want, detail string
+		name   string
+		change func(*Vitals)
+		want   whyNotLifted
+		detail string
 	}{
 		{"nothing in the way", func(*Vitals) {}, "", ""},
-		{"a delivery that cannot change", func(v *Vitals) { v.switchable = false }, "the delivery cannot change while the device plays it", ""},
-		{"a held device", func(v *Vitals) { v.paused = true }, "the device is held", ""},
-		{"an intake not covered yet", func(v *Vitals) { v.intakeKnown = false }, "what the device takes is not measured yet", ""},
-		{"a device taking less than the cast weighs", func(v *Vitals) { v.intake = 500_000 }, "the device takes less than the cast weighs", "4.0 Mbit/s of 6.4 Mbit/s"},
+		{"a delivery that cannot change", func(v *Vitals) { v.switchable = false }, deliveryFixed, ""},
+		{"a held device", func(v *Vitals) { v.paused = true }, deviceHeld, ""},
+		{"an intake not covered yet", func(v *Vitals) { v.intakeKnown = false }, intakeUnmeasured, ""},
+		{"a device taking less than the cast weighs", func(v *Vitals) { v.intake = 500_000 }, intakeBelowWeight, "4.0 Mbit/s of 6.4 Mbit/s"},
 		{"a device with little buffered still has room", func(v *Vitals) { v.took = v.played + time.Second }, "", ""},
-		{"a device that took less than it played", func(v *Vitals) { v.took = v.played - time.Second }, "the device has taken less than it has played", "-1s"},
-		{"a device that has stalled for minutes", func(v *Vitals) { v.took = v.played - 2*time.Minute }, "the device has taken less than it has played", "-2m0s"},
+		{"a device that took less than it played", func(v *Vitals) { v.took = v.played - time.Second }, tookLessThanPlayed, "-1s"},
+		{"a device that has stalled for minutes", func(v *Vitals) { v.took = v.played - 2*time.Minute }, tookLessThanPlayed, "-2m0s"},
 		{"no room above", func(v *Vitals) { v.room = false }, noRoom, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			v := roomy()
 			tt.change(&v)
-			if got, detail := v.unlifted(); got != tt.want || detail != tt.detail {
-				t.Errorf("unlifted = %q (%q), want %q (%q)", got, detail, tt.want, tt.detail)
+			if got := v.unlifted(); got.why != tt.want || got.detail != tt.detail {
+				t.Errorf("unlifted = %q (%q), want %q (%q)", got.why, got.detail, tt.want, tt.detail)
 			}
 		})
 	}
@@ -232,5 +234,8 @@ func TestWhereTheViewerGotToIsTheDevicesWordElseTheClockFromWhereItAsked(t *test
 	}
 	if _, ok := (Vitals{began: 20 * time.Minute, played: time.Minute}).Reached(); ok {
 		t.Error("a reading taken before any device played says where its viewer got to")
+	}
+	if got, ok := (Vitals{Landed: 4 << 20}).WithHead(95 * time.Second).Reached(); !ok || got != 95*time.Second {
+		t.Errorf("a reading given the device's word says %v (%t), want the viewer at 1m35s", got, ok)
 	}
 }

@@ -13,6 +13,9 @@ import (
 func (s *session) Controls() device.Controls {
 	s.watchMu.Lock()
 	defer s.watchMu.Unlock()
+	if s.watch == nil {
+		return device.Controls{}
+	}
 	return device.Controls{Pause: s.watch.commands&1 != 0, Seek: s.watch.commands&2 != 0}
 }
 
@@ -25,12 +28,10 @@ type seekCommand struct {
 // A finite HLS LOAD can be accepted while the receiver stays buffering at zero.
 // Keep the previous publication until playback starts. One seek into available
 // media recovers receivers stuck at the beginning of the new portion.
-func (s *session) awaitHLSStart(ctx context.Context, reply []byte) error {
+func (s *session) awaitHLSStart(ctx context.Context, watched *playback, reply []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	s.watchMu.Lock()
-	transport, content := s.transport, s.watch.content
-	s.watchMu.Unlock()
+	transport, content := watched.transport, watched.content
 	started, nudged := time.Now(), false
 	previousState, previousReason := "", ""
 	for {
@@ -40,7 +41,11 @@ func (s *session) awaitHLSStart(ctx context.Context, reply []byte) error {
 		// LOADING may arrive as IDLE before a media session is assigned.
 		// Refresh the identity after each reply rather than pinning its initial zero.
 		s.watchMu.Lock()
-		mediaSession := s.watch.mediaSession
+		if s.watch != watched {
+			s.watchMu.Unlock()
+			return context.Canceled
+		}
+		mediaSession := watched.mediaSession
 		s.watchMu.Unlock()
 		status, err := positionStatus(reply, mediaSession)
 		if err == nil && (status.PlayerState != previousState || status.IdleReason != previousReason) {
@@ -82,7 +87,11 @@ func (s *session) Seek(ctx context.Context, at time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	s.watchMu.Lock()
-	transport, mediaSession, content := s.transport, s.watch.mediaSession, s.watch.content
+	if s.watch == nil {
+		s.watchMu.Unlock()
+		return errNoMediaSession
+	}
+	transport, mediaSession, content := s.watch.transport, s.watch.mediaSession, s.watch.content
 	checkPlayback := s.watch.finiteMP4Source && s.watch.playerState == "PLAYING" && s.watch.commands&1 != 0
 	s.watchMu.Unlock()
 	if mediaSession == 0 {

@@ -5,56 +5,117 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"sync"
 
 	castmedia "github.com/vishen/go-chromecast/cast"
 
+	"github.com/stupside/castor/internal/machine"
 	"github.com/stupside/castor/services/apiserver/internal/device"
 )
 
-// ending is one Play's end: done closes once the receiver says how that playback ended.
-type ending struct {
-	once sync.Once
-	done chan struct{}
-	err  error
+var (
+	errRefused = errors.New("chromecast refused the media: the receiver went idle with an error before playback began")
+	errFailed  = errors.New("chromecast playback ended with receiver error")
+)
+
+// captionsState is a playlist's own caption track, from the playlist listing it to the receiver being asked to show it.
+type captionsState uint8
+
+const (
+	// captionsListed is a track the receiver has not been asked to show.
+	captionsListed captionsState = iota
+	// captionsAsked is a track the receiver was asked to show, once, so a viewer who turns it off keeps it off.
+	captionsAsked
+)
+
+func (s captionsState) String() string {
+	return [...]string{captionsListed: "listed", captionsAsked: "asked"}[s]
 }
 
-func newEnding() *ending { return &ending{done: make(chan struct{})} }
+type captionsEvent uint8
 
-// AwaitEnd observes the Cast channel rather than polling it.
-func (s *session) AwaitEnd(ctx context.Context) error {
-	s.watchMu.Lock()
-	e := s.ending
-	s.watchMu.Unlock()
-	select {
-	case <-e.done:
-		return e.err
-	case <-s.ch.gone:
-		// A status read before the connection dropped still decides the ending.
-		select {
-		case <-e.done:
-			return e.err
-		default:
-		}
-		return &device.Gone{Device: s.name, Observed: "the Cast connection closed while the cast was playing"}
-	case <-ctx.Done():
-		return context.Cause(ctx)
+const captionsShown captionsEvent = iota
+
+func (captionsEvent) String() string { return "shown" }
+
+// ownCaptions is the track of a playlist that lists captions of its own.
+func ownCaptions() *machine.Machine[captionsState, captionsEvent] {
+	return machine.New("chromecast captions", captionsListed, []captionsState{captionsAsked}, []machine.Edge[captionsState, captionsEvent]{
+		{On: captionsShown, From: []captionsState{captionsListed}, To: captionsAsked},
+	}, nil)
+}
+
+// playback follows the one Play the device was last handed, from its LOAD to its end. What the receiver says becomes
+// the facts of the device.Lifecycle every family shares; what is the Cast protocol's own stays here: which media
+// session is the Play's, the code the receiver gave for an error, and the caption track to show.
+// The session holds its lock around every use of it.
+type playback struct {
+	content string
+	// transport is the media receiver the Play loaded on, where its media commands go.
+	transport string
+	// mediaSession is the receiver's session for the media, zero until it reports it.
+	mediaSession    int
+	commands        uint64
+	playerState     string
+	finiteMP4Source bool
+	// receiverCode is the detailed code of the last error the receiver sent, zero when it sent none.
+	receiverCode int
+	// captions is the playlist's own caption track, nil for a playlist that lists none.
+	captions *machine.Machine[captionsState, captionsEvent]
+
+	life   *device.Lifecycle
+	ending *device.Ending
+	// identity carries the cast's id into the lifecycle's trace: the receiver's messages come from no call of the cast's.
+	identity context.Context
+}
+
+// newPlayback starts following a Play of content loaded on transport, whose playlist lists captions of its own or not.
+func newPlayback(ctx context.Context, content, transport string, listsCaptions bool) *playback {
+	p := &playback{
+		content: content, transport: transport,
+		life: device.NewLifecycle(familyType), ending: device.NewEnding(), identity: context.WithoutCancel(ctx),
+	}
+	if listsCaptions {
+		p.captions = ownCaptions()
+	}
+	return p
+}
+
+// abandon ends the trace of a Play its session is done with before it ended; a session with no Play has none to end.
+func (p *playback) abandon() {
+	if p != nil {
+		p.life.Abandon(p.identity)
 	}
 }
 
-func (s *session) watchMessage(h messageHeader, payload []byte) {
-	var response castmedia.MediaStatusResponse
-	decoded := json.Unmarshal(payload, &response)
-	s.watchMu.Lock()
-	defer s.watchMu.Unlock()
+// outcome is the error the Play ended on, nil for a clean end.
+func (p *playback) outcome() error {
+	switch {
+	case p.life.WasRefused():
+		return p.named(errRefused)
+	case p.life.HasFailed():
+		return p.named(errFailed)
+	}
+	return nil
+}
+
+// named is err with the receiver's own code for why it failed, when it gave one.
+func (p *playback) named(err error) error {
+	if err == nil || p.receiverCode == 0 {
+		return err
+	}
+	return fmt.Errorf("%w (receiver error code %d)", err, p.receiverCode)
+}
+
+// hear folds one receiver message into the Play, and returns the command the Play now asks the receiver for.
+func (p *playback) hear(h messageHeader, payload []byte) (editTracksInfo, bool) {
 	if h.DetailedErrorCode != 0 {
-		s.watch.receiverCode = h.DetailedErrorCode
+		p.receiverCode = h.DetailedErrorCode
 	}
-	if decoded != nil {
-		return
+	var response castmedia.MediaStatusResponse
+	if json.Unmarshal(payload, &response) != nil {
+		return editTracksInfo{}, false
 	}
-	over, playErr := playbackOutcome(&s.watch, &response)
-	// The controls follow what the receiver supports for the media session the outcome just followed.
+	p.apply(&response)
 	var controls struct {
 		Status []struct {
 			MediaSessionID int     `json:"mediaSessionId"`
@@ -63,90 +124,66 @@ func (s *session) watchMessage(h messageHeader, payload []byte) {
 	}
 	if response.Type == msgMediaStatus && json.Unmarshal(payload, &controls) == nil {
 		for _, status := range controls.Status {
-			if status.MediaSessionID == s.watch.mediaSession && status.Commands != nil {
-				s.watch.commands = *status.Commands
+			if status.MediaSessionID == p.mediaSession && status.Commands != nil {
+				p.commands = *status.Commands
 			}
 		}
 	}
-	if over {
-		e := s.ending
-		e.once.Do(func() {
-			e.err = s.watch.named(playErr)
-			close(e.done)
-		})
-	}
+	return p.showCaptions(reportedTracks(payload, p.mediaSession))
 }
 
-// playback follows the one Play the device was last handed, from its load to its end.
-type playback struct {
-	armed           bool
-	content         string
-	mediaSession    int
-	active          bool
-	playerState     string
-	finiteMP4Source bool
-	// commands is the receiver's supportedMediaCommands for this media session, which the controls follow.
-	commands uint64
-	// receiverCode is the detailed code of the last error the receiver sent since begin, zero when it sent none.
-	receiverCode int
-}
-
-func (w *playback) begin(content string) { *w = playback{armed: true, content: content} }
-
-func (w *playback) disarm() { *w = playback{} }
-
-// named is err with the receiver's own code for why it failed, when it gave one.
-func (w *playback) named(err error) error {
-	if err == nil || w.receiverCode == 0 {
-		return err
-	}
-	return fmt.Errorf("%w (receiver error code %d)", err, w.receiverCode)
-}
-
-func (w *playback) observe(status castmedia.Media) (bool, error) {
-	switch {
-	case w.mediaSession == 0:
-		if status.Media.ContentId != w.content || status.MediaSessionId == 0 {
-			return false, nil
+// apply turns a message into what it says of the device, and ends the Play once that ends it.
+func (p *playback) apply(response *castmedia.MediaStatusResponse) {
+	switch response.Type {
+	case msgClose:
+		p.life.Stopped(p.identity)
+	case msgMediaStatus:
+		for _, status := range response.Status {
+			p.observe(status)
 		}
-		w.mediaSession = status.MediaSessionId
-	case status.MediaSessionId != w.mediaSession:
-		return false, nil
 	}
+	if p.life.Over() {
+		p.ending.Finish(p.outcome())
+	}
+}
 
-	w.playerState = status.PlayerState
+// observe turns one status into what it says of the device, if it is of this Play's media.
+func (p *playback) observe(status castmedia.Media) {
+	if p.mediaSession == 0 {
+		if status.Media.ContentId != p.content || status.MediaSessionId == 0 {
+			return
+		}
+		p.mediaSession = status.MediaSessionId
+	} else if status.MediaSessionId != p.mediaSession {
+		return
+	}
+	p.playerState = status.PlayerState
 	switch status.PlayerState {
-	case "BUFFERING", "PLAYING", "PAUSED":
-		w.active = true
+	case stateBuffering, statePlaying, statePaused:
+		p.life.Played(p.identity)
 	case stateIdle:
 		switch status.IdleReason {
 		case idleError:
-			if w.active {
-				return true, errors.New("chromecast playback ended with receiver error")
+			if p.life.Started() {
+				p.life.Failed(p.identity)
+			} else {
+				p.life.Refused(p.identity)
 			}
-			return true, errors.New("chromecast refused the media: the receiver went idle with an error before playback began")
-		case "FINISHED", "CANCELLED", "INTERRUPTED":
-			return w.active, nil
+		case idleFinished, idleCancelled, idleInterrupted:
+			p.life.Stopped(p.identity)
 		}
 	}
-	return false, nil
 }
 
-func playbackOutcome(w *playback, response *castmedia.MediaStatusResponse) (bool, error) {
-	if !w.armed {
-		return false, nil
+// showCaptions is the command that shows the playlist's own caption track once the receiver reports it.
+func (p *playback) showCaptions(tracks []track) (editTracksInfo, bool) {
+	if p.captions == nil || !p.captions.Is(captionsListed) {
+		return editTracksInfo{}, false
 	}
-	switch response.Type {
-	case msgClose:
-		return w.active, nil
-	case msgMediaStatus:
-		for _, status := range response.Status {
-			if over, err := w.observe(status); over {
-				return true, err
-			}
+	for _, t := range tracks {
+		if t.Type == trackText && p.captions.Take(p.identity, captionsShown) {
+			return editTracksInfo{Type: msgEditTracks, MediaSessionID: p.mediaSession, ActiveTrackIDs: []int{t.TrackID}}, true
 		}
-		return false, nil
-	default:
-		return false, nil
 	}
+	return editTracksInfo{}, false
 }

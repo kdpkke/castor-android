@@ -100,9 +100,9 @@ var classes = []classRule{{
 	when: func(e Evidence) bool { return e.TimelineErr != nil },
 	kind: unreachable,
 }, {
-	// Android extension: a read its own encoder failed had a link to read, even with nothing landed (execute/read_hardware.go).
+	// A read or remux whose hardware encode exited had a link to read; software retries it before the link is given up.
 	why:  "the read's encoder failed",
-	when: func(e Evidence) bool { return e.EncodeErr != nil && e.ReadErr != nil && e.Reached <= health.Reading },
+	when: func(e Evidence) bool { return e.EncodeErr != nil && e.Reached <= health.Reading && !e.ReadIncomplete },
 	kind: encodeFailed,
 }, {
 	// Media landed then died is deliberately not unreachable; that would send a working cast to recovery.
@@ -171,7 +171,7 @@ var unrecognised = classRule{
 }
 
 // classify names what failed, after the strategies already tried.
-func classify(a Attempt, o Outcome, tried []string) *fault {
+func classify(a Attempt, o Outcome, tried []revised) *fault {
 	r := classFor(o.Evidence)
 	if r.kind == unclassified && errors.Is(o.Err, media.ErrNativeIncompatible) {
 		r = classRule{kind: nativeIncompatible, why: "the source requires conversion"}
@@ -205,16 +205,28 @@ type fault struct {
 	attempt  Attempt
 	evidence Evidence
 	// tried distinguishes 'could not cast this' from 'tried three things and here is what each measured'.
-	tried []string
+	tried []revised
 	// err is the attempt's own error, unwrapped so errors.Is still finds cancellation or exit status.
 	err error
 }
+
+// revised is a strategy already run, and the failure that prompted it.
+type revised struct {
+	action Action
+	why    string
+}
+
+func (r revised) String() string { return string(r.action) + " after " + r.why }
 
 func (f *fault) Error() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s: %s", f.kind, f.why)
 	if len(f.tried) > 0 {
-		fmt.Fprintf(&b, "; already tried: %s", strings.Join(f.tried, ", "))
+		tried := make([]string, len(f.tried))
+		for i, r := range f.tried {
+			tried[i] = r.String()
+		}
+		fmt.Fprintf(&b, "; already tried: %s", strings.Join(tried, ", "))
 	}
 	if gone := f.evidence.DeviceGone; gone != nil {
 		fmt.Fprintf(&b, "; the device %q stopped answering", gone.Device)

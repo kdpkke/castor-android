@@ -9,6 +9,7 @@ import (
 	"time"
 
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
+	"github.com/stupside/castor/internal/machine"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/stupside/castor/gen/castor/media/v1/mediav1connect"
@@ -29,7 +30,7 @@ func TestStopReconciliationHasOneBoundedBudget(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		lost := errors.New("stop response lost")
 		remote := &unavailableCast{err: lost}
-		client := &Client{Casts: remote}
+		client := &Client{casts: remote}
 		ctx, cancel := context.WithTimeout(t.Context(), stopGrace)
 		defer cancel()
 		start := time.Now()
@@ -50,7 +51,7 @@ func TestRemoteCompletionDuringJoinSurvivesStopTimeout(t *testing.T) {
 		watched := make(chan watchResult, 1)
 		ended := &castorv1.Ended{Result: &castorv1.Ended_Stopped{Stopped: &emptypb.Empty{}}}
 		s := &session{
-			client: &Client{Casts: &unavailableCast{err: errors.New("stop response lost")}},
+			client: &Client{casts: &unavailableCast{err: errors.New("stop response lost")}},
 			id:     "cast", ctx: ctx, cancel: cancel, machine: newSessionMachine(), watching: watched,
 		}
 		s.move(remoteStarted)
@@ -84,7 +85,7 @@ func TestAStopGraceThatRanOutIsReportedOnce(t *testing.T) {
 		defer cancel()
 		watched := make(chan watchResult, 1)
 		s := &session{
-			client: &Client{Casts: &unavailableCast{err: errors.New("stop response lost")}},
+			client: &Client{casts: &unavailableCast{err: errors.New("stop response lost")}},
 			id:     "cast", ctx: ctx, cancel: cancel, machine: newSessionMachine(), watching: watched,
 			failure: errors.New("the device went away"),
 		}
@@ -99,4 +100,12 @@ func TestAStopGraceThatRanOutIsReportedOnce(t *testing.T) {
 			t.Errorf("finish = %q, want the grace that ran out named once", err)
 		}
 	})
+}
+
+func TestAnEventTheSessionRefusesStopsItTheWayAFailureDoes(t *testing.T) {
+	s := &session{ctx: t.Context(), machine: newSessionMachine()}
+	s.move(stopSettled)
+	if !errors.Is(s.failure, machine.ErrRefused) || !s.machine.Is(sessionStopping) {
+		t.Errorf("session in %s with failure %v, want it stopping on the refusal", s.machine.State(), s.failure)
+	}
 }

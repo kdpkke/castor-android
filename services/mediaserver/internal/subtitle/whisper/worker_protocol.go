@@ -1,15 +1,15 @@
 package whisper
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"os"
+	"os/signal"
 
 	wcpp "github.com/ggerganov/whisper.cpp/bindings/go/pkg/whisper"
 	"github.com/stupside/castor/services/mediaserver/internal/subtitle"
@@ -26,6 +26,8 @@ const (
 // is only an IPC worker: it does not initialize services or process CLI options.
 func init() {
 	if len(os.Args) == 2 && os.Args[1] == workerArgument {
+		// The terminal's interrupt reaches this child with its parent, which ends it by closing its input.
+		signal.Ignore(os.Interrupt)
 		if err := serveWorker(os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -44,7 +46,6 @@ type workerRequest struct {
 	workerConfig
 	Samples []float32
 	Offset  float64
-	Prompt  string
 }
 type workerResponse struct {
 	Words []subtitle.Word
@@ -62,7 +63,7 @@ func writeFrame(w io.Writer, value any) error {
 	if err := binary.Write(w, binary.BigEndian, uint32(len(payload))); err != nil {
 		return err
 	}
-	_, err = io.Copy(w, bytes.NewReader(payload))
+	_, err = w.Write(payload)
 	return err
 }
 func readFrame(r io.Reader, value any) error {
@@ -80,7 +81,7 @@ func readFrame(r io.Reader, value any) error {
 	return json.Unmarshal(payload, value)
 }
 func (r workerRequest) validate() error {
-	if len(r.Samples) > 30*subtitle.SampleRate || len(r.Prompt) > 4096 || len(r.ModelPath) > 8192 || len(r.VADPath) > 8192 || len(r.Language) > 32 || math.IsNaN(r.Offset) || math.IsInf(r.Offset, 0) {
+	if len(r.Samples) > 30*subtitle.SampleRate || len(r.ModelPath) > 8192 || len(r.VADPath) > 8192 || len(r.Language) > 32 || math.IsNaN(r.Offset) || math.IsInf(r.Offset, 0) {
 		return errors.New("native recognition request exceeds limits")
 	}
 	return nil
@@ -121,7 +122,7 @@ func serveWorker(in io.Reader, out io.Writer) error {
 		if req.workerConfig != config {
 			return errors.New("native worker configuration changed")
 		}
-		words, err := (recognizer{model: model, language: req.Language, vadModelPath: req.VADPath}).Recognize(context.Background(), req.Samples, req.Offset, req.Prompt)
+		words, err := (recognizer{model: model, language: req.Language, vadModelPath: req.VADPath}).Recognize(context.Background(), req.Samples, req.Offset)
 		response := workerResponse{Words: words}
 		if err != nil {
 			response.Error = err.Error()

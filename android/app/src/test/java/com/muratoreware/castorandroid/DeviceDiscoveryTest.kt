@@ -2,6 +2,7 @@ package com.muratoreware.castorandroid
 
 import castor.v1.DeviceOuterClass.Device
 import castor.v1.DeviceOuterClass.DeviceType
+import java.net.InetAddress
 import java.net.ServerSocket
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.*
@@ -12,6 +13,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DeviceDiscoveryTest {
+  @Test
+  fun discoveryPrefersANeighbourOverATranslatedAddressAndKeepsTheScopedAddressLast() {
+    val v4 = InetAddress.getByName("192.0.2.4")
+    val v6 = InetAddress.getByName("2001:db8::4")
+    val local = InetAddress.getByName("fe80::4")
+    val addresses = listOf(local, v4, v6)
+    assertEquals(v6, DeviceDiscovery.preferredAddress(addresses) { it == v6 || it == local })
+    assertEquals(v4, DeviceDiscovery.preferredAddress(addresses) { true })
+    assertEquals(v4, DeviceDiscovery.preferredAddress(addresses) { false })
+    assertEquals(local, DeviceDiscovery.preferredAddress(listOf(local)) { false })
+    assertNull(DeviceDiscovery.preferredAddress(emptyList()) { false })
+  }
+
   private val id = "11223344556677889900aabbccddeeff"
 
   private fun remembered(port: Int) =

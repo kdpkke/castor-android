@@ -15,7 +15,7 @@ import (
 
 // Config holds settings for the isolated whisper.cpp transcriber.
 type Config struct {
-	ModelPath string `yaml:"model_path"` // override the auto-downloaded tiny model (tiny.en for English)
+	ModelPath string `yaml:"model_path"` // override the auto-downloaded base model (base.en for English)
 }
 
 // Transcript owns speech recognition and its committed captions. Burn-in is an optional consumer.
@@ -70,6 +70,9 @@ func (b *Transcript) transcribe(ctx context.Context, pcm io.Reader) error {
 	defer worker.Close()
 	return subtitle.Transcribe(ctx, pcm, worker, b.cues)
 }
+
+// Language is the code transcribed in.
+func (b *Transcript) Language() string { return b.config.Language }
 
 // Cues supplies timed captions independently of the selected renderer.
 func (b *Transcript) Cues() *subtitle.Cues { return b.cues }

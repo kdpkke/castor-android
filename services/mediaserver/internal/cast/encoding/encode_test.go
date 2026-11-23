@@ -14,6 +14,8 @@ import (
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/codec"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/container"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/fetch"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder/mediacodec"
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
@@ -90,7 +92,7 @@ func TestTheArgvRendersTheDecision(t *testing.T) {
 	src := muxedSource(t, mustURL(t, "http://example.test/in.m3u8"), media.HLS, fetch.Policy{})
 	piped := FromPipe(fetch.Pace{})
 	scale := "scale=-2:'min(1080,max(2,trunc(ih/2)*2))'"
-	hardware := ffmpeg.Encoder{
+	hardware := encoder.Encoder{
 		Name: "h264_test_hw", Codec: media.CodecH264, Hardware: true,
 		InitArgs: []string{"-init_hw_device", "test=host"},
 		Filters:  []string{"format=nv12", "hwupload"},
@@ -266,8 +268,8 @@ func TestPipesAreCountedFromTheArgvAndMatchTheConsumer(t *testing.T) {
 	}
 }
 
-// libx264 is the software H.264 encoder as ffmpeg.Encoders states it.
-var libx264 = ffmpeg.Encoder{Name: "libx264", Codec: media.CodecH264, Flags: []string{"-preset", "veryfast", "-pix_fmt", "yuv420p"}}
+// libx264 is the software H.264 encoder at the default preset.
+var libx264 = encoder.Encoder{Name: "libx264", Codec: media.CodecH264, Flags: []string{"-preset", "veryfast", "-pix_fmt", "yuv420p"}}
 
 func mustURL(t *testing.T, raw string) *url.URL {
 	t.Helper()
@@ -350,6 +352,49 @@ func TestFilterArgEscapingSurvivesAWindowsPath(t *testing.T) {
 	}
 }
 
+// mediaCodecEncoder is MediaCodec's encoder for c.
+func mediaCodecEncoder(t *testing.T, c media.Codec) encoder.Encoder {
+	t.Helper()
+	for _, e := range (mediacodec.Family{}).Encoders() {
+		if e.Codec == c {
+			return e
+		}
+	}
+	t.Fatalf("MediaCodec has no %s encoder", c)
+	return encoder.Encoder{}
+}
+
+func TestAMediaCodecEncodeIsAskedOnlyWhatItHonors(t *testing.T) {
+	for _, tt := range []struct {
+		codec       media.Codec
+		level, want string
+	}{
+		{media.CodecH264, "4.0", "4"},
+		{media.CodecH264, "4.2", "4.2"},
+		{media.CodecHEVC, "4.1", "m4.1"},
+	} {
+		args := videoEncodeArgs(codec.VideoEncode{
+			Encoder: mediaCodecEncoder(t, tt.codec),
+			Level:   tt.level, Bitrate: 4_000_000, Maxrate: 4_000_000, Bufsize: 8_000_000,
+			KeyframeIntervalSec: 2, FrameRate: 23.976,
+		})
+		value := func(flag string) string {
+			if i := slices.Index(args, flag); i >= 0 && i+1 < len(args) {
+				return args[i+1]
+			}
+			return ""
+		}
+		if value("-level:v") != tt.want || value("-g") != "48" || value("-b:v") == "" {
+			t.Errorf("%s %s: args %q, want -level:v %s, -g 48 and -b:v", tt.codec, tt.level, args, tt.want)
+		}
+		for _, ignored := range []string{"-maxrate", "-bufsize", "-force_key_frames"} {
+			if slices.Contains(args, ignored) {
+				t.Errorf("%s: args %q carry %s, which MediaCodec ignores", tt.codec, args, ignored)
+			}
+		}
+	}
+}
+
 func TestADolbyVisionCopyIsMarkedDvh1OnlyForAPlayerThatNeedsIt(t *testing.T) {
 	dolbyVision := media.ProbeInfo{VideoCodec: media.CodecHEVC, AudioCodec: media.CodecAAC, VideoDolbyVision: &media.DolbyVision{Profile: 8, Level: 6, Compatibility: 1}}
 	plain := dolbyVision
@@ -373,36 +418,5 @@ func TestADolbyVisionCopyIsMarkedDvh1OnlyForAPlayerThatNeedsIt(t *testing.T) {
 				t.Errorf("-tag:v = %q in %q, want one %q", got, args, tt.want)
 			}
 		})
-	}
-}
-
-func TestAMediaCodecEncodeIsAskedOnlyWhatItHonors(t *testing.T) {
-	for _, tt := range []struct {
-		codec       media.Codec
-		level, want string
-	}{
-		{media.CodecH264, "4.0", "4"},
-		{media.CodecH264, "4.2", "4.2"},
-		{media.CodecHEVC, "4.1", "m4.1"},
-	} {
-		args := videoEncodeArgs(codec.VideoEncode{
-			Encoder: ffmpeg.Encoder{Name: "mediacodec", Codec: tt.codec, AverageRate: true, GOPKeyframes: true, MediaCodecLevels: true},
-			Level:   tt.level, Bitrate: 4_000_000, Maxrate: 4_000_000, Bufsize: 8_000_000,
-			KeyframeIntervalSec: 2, FrameRate: 23.976,
-		})
-		value := func(flag string) string {
-			if i := slices.Index(args, flag); i >= 0 && i+1 < len(args) {
-				return args[i+1]
-			}
-			return ""
-		}
-		if value("-level:v") != tt.want || value("-g") != "48" || value("-b:v") == "" {
-			t.Errorf("%s %s: args %q, want -level:v %s, -g 48 and -b:v", tt.codec, tt.level, args, tt.want)
-		}
-		for _, ignored := range []string{"-maxrate", "-bufsize", "-force_key_frames"} {
-			if slices.Contains(args, ignored) {
-				t.Errorf("%s: args %q carry %s, which MediaCodec ignores", tt.codec, args, ignored)
-			}
-		}
 	}
 }

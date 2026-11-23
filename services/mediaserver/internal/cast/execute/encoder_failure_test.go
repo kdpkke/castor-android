@@ -19,6 +19,8 @@ import (
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/codec"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder/software"
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"github.com/stupside/castor/services/mediaserver/internal/source"
@@ -26,6 +28,7 @@ import (
 
 // fetchingDevice fetches what it was handed in the background and ends once it took it all.
 type fetchingDevice struct {
+	noPlayhead
 	caps media.Capabilities
 	// slow reads the first play slowly; held stops reading it for a while, as a pause does.
 	slow, held bool
@@ -103,8 +106,8 @@ func (r *revisions) Revising(action recovery.Action, _ string) {
 	r.actions = append(r.actions, action)
 }
 
-// faultCast casts links through testdata/ffmpeg-fault, with encoder as the hardware H.264 encoder.
-func faultCast(t *testing.T, dev Device, encoder string, links ...*source.Stream) (actions []recovery.Action, ran []recovery.Attempt, outcomes []recovery.Outcome, err error) {
+// faultCast casts links through testdata/ffmpeg-fault, with hardwareName as the hardware H.264 encoder.
+func faultCast(t *testing.T, dev Device, hardwareName string, links ...*source.Stream) (actions []recovery.Action, ran []recovery.Attempt, outcomes []recovery.Outcome, err error) {
 	t.Helper()
 	ffmpegPath, ffprobePath := requireFFmpegTools(t)
 	faulty, err := filepath.Abs("testdata/ffmpeg-fault")
@@ -112,12 +115,12 @@ func faultCast(t *testing.T, dev Device, encoder string, links ...*source.Stream
 		t.Fatal(err)
 	}
 	c := realCast(dev, faulty, ffprobePath)
-	software := ffmpeg.Encoders(ffmpegPath, nil)
-	c.Encoders = func(ctx context.Context, codec media.Codec, soft bool) (ffmpeg.Encoder, bool) {
+	inSoftware := encoder.Best(ffmpegPath, nil, software.Family{Preset: software.Veryfast})
+	c.Encoders = func(ctx context.Context, codec media.Codec, soft bool) (encoder.Encoder, bool) {
 		if soft || codec != media.CodecH264 {
-			return software(ctx, codec, true)
+			return inSoftware(ctx, codec, true)
 		}
-		return ffmpeg.Encoder{Name: encoder, Codec: media.CodecH264, Hardware: true, Flags: []string{"-pix_fmt", "yuv420p"}}, true
+		return encoder.Encoder{Name: hardwareName, Codec: media.CodecH264, Hardware: true, Flags: []string{"-pix_fmt", "yuv420p"}}, true
 	}
 	var mu sync.Mutex
 	runner := runnerFunc(func(ctx context.Context, a recovery.Attempt) recovery.Outcome {
@@ -157,9 +160,9 @@ func TestAHardwareEncoderThatFailsOnRealInputIsReplacedBySoftware(t *testing.T) 
 	stream := sourceOf(t, generateFixture(t, ffmpegPath, "movie.ts", 60, []string{"-vf", "noise=alls=40:allf=t", "-c:v", "mpeg4", "-c:a", "aac", "-ac", "2", "-shortest", "-f", "mpegts"}))
 
 	for _, tt := range []struct {
-		name    string
-		encoder string
-		caps    media.Capabilities
+		name     string
+		hardware string
+		caps     media.Capabilities
 		// resumed: the retry starts past 0; wedged: the first attempt ended Wedged.
 		slow, held, resumed, wedged bool
 		want                        []recovery.Action
@@ -175,7 +178,7 @@ func TestAHardwareEncoderThatFailsOnRealInputIsReplacedBySoftware(t *testing.T) 
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			actions, ran, outcomes, err := faultCast(t, &fetchingDevice{caps: tt.caps, slow: tt.slow, held: tt.held}, tt.encoder, stream)
+			actions, ran, outcomes, err := faultCast(t, &fetchingDevice{caps: tt.caps, slow: tt.slow, held: tt.held}, tt.hardware, stream)
 			if err != nil {
 				t.Fatalf("the cast failed instead of going on in software: %v", err)
 			}
@@ -192,6 +195,64 @@ func TestAHardwareEncoderThatFailsOnRealInputIsReplacedBySoftware(t *testing.T) 
 				t.Errorf("the first attempt ended on %v, want wedged %t", outcomes[0].Err, tt.wedged)
 			}
 		})
+	}
+}
+
+// playheadDevice plays what it is handed without fetching it, says where it got to, and stays until the attempt fails; its second play ends at once.
+type playheadDevice struct {
+	caps  media.Capabilities
+	at    time.Duration
+	mu    sync.Mutex
+	plays int
+}
+
+func (d *playheadDevice) Play(context.Context, Playback) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.plays++
+	return nil
+}
+
+func (d *playheadDevice) AwaitEnd(ctx context.Context) error {
+	d.mu.Lock()
+	again := d.plays > 1
+	d.mu.Unlock()
+	if again {
+		return nil
+	}
+	<-ctx.Done()
+	return context.Cause(ctx)
+}
+
+func (d *playheadDevice) Position(context.Context) (time.Duration, bool, bool) {
+	return d.at, false, true
+}
+func (d *playheadDevice) Capabilities() media.Capabilities { return d.caps }
+func (*playheadDevice) Pause(context.Context) error        { return nil }
+func (*playheadDevice) Resume(context.Context) error       { return nil }
+
+// A playlist has no watch to keep where the viewer got to, so a failed attempt asks the device, and the retry resumes from its answer.
+func TestAHardwareEncodeThatDiedWhilePlayingAPlaylistIsMadeAgainInSoftwareFromWhereTheDeviceGot(t *testing.T) {
+	t.Parallel()
+	ffmpegPath, _ := requireFFmpegTools(t)
+	stream := sourceOf(t, generateFixture(t, ffmpegPath, "movie.ts", 60, []string{"-vf", "noise=alls=40:allf=t", "-c:v", "mpeg4", "-c:a", "aac", "-ac", "2", "-shortest", "-f", "mpegts"}))
+	dev := &playheadDevice{caps: chromecastLike(media.HLS), at: 25 * time.Second}
+
+	actions, ran, outcomes, err := faultCast(t, dev, "h264_crash_late", stream)
+	if err != nil {
+		t.Fatalf("the cast failed instead of going on in software: %v", err)
+	}
+	if len(outcomes) < 2 || outcomes[0].Evidence.Reached < health.Playing {
+		t.Fatalf("the first attempt did not die while playing: %d attempts, %+v", len(outcomes), outcomes[0].Evidence)
+	}
+	if at, placed := outcomes[0].Evidence.Vitals.Reached(); !placed || at != 25*time.Second {
+		t.Errorf("the first attempt places the viewer at %s (%t), want where the device said, 25s", at, placed)
+	}
+	if !slices.Equal(actions, []recovery.Action{recovery.SoftwareEncode}) {
+		t.Errorf("revisions %v, want one software encode", actions)
+	}
+	if next := ran[1]; !next.Software || next.Program.Start != 25*time.Second {
+		t.Errorf("the retry: software %t from %s, want software from 25s", next.Software, next.Program.Start)
 	}
 }
 
@@ -243,7 +304,7 @@ func mp4Only() media.Capabilities {
 }
 
 func TestAnOutputTheReceiverRefusesIsTheEncodesOnlyWhereItEncodedWhatWasRefused(t *testing.T) {
-	hardware := codec.Encode(codec.VideoEncode{Encoder: ffmpeg.Encoder{Name: "h264_videotoolbox", Hardware: true}})
+	hardware := codec.Encode(codec.VideoEncode{Encoder: encoder.Encoder{Name: "h264_videotoolbox", Hardware: true}})
 	sound := codec.Encode(codec.AudioEncode{Codec: media.CodecAAC})
 	refused := func(axes media.Axes) error { return fmt.Errorf("validating: %w", &encoding.Mismatch{Refused: axes}) }
 	for _, tt := range []struct {
@@ -266,7 +327,8 @@ func TestAnOutputTheReceiverRefusesIsTheEncodesOnlyWhereItEncodedWhatWasRefused(
 	}
 }
 
-func TestARemuxOfDeadLinksIsNotBlamedOnItsEncoder(t *testing.T) {
+// A hardware encode's exit over the source cannot be told from the source's, so each link has software make it again before it is given up.
+func TestARemuxOfDeadLinksIsMadeAgainInSoftwareOnEachBeforeItIsGivenUp(t *testing.T) {
 	t.Parallel()
 	requireFFmpegTools(t)
 	gone := httptest.NewServer(http.HandlerFunc(http.NotFound))
@@ -277,28 +339,31 @@ func TestARemuxOfDeadLinksIsNotBlamedOnItsEncoder(t *testing.T) {
 	}
 	dev := &fakeDevice{caps: media.Capabilities{SelfFetch: true, Formats: []media.FormatSupport{{Transport: media.TransportMPEGTS, Video: media.VideoSupport{Codec: media.CodecH264}, Audio: media.AudioSupport{Codec: media.CodecAAC, MaxChannels: 2}}}}, drain: true}
 	actions, _, _, err := faultCast(t, dev, "h264_bogus", dead("/one.ts"), dead("/two.ts"))
-	if err == nil || !slices.Equal(actions, []recovery.Action{recovery.SwitchCandidate}) {
-		t.Fatalf("the cast ended on %v after revisions %v, want a refusal after one switch of link", err, actions)
+	want := []recovery.Action{recovery.SoftwareEncode, recovery.SwitchCandidate, recovery.SoftwareEncode}
+	if err == nil || !slices.Equal(actions, want) {
+		t.Fatalf("the cast ended on %v after revisions %v, want a refusal after %v", err, actions, want)
 	}
 }
 
-func TestAnExitIsTheEncodesOnlyWhereItCannotBeTheSources(t *testing.T) {
+func TestAnExitOverTheSourceIsTheEncodesOnlyBySignalOrOnHardware(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
 		script   string
+		hardware bool
 		buffered bool
 		own      bool
 	}{
-		{"an exit over castor's buffer", "exit 3", true, true},
-		{"an exit over the source", "exit 3", false, false},
-		{"a signal of its own over the source", "kill -SEGV $$", false, true},
+		{"an exit over castor's buffer", "exit 3", false, true, true},
+		{"an exit over the source", "exit 3", false, false, false},
+		{"an exit of a hardware encode over the source", "exit 3", true, false, true},
+		{"a signal of its own over the source", "kill -SEGV $$", false, false, true},
 	} {
 		proc, err := ffmpeg.Start(t.Context(), "/bin/sh", ffmpeg.Command{Args: []string{"-c", tt.script}}, ffmpeg.Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
 		_, _ = io.Copy(io.Discard, proc.Stdout)
-		if _, own := errors.AsType[*encoderFailed](encoderResult(t.Context(), proc, false, tt.buffered)); own != tt.own {
+		if _, own := errors.AsType[*encoderFailed](encoderResult(t.Context(), proc, tt.hardware, tt.buffered)); own != tt.own {
 			t.Errorf("%s: the encode's own failure %t, want %t", tt.name, own, tt.own)
 		}
 	}

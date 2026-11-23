@@ -31,10 +31,6 @@ type feed struct {
 // spliced is whether the plan joins a seamed program itself; a buffer was made one stream by the floor.
 func (f feed) spliced() bool { return f.buffered == nil && f.program.Seamed() }
 
-func (f feed) live() bool {
-	return f.buffered != nil && f.buffered.live || slices.ContainsFunc(f.program.Inputs, func(in media.Input) bool { return in.Fetching().Live })
-}
-
 // delivery is what serves a cast: the mechanism the device fetches from, and what writes the bytes it serves.
 type delivery struct {
 	sink   output.Output
@@ -105,6 +101,11 @@ func encodeFault(err error, opts encoding.EncodeOptions) error {
 		return err
 	}
 	return &encoderFailed{err: err, hardware: refusedVideo && video.Encoder.Hardware}
+}
+
+// live is a feed that arrives at playback pace, which no pause gets ahead of.
+func (f feed) live() bool {
+	return f.buffered != nil && f.buffered.live || slices.ContainsFunc(f.program.Inputs, func(in media.Input) bool { return in.Fetching().Live })
 }
 
 func (s *preparation) produce(work string, f feed, opts encodePlan, burn burnRenderer) (delivery, error) {

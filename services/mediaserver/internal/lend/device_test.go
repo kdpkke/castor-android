@@ -324,6 +324,67 @@ func TestCastorsHoldOverARemotePauseIsPressedOnceTheRemotePlaysOn(t *testing.T) 
 	})
 }
 
+func TestAPlaylistTellsTheDeviceWhenItListsItsOwnCaptions(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		playlist execute.Playlist
+		want     bool
+	}{
+		{"a playlist that lists the generated captions", execute.Playlist{Segments: media.MP4, EmbeddedCaptions: true}, true},
+		{"a playlist that lists none", execute.Playlist{Segments: media.MP4}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				r := &remote{}
+				d := r.device(t, 0)
+				if err := d.Play(t.Context(), execute.Playback{URL: &url.URL{Scheme: "http", Host: "castor"}, Stream: tt.playlist}); err != nil {
+					t.Fatal(err)
+				}
+				if got := r.plays[0].GetPlaylist().GetEmbeddedCaptions() != nil; got != tt.want {
+					t.Errorf("the device was told its playlist lists captions = %v, want %v", got, tt.want)
+				}
+			})
+		})
+	}
+}
+
+// A device is held exactly while someone holds it, and a device with no stream is held by no one.
+func TestTheDeviceIsHeldExactlyWhileSomeoneHoldsItAndNeverWithoutAStream(t *testing.T) {
+	r := &remote{}
+	d := r.device(t, time.Minute)
+	if err := d.Hold(t.Context(), Castor, true); !errors.Is(err, ErrNotPlaying) {
+		t.Fatalf("holding a device that took no stream = %v, want %v", err, ErrNotPlaying)
+	}
+	if err := d.Play(t.Context(), fromAMinuteIn); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []struct {
+		name    string
+		do      func()
+		state   deviceState
+		holders Holder
+	}{
+		{"it plays what it was handed", func() {}, playing, 0},
+		{"castor holds it", func() { _ = d.Hold(t.Context(), Castor, true) }, held, Castor},
+		{"the viewer holds it too", func() { _ = d.Hold(t.Context(), Viewer, true) }, held, Castor | Viewer},
+		{"castor lets go while the viewer holds", func() { _ = d.Hold(t.Context(), Castor, false) }, held, Viewer},
+		{"the viewer lets go", func() { _ = d.Hold(t.Context(), Viewer, false) }, playing, 0},
+		{"castor holds it again", func() { _ = d.Hold(t.Context(), Castor, true) }, held, Castor},
+		{"the viewer moves the cast off its stream", d.Reload, noStream, 0},
+	} {
+		step.do()
+		d.mu.Lock()
+		state, holders := d.moves.State(), d.holders
+		d.mu.Unlock()
+		if state != step.state || holders != step.holders || (holders != 0) != (state == held) {
+			t.Fatalf("after %q the device is %s held by %b, want %s held by %b", step.name, state, holders, step.state, step.holders)
+		}
+	}
+	if err := d.Hold(t.Context(), Castor, true); !errors.Is(err, ErrNotPlaying) {
+		t.Errorf("holding a device moved off its stream = %v, want %v", err, ErrNotPlaying)
+	}
+}
+
 func TestTheDeviceSeeksWithinTheOriginalFileItPlaysAndNothingElse(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := &remote{}

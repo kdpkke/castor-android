@@ -142,7 +142,10 @@ class CastorService : Service() {
           )
         hardwareEncoders()
           .takeIf { it.isNotEmpty() }
-          ?.let { builder.environment()["CASTOR_SERVERS__MEDIA__FFMPEG__HARDWARE_ENCODERS"] = it.joinToString(",") }
+          ?.let { encoders ->
+            builder.environment()["CASTOR_SERVERS__MEDIA__FFMPEG__HARDWARE_ENCODERS"] = encoders.joinToString(",")
+            builder.environment()["CASTOR_SERVERS__MEDIA__FFMPEG__SOFTWARE_PRESET"] = "superfast"
+          }
         val child = builder.start()
         withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) {
           if (closed) child.destroy() else process = child

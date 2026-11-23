@@ -2,11 +2,12 @@ package execute
 
 import (
 	"context"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder/software"
 	"path/filepath"
 	"testing"
 
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
-	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"github.com/stupside/castor/services/mediaserver/internal/source"
 )
@@ -21,7 +22,7 @@ func TestAHardwareEncoderThatCrashesOrHangsIsKeptOutOfLaterCasts(t *testing.T) {
 	}
 	// MPEG-4 forces an encode; noise makes it outweigh the socket buffers.
 	stream := sourceOf(t, generateFixture(t, ffmpegPath, "movie.ts", 60, []string{"-vf", "noise=alls=40:allf=t", "-c:v", "mpeg4", "-c:a", "aac", "-ac", "2", "-shortest", "-f", "mpegts"}))
-	software := ffmpeg.Encoders(ffmpegPath, nil)
+	inSoftware := encoder.Best(ffmpegPath, nil, software.Family{Preset: software.Veryfast})
 
 	for _, tt := range []struct {
 		name    string
@@ -38,11 +39,11 @@ func TestAHardwareEncoderThatCrashesOrHangsIsKeptOutOfLaterCasts(t *testing.T) {
 			t.Parallel()
 			var r Retirement
 			c := realCast(&fetchingDevice{caps: dlnaLike(), slow: tt.slow}, faulty, ffprobePath)
-			c.Encoders = r.Encoders(func(ctx context.Context, codec media.Codec, soft bool) (ffmpeg.Encoder, bool) {
+			c.Encoders = r.Encoders(func(ctx context.Context, codec media.Codec, soft bool) (encoder.Encoder, bool) {
 				if soft || codec != media.CodecH264 {
-					return software(ctx, codec, true)
+					return inSoftware(ctx, codec, true)
 				}
-				return ffmpeg.Encoder{Name: tt.encoder, Codec: media.CodecH264, Hardware: true, Flags: []string{"-pix_fmt", "yuv420p"}}, true
+				return encoder.Encoder{Name: tt.encoder, Codec: media.CodecH264, Hardware: true, Flags: []string{"-pix_fmt", "yuv420p"}}, true
 			})
 			ctx, cancel := context.WithTimeout(t.Context(), castTimeout)
 			defer cancel()

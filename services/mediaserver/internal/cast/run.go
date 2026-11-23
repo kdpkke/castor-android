@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"github.com/stupside/castor/internal/awake"
+	"github.com/stupside/castor/internal/settings"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
 	"github.com/stupside/castor/services/mediaserver/internal/lend"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
@@ -110,24 +112,11 @@ func (c *cast) Delivering(d media.Delivery) {
 	c.fire(eventDeliver, func(next *view) { next.status.GetCasting().Handover = wire.Handover(d) })
 }
 
-// recoveryAction translates the engine's actions at the contract edge.
+// recoveryAction translates the engine's actions at the contract edge: switch-candidate is RECOVERY_ACTION_SWITCH_CANDIDATE.
 func recoveryAction(action recovery.Action) castorv1.RecoveryAction {
-	switch action {
-	case recovery.OptimizeLive:
-		return castorv1.RecoveryAction_RECOVERY_ACTION_OPTIMIZE_LIVE
-	case recovery.SwitchCandidate:
-		return castorv1.RecoveryAction_RECOVERY_ACTION_SWITCH_CANDIDATE
-	case recovery.DecodeAxis:
-		return castorv1.RecoveryAction_RECOVERY_ACTION_DECODE_AXIS
-	case recovery.RelaxRead:
-		return castorv1.RecoveryAction_RECOVERY_ACTION_RELAX_READ
-	case recovery.ServeInstead:
-		return castorv1.RecoveryAction_RECOVERY_ACTION_SERVE_INSTEAD
-	case recovery.Stay:
-		return castorv1.RecoveryAction_RECOVERY_ACTION_STAY
-	case recovery.SoftwareEncode:
-		return castorv1.RecoveryAction_RECOVERY_ACTION_SOFTWARE_ENCODE
-	default:
+	kind, ok := settings.ParseEnum[castorv1.RecoveryAction](strings.ReplaceAll(string(action), "-", "_"))
+	if !ok {
 		panic(fmt.Sprintf("unknown recovery action %q", action))
 	}
+	return kind
 }

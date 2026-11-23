@@ -13,7 +13,7 @@ import (
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output/storage"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
-	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"github.com/stupside/castor/services/mediaserver/internal/source"
 	"github.com/stupside/castor/services/mediaserver/internal/subtitle"
@@ -36,7 +36,7 @@ func TestEncodeTriesNextTransportWhenHostCannotEncodeForFirst(t *testing.T) {
 		{Transport: media.TransportHLS, Video: media.VideoSupport{Codec: media.CodecHEVC}, Audio: media.AudioSupport{Codec: media.CodecAAC, MaxChannels: 2}},
 		{Transport: media.TransportMP4, Video: media.VideoSupport{Codec: media.CodecH264}, Audio: media.AudioSupport{Codec: media.CodecAAC, MaxChannels: 2}},
 	}}
-	s.Encoders = func(context.Context, media.Codec, bool) (ffmpeg.Encoder, bool) { return ffmpeg.Encoder{}, false }
+	s.Encoders = func(context.Context, media.Codec, bool) (encoder.Encoder, bool) { return encoder.Encoder{}, false }
 	opts, err := s.encode(feed{buffered: buf}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +105,25 @@ func bufferedCast(t *testing.T, ffmpegPath, ffprobePath string) (*preparation, *
 	}
 	s := readingAttempt(t, realCast(&fakeDevice{}, ffmpegPath, ffprobePath), recovery.Attempt{})
 	return s, &buffered{reader: &pull{spool: sp, done: make(chan struct{})}}
+}
+
+func TestALiveCastIsOfferedSegmentedBeforeWhatTheDeviceListsFirst(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		live bool
+		want string
+	}{
+		{"live", true, media.HLS},
+		{"finite", false, media.MP4},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			// The device lists MP4 first.
+			offered := testOutputs().Selections(chromecastLike(media.MP4, media.HLS), nil, 0, tt.live)
+			if len(offered) != 2 || offered[0].Plan.Format().ContentType != tt.want {
+				t.Fatalf("offered %d deliveries, the first %v, want 2 and %s first", len(offered), offered[0].Plan.Format().ContentType, tt.want)
+			}
+		})
+	}
 }
 
 func TestLiveAndFiniteNativeDownloadsPreferSegmentedDelivery(t *testing.T) {

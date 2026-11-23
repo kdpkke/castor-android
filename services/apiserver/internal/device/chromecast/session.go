@@ -21,10 +21,8 @@ type session struct {
 	name string
 
 	watchMu sync.Mutex
-	watch   playback
-	ending  *ending
-	// transport is the media receiver the last Play loaded on.
-	transport string
+	// watch is the Play last handed, nil before any.
+	watch *playback
 }
 
 var _ device.Device = (*session)(nil)
@@ -52,13 +50,9 @@ func (s *session) play(ctx context.Context, playback device.Playback) error {
 		return fmt.Errorf("starting chromecast playback: %w", err)
 	}
 	// Each Play is awaited to its own end, so a retry after a refused one starts clean on the same connection.
-	mine := newEnding()
-	s.watchMu.Lock()
-	s.watch.begin(stream)
-	s.watch.finiteMP4Source = playback.Play.GetSource().GetContainer() == mediav1.Container_CONTAINER_MP4 && playback.Duration() > 0
-	s.ending = mine
-	s.transport = transport
-	s.watchMu.Unlock()
+	mine := newPlayback(ctx, stream, transport, playback.Play.GetPlaylist().GetEmbeddedCaptions() != nil)
+	mine.finiteMP4Source = playback.Play.GetSource().GetContainer() == mediav1.Container_CONTAINER_MP4 && playback.Duration() > 0
+	s.follow(mine)
 	load := &loadCommand{
 		Type: msgLoad, Autoplay: true,
 		Media: mediaItem{MediaItem: castmedia.MediaItem{ContentId: stream, ContentType: device.MIME(playback.Container()), StreamType: streamBuffered, Duration: float32(playback.Duration().Seconds())}},
@@ -81,14 +75,15 @@ func (s *session) play(ctx context.Context, playback device.Playback) error {
 		err = loadVerdict(reply, stream)
 	}
 	if err == nil && playback.Play.GetPlaylist() != nil && playback.Duration() > 0 {
-		err = s.awaitHLSStart(ctx, reply)
+		err = s.awaitHLSStart(ctx, mine, reply)
 	}
 	if err != nil {
 		s.watchMu.Lock()
 		// A Play begun since owns the watch now; this one's failure is not its to clear or name.
-		if s.ending == mine {
-			err = s.watch.named(err)
-			s.watch.disarm()
+		if s.watch == mine {
+			err = mine.named(err)
+			mine.abandon()
+			s.watch = nil
 		}
 		s.watchMu.Unlock()
 		return fmt.Errorf("starting chromecast playback: %w", err)
@@ -110,6 +105,16 @@ type mediaItem struct {
 	HLSVideoSegmentFormat string  `json:"hlsVideoSegmentFormat,omitempty"`
 }
 
+// trackText is the type of a track that carries captions.
+const trackText = "TEXT"
+
+// editTracksInfo changes which text track a receiver shows.
+type editTracksInfo struct {
+	castmedia.PayloadHeader
+	MediaSessionID int   `json:"mediaSessionId"`
+	ActiveTrackIDs []int `json:"activeTrackIds"`
+}
+
 type track struct {
 	TrackID          int    `json:"trackId"`
 	Type             string `json:"type"`
@@ -124,7 +129,7 @@ type track struct {
 func textTracks(captions []*mediav1.DeviceCommand_Caption) (tracks []track, active []int) {
 	for i, c := range captions {
 		tracks = append(tracks, track{
-			TrackID: i + 1, Type: "TEXT", Subtype: "SUBTITLES", TrackContentID: c.GetUrl(),
+			TrackID: i + 1, Type: trackText, Subtype: "SUBTITLES", TrackContentID: c.GetUrl(),
 			TrackContentType: device.CaptionMIME(c.GetFormat()), Language: c.GetLanguage(), Name: c.GetName(),
 		})
 		if c.GetDefault() {
@@ -132,6 +137,30 @@ func textTracks(captions []*mediav1.DeviceCommand_Caption) (tracks []track, acti
 		}
 	}
 	return tracks, active
+}
+
+// reportedTracks are the tracks a MEDIA_STATUS says the media session carries.
+func reportedTracks(payload []byte, mediaSession int) []track {
+	if mediaSession == 0 {
+		return nil
+	}
+	var reply struct {
+		Status []struct {
+			MediaSessionID int `json:"mediaSessionId"`
+			Media          struct {
+				Tracks []track `json:"tracks"`
+			} `json:"media"`
+		} `json:"status"`
+	}
+	if json.Unmarshal(payload, &reply) != nil {
+		return nil
+	}
+	for _, status := range reply.Status {
+		if status.MediaSessionID == mediaSession {
+			return status.Media.Tracks
+		}
+	}
+	return nil
 }
 
 func (s *session) Pause(ctx context.Context) error { return s.transportCommand(ctx, msgPause) }
@@ -205,8 +234,12 @@ var errNoMediaSession = errors.New("the chromecast has reported no media session
 
 // mediaRequest sends msg to the media session the last Play opened, returning that session and the receiver's MEDIA_STATUS.
 func (s *session) mediaRequest(ctx context.Context, msg string) (int, []byte, error) {
+	var transport string
+	var mediaSession int
 	s.watchMu.Lock()
-	transport, mediaSession := s.transport, s.watch.mediaSession
+	if s.watch != nil {
+		transport, mediaSession = s.watch.transport, s.watch.mediaSession
+	}
 	s.watchMu.Unlock()
 	if mediaSession == 0 {
 		return 0, nil, errNoMediaSession
@@ -297,7 +330,11 @@ func defaultMediaTransport(status castmedia.ReceiverStatusResponse) (string, boo
 }
 
 func (s *session) Close() error {
-	return s.ch.Close()
+	err := s.ch.Close()
+	s.watchMu.Lock()
+	s.watch.abandon()
+	s.watchMu.Unlock()
+	return err
 }
 
 func (s *session) Capabilities() *mediav1.Capabilities { return capabilities() }

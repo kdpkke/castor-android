@@ -2,6 +2,8 @@ package execute
 
 import (
 	"context"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder/software"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +16,6 @@ import (
 
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/splice"
-	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"github.com/stupside/castor/services/mediaserver/internal/source"
 )
@@ -82,9 +83,10 @@ func (d *recordingDevice) AwaitEnd(ctx context.Context) error {
 	}
 }
 
-func (*recordingDevice) Pause(context.Context) error        { return nil }
-func (*recordingDevice) Resume(context.Context) error       { return nil }
-func (d *recordingDevice) Capabilities() media.Capabilities { return d.caps }
+func (*recordingDevice) Position(context.Context) (time.Duration, bool, bool) { return 0, false, false }
+func (*recordingDevice) Pause(context.Context) error                          { return nil }
+func (*recordingDevice) Resume(context.Context) error                         { return nil }
+func (d *recordingDevice) Capabilities() media.Capabilities                   { return d.caps }
 
 // steps is the largest step forward and back between consecutive times.
 func steps(times []time.Duration) (forward, back time.Duration) {
@@ -118,8 +120,8 @@ func chainFixture(t *testing.T, ffmpegPath string, seconds int) *source.Stream {
 }
 
 // failingHardware is libx264 posing as a hardware encoder without B-frames, as MediaCodec runs, with filters that make it fail.
-func failingHardware(filters ...string) ffmpeg.Encoder {
-	return ffmpeg.Encoder{Name: "libx264", Codec: media.CodecH264, Hardware: true, Filters: filters,
+func failingHardware(filters ...string) encoder.Encoder {
+	return encoder.Encoder{Name: "libx264", Codec: media.CodecH264, Hardware: true, Filters: filters,
 		Flags: []string{"-preset", "veryfast", "-pix_fmt", "yuv420p", "-bf", "0"}}
 }
 
@@ -132,17 +134,17 @@ type carriedCast struct {
 }
 
 // castWith casts stream to dev with encoder offered as the hardware one until it is retired.
-func castWith(t *testing.T, dev Device, stream *source.Stream, encoder ffmpeg.Encoder) carriedCast {
+func castWith(t *testing.T, dev Device, stream *source.Stream, hardware encoder.Encoder) carriedCast {
 	t.Helper()
 	ffmpegPath, ffprobePath := requireFFmpegTools(t)
 	c := realCast(dev, ffmpegPath, ffprobePath)
-	software := ffmpeg.Encoders(ffmpegPath, nil)
+	inSoftware := encoder.Best(ffmpegPath, nil, software.Family{Preset: software.Veryfast})
 	var r Retirement
-	c.Encoders = r.Encoders(func(ctx context.Context, codec media.Codec, soft bool) (ffmpeg.Encoder, bool) {
+	c.Encoders = r.Encoders(func(ctx context.Context, codec media.Codec, soft bool) (encoder.Encoder, bool) {
 		if soft || codec != media.CodecH264 {
-			return software(ctx, codec, true)
+			return inSoftware(ctx, codec, true)
 		}
-		return encoder, true
+		return hardware, true
 	})
 	c.Retire, c.CarryOn = r.Retire, true
 	var mu sync.Mutex
@@ -173,7 +175,7 @@ func TestAHardwareEncoderThatFailsInAChainIsCarriedOnInSoftwareInTheSameStream(t
 	shorterHangWindow(t)
 	for _, tt := range []struct {
 		name    string
-		encoder ffmpeg.Encoder
+		encoder encoder.Encoder
 		// retired: only a crash or a hang keeps hardware out of later casts.
 		retired bool
 	}{

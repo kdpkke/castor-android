@@ -27,6 +27,8 @@ import (
 type encodePlan struct {
 	encoding.EncodeOptions
 	delivery output.Selection
+	// captioned is a delivery that carries the generated captions in its own playlist.
+	captioned bool
 }
 
 // encode decides codecs within the envelope accepted by the output adapter.
@@ -34,28 +36,14 @@ func (s *preparation) encode(f feed, burn burnRenderer) (encodePlan, error) {
 	_, native := s.nativeOutput(f)
 	var captions *output.Captions
 	if native && burn == nil {
-		captions = &output.Captions{Cues: f.buffered.transcript.Cues(), VideoOffset: *f.buffered.captionVideoOffset}
+		captions = f.buffered.captions()
 	}
 	caps := s.playbackCapabilities()
 	var runtime time.Duration
 	if s.PreserveSource && caps.NativePlaybackTrial && !f.live() {
 		runtime = s.attempt.Runtime()
 	}
-	selections := s.Outputs.Selections(caps, captions, runtime)
-	// Android extension: a live cast prefers HLS too, whose playlist lists complete fragments, over a growing progressive file a receiver stalls on.
-	if runtime > 0 || f.live() {
-		// A growing, unindexed progressive MP4 is not seekable in Chromium.
-		// HLS indexes complete fragments without waiting for the whole download.
-		slices.SortStableFunc(selections, func(a, b output.Selection) int {
-			priority := func(s output.Selection) int {
-				if s.Plan.Format().ContentType == media.HLS {
-					return 0
-				}
-				return 1
-			}
-			return cmp.Compare(priority(a), priority(b))
-		})
-	}
+	selections := s.Outputs.Selections(caps, captions, runtime, f.live())
 	if len(selections) == 0 {
 		if s.PreserveSource {
 			return encodePlan{}, fmt.Errorf("%w: no compatible delivery adapter", media.ErrNativeIncompatible)
@@ -84,7 +72,7 @@ func (s *preparation) encode(f feed, burn burnRenderer) (encodePlan, error) {
 			planningErr = errors.Join(planningErr, fmt.Errorf("%s: %w", into.ContentType, err))
 			continue
 		}
-		return encodePlan{delivery: selected,
+		return encodePlan{delivery: selected, captioned: captions != nil,
 			Input: input, Format: into, Probe: facts.probe,
 			Video: decided.Video, Audio: decided.Audio}, nil
 	}
@@ -215,13 +203,9 @@ func encoderResult(ctx context.Context, proc *ffmpeg.Process, hardware, buffered
 		return nil
 	}
 	err = fmt.Errorf("encoder: %w", err)
-	// An ffmpeg reading the source exits on the source's failure as on its own.
-	if evidence.ExitStatus > 0 && (buffered || evidence.Signaled) {
+	// An ffmpeg reading the source exits on the source's failure as on its own, so only a hardware encode is retried on its exit.
+	if evidence.ExitStatus > 0 && (buffered || evidence.Signaled || hardware && !demuxFailed(evidence.Lines)) {
 		// The cast's fault quotes the encoder's lines itself.
-		return &encoderFailed{err: err, hardware: hardware, lines: evidence.Lines}
-	}
-	// Android extension: over the source, the hardware encoder's own errors still make the exit its own (read_hardware.go).
-	if hardware && evidence.ExitStatus > 0 && hardwareFailedItself(evidence.Lines) {
 		return &encoderFailed{err: err, hardware: hardware, lines: evidence.Lines}
 	}
 	return quoting(err, evidence.Lines)

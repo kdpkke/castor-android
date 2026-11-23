@@ -27,6 +27,14 @@ The exact integrated release is recorded in [android/upstream.json](android/upst
   HTML still follows webpage extraction; detected media uses the engine's existing
   progressive delivery rather than waiting for a complete download.
 
+## Playback recovery
+
+After an encoder fails during a finite playlist, the media service uses the last
+observed playhead or asks the receiver for its position. A live playlist with
+no known position can be reopened at its live edge. Recovery records the reason
+for each attempted change. The API distinguishes a refused token, a rejected
+request and an interrupted media service when reporting a failure to the client.
+
 ## Contracts and trust boundaries
 
 Go and Android share the Protobuf contracts in `proto/`. The `android/client`

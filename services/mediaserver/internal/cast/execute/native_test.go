@@ -2,6 +2,7 @@ package execute
 
 import (
 	"context"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,7 +10,6 @@ import (
 
 	"github.com/stupside/castor/services/mediaserver/internal/cast/compose"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
-	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"github.com/stupside/castor/services/mediaserver/internal/source"
 )
@@ -64,8 +64,8 @@ func TestNativeLiveFallbackProducesPlayableMediaThroughBothReadPaths(t *testing.
 			dev := &fakeDevice{caps: chromecastLike(media.MP4), drain: true}
 			dev.caps.SelfFetch = selfFetch
 			cast := realCast(dev, ffmpegPath, ffprobePath)
-			cast.Encoders = func(_ context.Context, codec media.Codec, _ bool) (ffmpeg.Encoder, bool) {
-				return ffmpeg.Encoder{Name: "libx264", Codec: media.CodecH264}, codec == media.CodecH264
+			cast.Encoders = func(_ context.Context, codec media.Codec, _ bool) (encoder.Encoder, bool) {
+				return encoder.Encoder{Name: "libx264", Codec: media.CodecH264}, codec == media.CodecH264
 			}
 			cast.PreserveSource = true
 			turns := &liveFallbackTurns{}

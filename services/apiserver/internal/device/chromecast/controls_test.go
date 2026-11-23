@@ -23,7 +23,7 @@ func TestFiniteHLSWaitsForPlaybackAndRecoversAReceiverStuckAtZero(t *testing.T) 
 	for _, mode := range []string{"starts normally", "stuck until seek", "never starts", "still buffering after seek"} {
 		t.Run(mode, func(t *testing.T) {
 			near, far := net.Pipe()
-			dev := &session{ending: newEnding()}
+			dev := &session{}
 			dev.ch = newChannel(near, dev.watchMessage)
 			var started atomic.Bool
 			var nudges atomic.Int32
@@ -184,7 +184,7 @@ func TestServedHLSDeclaresFMP4WithoutOverridingSourcePlaylists(t *testing.T) {
 	for _, served := range []bool{false, true} {
 		t.Run(fmt.Sprint("served=", served), func(t *testing.T) {
 			near, far := net.Pipe()
-			dev := &session{ending: newEnding()}
+			dev := &session{}
 			dev.ch = newChannel(near, dev.watchMessage)
 			loaded := make(chan mediaItem, 1)
 			var receiver *channel
@@ -230,7 +230,7 @@ func TestChromecastSeekUsesTheCurrentSessionAndPreservesPlayback(t *testing.T) {
 	for _, mode := range []string{"paused", "restarts at zero", "playing", "buffers until resumed"} {
 		t.Run(mode, func(t *testing.T) {
 			near, far := net.Pipe()
-			dev := &session{ending: newEnding()}
+			dev := &session{}
 			dev.ch = newChannel(near, dev.watchMessage)
 			var receiver *channel
 			var content string

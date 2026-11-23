@@ -20,6 +20,8 @@ import (
 	hlsoutput "github.com/stupside/castor/services/mediaserver/internal/cast/output/hls"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output/progressive"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder/software"
 	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 	"github.com/stupside/castor/services/mediaserver/internal/probe"
@@ -30,7 +32,13 @@ import (
 )
 
 // fakeDevice plays what it is handed, kept in handed; if drain is set, it fetches the served stream and keeps it in served.
+// noPlayhead is a device that cannot say where it plays.
+type noPlayhead struct{}
+
+func (noPlayhead) Position(context.Context) (time.Duration, bool, bool) { return 0, false, false }
+
 type fakeDevice struct {
+	noPlayhead
 	caps   media.Capabilities
 	drain  bool
 	refuse error
@@ -266,7 +274,7 @@ func realCast(dev Device, ffmpegPath, ffprobePath string) Cast {
 		Outputs:    testOutputs(),
 		FFmpegPath: ffmpegPath,
 		Binary:     ffmpeg.Inspect(ffmpegPath),
-		Encoders:   ffmpeg.Encoders(ffmpegPath, nil),
+		Encoders:   encoder.Best(ffmpegPath, nil, software.Family{Preset: software.Veryfast}),
 		Probes:     probe.FFprobe(ffprobePath),
 		Timelines:  direct{},
 		InputArgs:  formats.InputArgs,

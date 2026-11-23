@@ -41,7 +41,7 @@ func captionWriter(t *testing.T, cues *subtitle.Cues, videoOffset time.Duration)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { root.Close() })
-	return &captionDelivery{root: root, playlist: "stream.m3u8", cues: cues, videoOffset: videoOffset, vtt: map[string]string{}}, dir
+	return &captionDelivery{root: root, playlist: "stream.m3u8", cues: cues, videoOffset: videoOffset, language: "en", vtt: map[string]string{}}, dir
 }
 
 func TestCaptionPublisherBackpressuresAtUnsettledFragment(t *testing.T) {
@@ -271,5 +271,25 @@ func TestCaptionPublisherRefusesInventedVideoClock(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "stream.m3u8")); !os.IsNotExist(err) {
 		t.Fatalf("invented video clock published: %v", err)
+	}
+}
+
+func TestCaptionPublisherRefusesAFragmentWhoseMoofIsNotFollowedByItsMdat(t *testing.T) {
+	data := captionMP4(t, "8")
+	for offset := 0; offset < len(data); offset += int(binary.BigEndian.Uint32(data[offset : offset+4])) {
+		if string(data[offset+4:offset+8]) == "mdat" {
+			copy(data[offset+4:], "free")
+			break
+		}
+	}
+	cues := &subtitle.Cues{}
+	cues.Close()
+	c, dir := captionWriter(t, cues, 0)
+	err := c.write(t.Context(), bytes.NewReader(data))
+	if err == nil || !strings.Contains(err.Error(), "expected mdat, received free") {
+		t.Fatalf("a moof followed by %q: %v", "free", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "seg_00000.m4s")); !os.IsNotExist(err) {
+		t.Fatalf("a fragment without its mdat was published: %v", err)
 	}
 }

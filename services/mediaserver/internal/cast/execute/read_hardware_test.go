@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder"
 	"io"
 	"testing"
 
@@ -19,12 +20,12 @@ func TestAReadItsHardwareEncoderFailedIsTheEncodesFailure(t *testing.T) {
 
 	c := realCast(&fakeDevice{}, ffmpegPath, ffprobePath)
 	working := c.Encoders
-	c.Encoders = func(ctx context.Context, codec media.Codec, software bool) (ffmpeg.Encoder, bool) {
+	c.Encoders = func(ctx context.Context, codec media.Codec, software bool) (encoder.Encoder, bool) {
 		if software || codec != media.CodecH264 {
 			return working(ctx, codec, true)
 		}
 		// libx264 refusing 4:4:4 in this profile as it opens, as a phone's encoder refuses a picture it cannot make.
-		return ffmpeg.Encoder{Name: "libx264", Codec: media.CodecH264, Hardware: true, Flags: []string{"-profile:v", "baseline", "-pix_fmt", "yuv444p"}}, true
+		return encoder.Encoder{Name: "libx264", Codec: media.CodecH264, Hardware: true, Flags: []string{"-profile:v", "baseline", "-pix_fmt", "yuv444p"}}, true
 	}
 	program := programFromStream(t, origin.stream())
 

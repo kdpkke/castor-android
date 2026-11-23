@@ -14,7 +14,7 @@ import (
 )
 
 // pickyRenderer refuses to seek while paused, as LG's does, and records what it was asked.
-func pickyRenderer(actions *[]string) *session {
+func pickyRenderer(actions *[]string, file bool) *session {
 	state := "PAUSED_PLAYBACK"
 	client := soap.NewSOAPClient(url.URL{Scheme: "http", Host: "192.0.2.10", Path: "/control"})
 	client.HTTPClient.Transport = actionTransport(func(r *http.Request) (*http.Response, error) {
@@ -43,14 +43,13 @@ func pickyRenderer(actions *[]string) *session {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})
 	s := &session{transport: goupnp.ServiceClient{SOAPClient: client, Service: &goupnp.Service{ServiceType: "urn:schemas-upnp-org:service:AVTransport:1"}}}
-	s.seekable.Store(true)
+	s.played.Store(&handed{seekable: true, file: file})
 	return s
 }
 
 func TestAPausedFileIsSoughtWhileItPlaysAndHeldAgain(t *testing.T) {
 	var actions []string
-	s := pickyRenderer(&actions)
-	s.file.Store(true)
+	s := pickyRenderer(&actions, true)
 	if err := s.Seek(t.Context(), 80*time.Second); err != nil {
 		t.Fatalf("Seek() = %v; actions %v", err, actions)
 	}
@@ -61,7 +60,7 @@ func TestAPausedFileIsSoughtWhileItPlaysAndHeldAgain(t *testing.T) {
 
 func TestAPausedStreamCastorMakesIsNotPlayedToSeek(t *testing.T) {
 	var actions []string
-	s := pickyRenderer(&actions)
+	s := pickyRenderer(&actions, false)
 	if err := s.Seek(t.Context(), 80*time.Second); err == nil {
 		t.Fatal("Seek() succeeded on a renderer that refused it")
 	}

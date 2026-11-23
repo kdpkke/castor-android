@@ -52,8 +52,8 @@ func Cast(ctx context.Context, in Intent, run Runner, resolver SourceResolver) e
 	// left is the attempt a climb left, kept for the very next attempt only.
 	var left *Attempt
 
-	// tried names every strategy already run, for the refusal to state.
-	var tried []string
+	// tried names every strategy already run and what prompted it, for the refusal to state.
+	var tried []revised
 
 	for {
 		if cause := context.Cause(ctx); cause != nil {
@@ -109,14 +109,15 @@ func Cast(ctx context.Context, in Intent, run Runner, resolver SourceResolver) e
 			wait = 0
 		case f.kind == outranked:
 			wait = min(2*wait, climbMost)
-			if back, ok := f.attempt.at(f.resumeAt()); ok {
+			pos, _ := f.resumeAt()
+			if back, ok := f.attempt.at(pos); ok {
 				left = &back
 			}
 		}
 
 		revising(ctx, f, rev)
 		in.Turns.Revising(rev.action, f.why)
-		tried = append(tried, string(rev.action))
+		tried = append(tried, revised{action: rev.action, why: f.why})
 		a = rev.attempt
 	}
 }

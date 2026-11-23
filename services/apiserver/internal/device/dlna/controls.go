@@ -10,11 +10,13 @@ import (
 )
 
 func (s *session) Controls() device.Controls {
-	return device.Controls{Pause: true, Seek: s.seekable.Load()}
+	p := s.played.Load()
+	return device.Controls{Pause: true, Seek: p != nil && p.seekable}
 }
 
 func (s *session) Seek(ctx context.Context, at time.Duration) error {
-	if at < 0 || !s.seekable.Load() {
+	p := s.played.Load()
+	if at < 0 || p == nil || !p.seekable {
 		return device.ErrUnsupportedControl
 	}
 	// AVTransport's REL_TIME refers to the current track, including a paused one.
@@ -23,7 +25,7 @@ func (s *session) Seek(ctx context.Context, at time.Duration) error {
 		return s.action(ctx, "Seek", &struct{ InstanceID, Unit, Target string }{"0", "REL_TIME", target})
 	}
 	err := seek()
-	if upnpError(err, actionFailed) && s.file.Load() && s.state(ctx) == statePaused {
+	if upnpError(err, actionFailed) && p.file && s.state(ctx) == statePaused {
 		// LG's renderer seeks a file only while it plays, so it is played, sought and held again.
 		// Not a stream castor makes: that renderer stalls seeking one while it plays.
 		err = s.Resume(ctx)

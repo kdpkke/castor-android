@@ -121,12 +121,7 @@ func (c *Client) Run(parent context.Context, id string, source *mediav1.Source, 
 }
 
 func (s *session) move(event sessionEvent) {
-	if err := s.machine.Fire(s.ctx, event); err != nil {
-		s.failure = errors.Join(s.failure, err)
-		if s.machine.Can(sessionFailed) {
-			s.failure = errors.Join(s.failure, s.machine.Fire(s.ctx, sessionFailed))
-		}
-	}
+	s.failure = errors.Join(s.failure, s.machine.FireOrFail(s.ctx, event, sessionFailed))
 }
 
 func (s *session) observe(parent context.Context, lent device.Device, info *castorv1.MediaInfo, status func(*castorv1.CastStatus)) {
@@ -223,7 +218,7 @@ func (s *session) finish() (*castorv1.Ended, error) {
 // stopRemote retries lost stop requests within the owner's reconciliation budget.
 func (c *Client) stopRemote(ctx context.Context, id string) error {
 	for backoff := stopBackoff; ; backoff = min(2*backoff, controlTimeout) {
-		_, err := c.Casts.Stop(ctx, &castorv1.StopRequest{CastId: id})
+		_, err := c.casts.Stop(ctx, &castorv1.StopRequest{CastId: id})
 		if err == nil || connect.CodeOf(err) == connect.CodeNotFound {
 			return nil
 		}

@@ -21,7 +21,6 @@ import (
 	"github.com/stupside/castor/internal/registry"
 	"github.com/stupside/castor/internal/telemetry"
 	"github.com/stupside/castor/services/apiserver/internal/device"
-	"github.com/stupside/castor/services/apiserver/internal/mediaclient"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -40,6 +39,15 @@ type Devices interface {
 	Connect(ctx context.Context, target device.Info) (device.Device, error)
 }
 
+// Media is the media server a cast plays through: the cast it runs on a lent device, the streams it ranks, and the control of a cast that plays.
+type Media interface {
+	Run(ctx context.Context, id string, source *mediav1.Source, asked *mediav1.PlaybackSettings, lent device.Device, info *castorv1.MediaInfo, start time.Duration, status func(*castorv1.CastStatus)) (*castorv1.Ended, error)
+	Rank(ctx context.Context, source *mediav1.Source, asked *mediav1.PlaybackSettings) ([]*castorv1.RankedStream, error)
+	Pause(context.Context, *castorv1.PauseRequest) (*castorv1.PauseResponse, error)
+	Resume(context.Context, *castorv1.ResumeRequest) (*castorv1.ResumeResponse, error)
+	Seek(context.Context, *castorv1.SeekRequest) (*castorv1.SeekResponse, error)
+}
+
 type Resolver interface {
 	ResolvePages(context.Context, []string) ([]*castorv1.StreamCandidate, error)
 }
@@ -50,7 +58,7 @@ type Service struct {
 	resolutions *admission.Gate
 	ctx         context.Context
 	shut        context.CancelCauseFunc
-	media       *mediaclient.Client
+	media       Media
 	scraping    Resolver
 	defaults    *mediav1.PlaybackSettings
 	devices     Devices
@@ -58,7 +66,7 @@ type Service struct {
 }
 
 // New casts on devices through media, every cast asking defaults unless its request says otherwise.
-func New(defaults *mediav1.PlaybackSettings, devices Devices, media *mediaclient.Client, scraping Resolver) *Service {
+func New(defaults *mediav1.PlaybackSettings, devices Devices, media Media, scraping Resolver) *Service {
 	// Casts outlive the request that started them, and end only once the server shuts down.
 	running, shut := context.WithCancelCause(context.Background())
 	return &Service{watchers: semaphore.NewWeighted(256), resolutions: admission.New(running, resolutionCapacity), ctx: running, shut: shut, media: media, scraping: scraping, defaults: proto.CloneOf(defaults), devices: devices, casts: registry.New[*cast](linger)}
@@ -107,12 +115,7 @@ func (s *Service) Cast(ctx context.Context, req *castorv1.CastRequest) (*castorv
 		defer stop(nil)
 		defer awake.Hold()()
 		ended := s.play(run, c, target, asked)
-		c.now.Update(func(v view) (view, bool) {
-			if v.ended != nil {
-				return v, false
-			}
-			return view{status: v.status, ended: ended}, true
-		})
+		c.end(ended)
 		slog.InfoContext(run, "cast ended", "device", cmp.Or(c.device.GetName(), c.device.GetAddress()), "result", result(ended))
 	}()
 	return &castorv1.CastResponse{CastId: c.id}, nil
@@ -176,7 +179,7 @@ func (s *Service) Resolve(ctx context.Context, req *castorv1.ResolveRequest) (*c
 	}
 	ranked, err := s.media.Rank(working, source, s.asked(req.GetPreferences()))
 	if err != nil {
-		return nil, s.resolutions.Answer(working, fromMedia(err))
+		return nil, s.resolutions.Answer(working, err)
 	}
 	return &castorv1.ResolveResponse{Ranked: ranked}, nil
 }
@@ -194,22 +197,9 @@ func (s *Service) resolve(ctx context.Context, source *castorv1.Source) (*mediav
 	}
 	streams, err := s.scraping.ResolvePages(ctx, source.GetPages().GetUrls())
 	if err != nil {
-		switch connect.CodeOf(err) {
-		case connect.CodeUnauthenticated, connect.CodePermissionDenied, connect.CodeInvalidArgument:
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("scrapingserver refused the API server (check servers.scraping.token): %w", err))
-		}
 		return nil, err
 	}
 	return &mediav1.Source{Source: &mediav1.Source_Streams{Streams: &castorv1.Source_ResolvedStreams{Streams: streams}}}, nil
-}
-
-// fromMedia is err from the media server as this API answers it: the media server refusing this server is this server's fault, not the caller's.
-func fromMedia(err error) error {
-	switch connect.CodeOf(err) {
-	case connect.CodeUnauthenticated, connect.CodePermissionDenied, connect.CodeInvalidArgument:
-		return connect.NewError(connect.CodeInternal, fmt.Errorf("the media server refused this API server (check servers.media.token): %w", err))
-	}
-	return err
 }
 
 func (s *Service) Stop(_ context.Context, req *castorv1.StopRequest) (*castorv1.StopResponse, error) {
@@ -222,15 +212,15 @@ func (s *Service) Stop(_ context.Context, req *castorv1.StopRequest) (*castorv1.
 }
 
 func (s *Service) Pause(ctx context.Context, req *castorv1.PauseRequest) (*castorv1.PauseResponse, error) {
-	return s.forward(ctx, req, s.media.Casts.Pause)
+	return s.forward(ctx, req, s.media.Pause)
 }
 
 func (s *Service) Resume(ctx context.Context, req *castorv1.ResumeRequest) (*castorv1.ResumeResponse, error) {
-	return s.forward(ctx, req, s.media.Casts.Resume)
+	return s.forward(ctx, req, s.media.Resume)
 }
 
 func (s *Service) Seek(ctx context.Context, req *castorv1.SeekRequest) (*castorv1.SeekResponse, error) {
-	return s.forward(ctx, req, s.media.Casts.Seek)
+	return s.forward(ctx, req, s.media.Seek)
 }
 
 // forward has the media server, which knows a cast once it plays, run call on it.
@@ -242,7 +232,7 @@ func (s *Service) forward[Req interface {
 	if err != nil {
 		return nil, err
 	}
-	if v, _ := c.now.Load(); v.ended != nil {
+	if c.over() {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("cast %q has ended", c.id))
 	}
 	// Android: each restart plays the cast as a media cast of its own.
@@ -251,7 +241,7 @@ func (s *Service) forward[Req interface {
 	case connect.CodeOf(err) == connect.CodeNotFound:
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("cast %q is not playing on its device yet", c.id))
 	case err != nil:
-		return nil, fromMedia(err)
+		return nil, err
 	}
 	return res, nil
 }
@@ -259,7 +249,7 @@ func (s *Service) forward[Req interface {
 func (s *Service) ListCasts(context.Context, *castorv1.ListCastsRequest) (*castorv1.ListCastsResponse, error) {
 	var playing []*cast
 	for c := range s.casts.All() {
-		if v, _ := c.now.Load(); v.ended == nil {
+		if !c.over() {
 			playing = append(playing, c)
 		}
 	}

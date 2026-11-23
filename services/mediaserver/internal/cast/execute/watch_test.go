@@ -13,7 +13,7 @@ import (
 	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/output/storage"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
-	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder"
 )
 
 // fakeLead mocks transcriber for gate testing without whisper model.
@@ -196,7 +196,7 @@ func TestCancellationJoinsHealthControlBeforeReleasingResources(t *testing.T) {
 
 // A relayed cast copies at first, so what wedges is the encoder a change of rate cut in, not the plan it began with.
 func TestAWedgeIsBlamedOnTheEncoderMakingTheDeliveryWhenItWedged(t *testing.T) {
-	hardware := encoding.EncodeOptions{Video: codec.Encode(codec.VideoEncode{Encoder: ffmpeg.Encoder{Name: "h264_videotoolbox", Hardware: true}})}
+	hardware := encoding.EncodeOptions{Video: codec.Encode(codec.VideoEncode{Encoder: encoder.Encoder{Name: "h264_videotoolbox", Hardware: true}})}
 	relayed := &adjustable{reader: &pull{proc: finished(t)}}
 	for _, tt := range []struct {
 		name  string
@@ -211,6 +211,15 @@ func TestAWedgeIsBlamedOnTheEncoderMakingTheDeliveryWhenItWedged(t *testing.T) {
 		if !ok || failed.hardware != tt.want {
 			t.Errorf("%s: wedged on hardware %t, want %t", tt.name, ok && failed.hardware, tt.want)
 		}
+	}
+}
+
+// The playing watch asks the device where it plays, which is how a link that cannot carry the cast is told from a read that cannot keep up.
+func TestThePlayingWatchReadsTheDevicesPlayhead(t *testing.T) {
+	dev := &fakeDevice{}
+	read := feed{buffered: &buffered{reader: &pull{}}}
+	if m := playingMonitor(read, delivery{output: &adjustable{}}, nil, 6_000_000, 0, dev); m.Playhead != health.Playhead(dev) {
+		t.Errorf("monitored with playhead %v, want the device's", m.Playhead)
 	}
 }
 

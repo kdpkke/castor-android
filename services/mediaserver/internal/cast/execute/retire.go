@@ -3,6 +3,7 @@ package execute
 import (
 	"context"
 	"errors"
+	"github.com/stupside/castor/services/mediaserver/internal/encoder"
 	"log/slog"
 	"os/exec"
 	"sync/atomic"
@@ -11,7 +12,6 @@ import (
 	"github.com/stupside/castor/services/mediaserver/internal/cast/encoding/codec"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/health"
 	"github.com/stupside/castor/services/mediaserver/internal/cast/recovery"
-	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 	"github.com/stupside/castor/services/mediaserver/internal/media"
 )
 
@@ -24,7 +24,7 @@ type Retirement struct{ retired atomic.Bool }
 
 // Encoders is lookup, asked for software once hardware was retired.
 func (r *Retirement) Encoders(lookup codec.Encoders) codec.Encoders {
-	return func(ctx context.Context, c media.Codec, software bool) (ffmpeg.Encoder, bool) {
+	return func(ctx context.Context, c media.Codec, software bool) (encoder.Encoder, bool) {
 		return lookup(ctx, c, software || r.retired.Load())
 	}
 }

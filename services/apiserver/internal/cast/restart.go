@@ -66,7 +66,7 @@ func (s *Service) runConnected(ctx context.Context, c *cast, lent device.Device,
 		}
 		return s.runPlayback(ctx, c, w, settings, id, start)
 	}, func(ctx context.Context, id string) error {
-		_, err := s.media.Casts.Pause(ctx, &castorv1.PauseRequest{CastId: id})
+		_, err := s.media.Pause(ctx, &castorv1.PauseRequest{CastId: id})
 		return err
 	})
 }

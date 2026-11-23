@@ -1,6 +1,8 @@
 package com.muratoreware.castorandroid
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.IpPrefix
 import android.net.TetheringInterface
 import android.net.TetheringManager
 import android.net.nsd.NsdManager
@@ -12,6 +14,7 @@ import castor.v1.DeviceOuterClass.Device
 import castor.v1.DeviceOuterClass.DeviceType
 import java.net.DatagramPacket
 import java.net.HttpURLConnection
+import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.MulticastSocket
 import java.net.NetworkInterface
@@ -408,7 +411,16 @@ class DeviceDiscovery(private val context: Context) {
             }
           }
         if (resolved != null) {
-          val host = resolved.host?.hostAddress ?: return@collect
+          val address =
+            if (Build.VERSION.SDK_INT >= 34) {
+              val connectivity = context.getSystemService(ConnectivityManager::class.java)
+              val links = connectivity?.getLinkProperties(resolved.network ?: connectivity.activeNetwork)
+              val prefixes = links?.linkAddresses.orEmpty().map { IpPrefix(it.address, it.prefixLength) }
+              preferredAddress(resolved.hostAddresses) { ip -> prefixes.any { it.contains(ip) } } ?: resolved.host
+            } else {
+              resolved.host
+            }
+          val host = address?.hostAddress ?: return@collect
           announced?.trySend(host)
           device(resolved, host)?.let { found += it }
         }
@@ -418,6 +430,16 @@ class DeviceDiscovery(private val context: Context) {
   }
 
   companion object {
+    internal fun preferredAddress(addresses: List<InetAddress>, onLink: (InetAddress) -> Boolean): InetAddress? =
+      addresses.minByOrNull { address ->
+        when {
+          address !is Inet4Address && address.isLinkLocalAddress -> 4
+          onLink(address) -> if (address is Inet4Address) 0 else 1
+          address is Inet4Address -> 2
+          else -> 3
+        }
+      }
+
     // Unicast searches of announced hosts end within the 5 s a search has, which mDNS itself takes 4 s of.
     internal const val ANNOUNCED_WINDOW_MS = 4_500L
 

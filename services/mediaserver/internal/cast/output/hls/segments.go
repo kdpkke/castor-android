@@ -30,7 +30,7 @@ func newSegments(o output.Opening, dir string, captions *output.Captions) (*Segm
 		return nil, err
 	}
 	if captions != nil {
-		store.captions = &captionDelivery{root: store.root, playlist: o.Format.Tuning.Output, cues: captions.Cues, videoOffset: captions.VideoOffset, vtt: map[string]string{}}
+		store.captions = &captionDelivery{root: store.root, playlist: o.Format.Tuning.Output, cues: captions.Cues, videoOffset: captions.VideoOffset, language: captions.Language, vtt: map[string]string{}}
 	}
 	return &Segments{o: o, store: store, lastRequest: time.Now()}, nil
 }
@@ -82,6 +82,7 @@ func (s *Segments) Wait(ctx context.Context, produced <-chan struct{}) error {
 }
 func (s *Segments) Close() error { return s.store.Close() }
 
+// Audience is nil: a playlist is fetched by fragment.
 func (*Segments) Audience() health.Audience { return nil }
 func (s *Segments) Settled(made media.Progress) error {
 	return health.NoneFetched(s.Served(), made)

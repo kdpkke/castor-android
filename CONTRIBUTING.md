@@ -15,6 +15,8 @@ cd android
 bash gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
+The Go end-to-end suite runs at most one cast per two CPU cores, with a minimum of one.
+
 On Windows use `android/scripts/build.ps1` and `test-device.ps1`. Device tests use local fixtures, not a real streaming site or TV. Verify actual device-test XML; a successful Gradle build alone does not prove that installation/tests ran.
 
 Kotlin follows ktfmt's two-space Google style. Go follows the upstream architecture and `gofmt`; test behavior and reproduce regressions before fixing them. Use Conventional Commits (`fix(android): ...`, `chore(core): ...`), with a blank line before a message body. Never commit signing keys, caches, `local.properties`, tokens or downloaded native binaries.

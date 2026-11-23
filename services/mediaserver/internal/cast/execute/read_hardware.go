@@ -3,14 +3,7 @@ package execute
 import (
 	"slices"
 	"strings"
-
-	"github.com/stupside/castor/services/mediaserver/internal/ffmpeg"
 )
-
-// Android extension: an ffmpeg that reads the source and encodes the picture in one process, as a read or a remux
-// does, exits on the source's failure as on the encoder's, so upstream blames the encoder only for a signal. A
-// phone's hardware encoder refuses pictures software makes, such as a small one, and says so in its own error lines;
-// those lines make the exit the encoder's, so the cast is made again in software instead of ending.
 
 // hardwareFailed is a read whose hardware video encoder logged its own failure.
 func (p *pull) hardwareFailed() bool {
@@ -30,11 +23,11 @@ func failedItself(name string, lines []string) bool {
 	})
 }
 
-// hardwareFailedItself is a log with errors from a hardware encoder castor knows.
-func hardwareFailedItself(lines []string) bool {
+// demuxFailed reports an explicit input failure during a remux. An unexplained
+// hardware exit can be retried in software, but changing encoder cannot repair this input.
+func demuxFailed(lines []string) bool {
 	return slices.ContainsFunc(lines, func(line string) bool {
-		erring, ok := erringEncoder(line)
-		return ok && ffmpeg.HardwareEncoder(erring)
+		return strings.HasPrefix(line, "[in#") && strings.Contains(line, "] [error] Error during demuxing")
 	})
 }
 
