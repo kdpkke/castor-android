@@ -3,6 +3,20 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
+## 2.2.1 — 2026-11-24
+
+- **Let a DLNA TV download the video directly.** In Native quality, enable **Download directly on the TV** in Playback settings to hand a compatible video link to the TV. The option starts off. If the TV refuses the link, Castor forwards the original file through the phone without re-encoding it, keeping its Dolby Vision metadata, audio tracks and subtitles.
+- **The playback bar updates more often.** The engine refreshes the receiver's position roughly once a second during a cast and schedules the next read from the most recent request. This prevents skipped updates like those observed on the LG C1.
+- **Starting another cast while the engine is stopping works reliably.** Castor waits for the old engine process to exit before starting its replacement. The in-app browser finishes the old navigation before falling back, and the engine preserves cancellation when joining an interrupted source read.
+- The Android validation workflow gives the 16 KB emulator suite enough time to finish and uses a deterministic fixture for the browser's ad-blocking test.
+
+### Italiano
+
+- **La TV DLNA può scaricare il video direttamente.** In qualità Nativa, attiva **Scarica direttamente sulla TV** nelle impostazioni di riproduzione per passare alla TV un link video compatibile. L'opzione è disattivata di default. Se la TV rifiuta il link, Castor inoltra il file originale tramite il telefono senza ricodificarlo, conservando metadati Dolby Vision, tracce audio e sottotitoli.
+- **La barra di avanzamento si aggiorna più spesso.** Il motore legge la posizione del ricevitore circa una volta al secondo durante il cast e programma la lettura successiva a partire dalla richiesta più recente. Questo elimina i salti di aggiornamento osservati sulla LG C1.
+- **I cast richiesti durante l'arresto del motore partono regolarmente.** Castor aspetta che il vecchio processo sia terminato prima di avviarne un altro. Il browser integrato chiude la navigazione precedente prima di passare al ripiego, e il motore conserva l'annullamento quando attende che termini la lettura dall'origine.
+- Il workflow di validazione Android dà alla suite sull'emulatore da 16 KB il tempo di concludersi e usa una pagina di prova deterministica per il test del blocco pubblicitario.
+
 ## 2.2.0 — 2026-11-23
 
 - **Original videos keep their timeline.** In Native, Castor can send compatible, seekable videos from your Android device as the original file. Castor recovers Chromecast playback if it stays buffering after a seek. AirPlay confirms the new position on the TV and keeps a paused video paused. Compatible originals, including MKV, can keep their audio and subtitle tracks when the default audio track is later in the file.
