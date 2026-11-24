@@ -6,6 +6,8 @@ import android.content.Intent
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.system.Os
+import android.system.OsConstants
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
@@ -130,13 +132,25 @@ class EngineOnDemandTest {
       var second: AutoCloseable? = null
       try {
         until(30_000, "The engine did not start for a request") { running() }
-        first.close()
-        withTimeout(15_000) {
-          while (EngineHost.phase != EngineLifecycle.Phase.Stopping) delay(1)
+        val firstPid = pidList().single()
+        Os.kill(firstPid.toInt(), OsConstants.SIGSTOP)
+        try {
+          first.close()
+          withTimeout(15_000) {
+            while (EngineHost.phase != EngineLifecycle.Phase.Stopping) delay(1)
+          }
+          second = EngineHost.hold()
+          // Let Android finish stopping the service while its suspended child is still alive.
+          delay(500)
+          assertEquals(EngineLifecycle.Phase.Stopping, EngineHost.phase)
+          assertNull(EngineHost.endpoint.value)
+          assertEquals(listOf(firstPid), pidList())
+        } finally {
+          Os.kill(firstPid.toInt(), OsConstants.SIGCONT)
         }
-        second = EngineHost.hold()
         until(30_000, "The request made while stopping was not served") { running() }
         assertEngine()
+        assertNotEquals(firstPid, pidList().single())
         assertTrue(
           "The next engine must answer casts",
           DataRepository(EngineHost.endpoint.value!!).casts().isEmpty(),

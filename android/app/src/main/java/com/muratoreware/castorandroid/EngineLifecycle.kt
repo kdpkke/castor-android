@@ -14,7 +14,7 @@ internal class EngineLifecycle(
 ) {
   enum class Phase { Stopped, Starting, Running, Stopping }
 
-  var phase = Phase.Stopped
+  @Volatile var phase = Phase.Stopped
     private set
 
   // Counts the engines started so far; what an engine reports carries the generation it was started as.

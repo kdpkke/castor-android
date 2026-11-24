@@ -15,8 +15,10 @@ import com.muratoreware.castorandroid.data.Rpc
 import com.muratoreware.castorandroid.ui.main.CastOptions
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -45,6 +47,8 @@ class CastorService : Service() {
 
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
   private var process: Process? = null
+  private var engineJob: Job? = null
+  private var termination: Job? = null
   private var bridge: BrowserServer? = null
   private var multicast: WifiManager.MulticastLock? = null
   private var wake: PowerManager.WakeLock? = null
@@ -52,7 +56,7 @@ class CastorService : Service() {
   private lateinit var media: CastMediaSession
   var generation = 0
     private set
-  @Volatile private var closed = false
+  private var closed = false
   private var casting = false
   // Whether work still held may start another engine once this one is gone: not after a failure or a stop by the user.
   private var restart = true
@@ -107,7 +111,7 @@ class CastorService : Service() {
         kotlinx.coroutines.delay(5 * 60 * 1000L)
       }
     }
-    scope.launch {
+    engineJob = scope.launch {
       try {
         val native = applicationInfo.nativeLibraryDir
         val executable = File(native, "libcastor.so")
@@ -146,9 +150,15 @@ class CastorService : Service() {
             builder.environment()["CASTOR_SERVERS__MEDIA__FFMPEG__HARDWARE_ENCODERS"] = encoders.joinToString(",")
             builder.environment()["CASTOR_SERVERS__MEDIA__FFMPEG__SOFTWARE_PRESET"] = "superfast"
           }
+        currentCoroutineContext().ensureActive()
         val child = builder.start()
-        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) {
-          if (closed) child.destroy() else process = child
+        // Starting the child is blocking and may complete after shutdown canceled this job.
+        withContext(NonCancellable) {
+          val registered = withContext(Dispatchers.Main) {
+            if (!closed) process = child
+            !closed
+          }
+          if (!registered) terminate(child)
         }
         currentCoroutineContext().ensureActive()
         launch {
@@ -169,9 +179,13 @@ class CastorService : Service() {
           val url = JSONObject(line).getString("url")
           check(url.startsWith("http://127.0.0.1:")) { "Unexpected native engine endpoint" }
           val rpc = Rpc(url, apiToken)
-          endpoint.value = rpc
-          EngineHost.ready(this@CastorService, rpc)
-          media.attach(DataRepository(rpc))
+          withContext(Dispatchers.Main) {
+            if (!closed) {
+              media.attach(DataRepository(rpc))
+              endpoint.value = rpc
+              EngineHost.ready(this@CastorService, rpc)
+            }
+          }
           // The newest cast's controls follow the engine's word on it, for the notification and the lock screen.
           launch {
             while (currentCoroutineContext().isActive) {
@@ -182,24 +196,28 @@ class CastorService : Service() {
           while (true) {
             val event = output.readLine() ?: break
             val active = JSONObject(event).getBoolean("active")
-            EngineHost.active(this@CastorService, active)
-            withContext(Dispatchers.Main) { keepAwake(active) }
+            withContext(Dispatchers.Main) {
+              if (!closed) {
+                EngineHost.active(this@CastorService, active)
+                keepAwake(active)
+              }
+            }
           }
         }
         val status = child.waitFor()
         error("The casting engine stopped (exit $status).")
       } catch (error: Exception) {
         // An engine that was asked to stop has not failed.
-        if (
-          !closed &&
-            currentCoroutineContext().isActive &&
-            error !is kotlinx.coroutines.CancellationException
-        ) {
-          failure.value = error.message ?: "Unable to start Castor"
-          restart = false
+        if (error !is kotlinx.coroutines.CancellationException) {
+          withContext(NonCancellable + Dispatchers.Main) {
+            if (!closed) {
+              failure.value = error.message ?: "Unable to start Castor"
+              restart = false
+            }
+          }
         }
       } finally {
-        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) { shutdown() }
+        withContext(NonCancellable + Dispatchers.Main) { shutdown() }
       }
     }
   }
@@ -254,7 +272,8 @@ class CastorService : Service() {
     stopped.value = true
     endpoint.value = null
     bridge?.close()
-    process?.destroy()
+    // Terminate independently of the engine job, which may be blocked reading the child's output.
+    termination = process?.let { child -> CoroutineScope(Dispatchers.IO).launch { terminate(child) } }
     scope.cancel()
     // The pages kept for this engine's casts are let go; the browser itself stays while the screen uses it.
     browser.releasePlayers()
@@ -268,8 +287,21 @@ class CastorService : Service() {
 
   override fun onDestroy() {
     shutdown()
-    EngineHost.stopped(this, failure.value, restart)
     super.onDestroy()
+    CoroutineScope(Dispatchers.Main).launch {
+      termination?.join()
+      engineJob?.join()
+      EngineHost.stopped(this@CastorService, failure.value, restart)
+    }
+  }
+
+  private fun terminate(child: Process) {
+    child.destroy()
+    if (!child.waitFor(5, TimeUnit.SECONDS)) {
+      // Android may send SIGTERM again here. After the first signal the Go host restores its default handler.
+      child.destroyForcibly()
+      child.waitFor()
+    }
   }
 
   companion object {
