@@ -8,12 +8,14 @@ English one.
 - Updated the in-app browser to GeckoView 161 and the FCast scanner's camera stack to CameraX 1.7.0.
 - Updated Jetpack Compose and Lifecycle. Castor now uses Fragment 1.9.1 in place of the outdated version flagged by Google Play.
 - Updated OkHttp to 5.5.1 and Connect Kotlin to 0.10.0, with a matching client generator. Updated the Android Gradle Plugin, Buf, the Protobuf Gradle plugin and the JVM test JSON library.
+- Enabled R8 code optimization and obfuscation for the Google Play bundle.
 
 ### Italiano
 
 - Aggiornato il browser integrato a GeckoView 161 e la gestione della fotocamera dello scanner FCast a CameraX 1.7.0.
 - Aggiornati Jetpack Compose e Lifecycle. Castor usa ora Fragment 1.9.1 al posto della versione obsoleta segnalata da Google Play.
 - Aggiornati OkHttp alla 5.5.1 e Connect Kotlin alla 0.10.0, con il generatore client corrispondente. Aggiornati anche Android Gradle Plugin, Buf, il plugin Gradle di Protobuf e la libreria JSON dei test JVM.
+- Attivate l'ottimizzazione e l'offuscamento del codice con R8 per il bundle Google Play.
 
 ## 2.2.1 — 2026-11-24
 

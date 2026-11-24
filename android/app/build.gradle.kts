@@ -45,6 +45,8 @@ android {
         create("play") {
             initWith(getByName("release"))
             matchingFallbacks += "release"
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-play.pro")
         }
     }
     compileOptions {
