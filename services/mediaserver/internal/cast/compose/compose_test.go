@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"net/http"
 	"net/url"
 	"testing"
 
@@ -43,6 +44,9 @@ func TestTheCompositionADeviceGets(t *testing.T) {
 		want       Kind
 	}{
 		{"a Native cast on a push-only device that plays the source gets its own bytes", pushOnly, media.MP4, true, DeliveryAuto, Forward},
+		{"an opted-in Native cast gives the renderer the origin URL", pushOnly, media.MP4, true, DeliveryPreferDirect, Handoff},
+		{"an opted-in optimized cast remains served", pushOnly, media.MP4, false, DeliveryPreferDirect, ReadOnce},
+		{"a refused direct URL can still be forwarded", pushOnly, media.MP4, true, DeliveryForward, Forward},
 		{"an optimized cast stays served, so castor keeps pacing it", pushOnly, media.MP4, false, DeliveryAuto, ReadOnce},
 		{"a push-only device is served once it refused the source", pushOnly, media.MP4, true, DeliveryServe, ReadOnce},
 		{"a container the push-only device does not name is read once", pushOnly, media.MKV, true, DeliveryAuto, ReadOnce},
@@ -52,6 +56,28 @@ func TestTheCompositionADeviceGets(t *testing.T) {
 			shape := Shape{Device: tt.device, Program: measured(t, tt.sourceCT, false), Delivery: tt.preference, PreserveSource: tt.native}
 			if got := For(shape); got != tt.want {
 				t.Errorf("composed %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDirectOriginalRequiresAnOriginTheRendererCanFetch(t *testing.T) {
+	device := media.Capabilities{NativePlaybackTrial: true, Formats: []media.FormatSupport{{Transport: media.TransportMKV}}}
+	for _, tt := range []struct {
+		name string
+		edit func(*media.Input)
+	}{
+		{"needs a header", func(in *media.Input) { in.Headers = http.Header{"Referer": {"https://example.test/"}} }},
+		{"contains user information", func(in *media.Input) { in.URL.User = url.UserPassword("user", "secret") }},
+		{"a file on the phone", func(in *media.Input) { in.URL.Host = "127.0.0.1" }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			program := measured(t, media.MKV, false)
+			probe, _ := program.Measurement()
+			tt.edit(&program.Inputs[0])
+			program.SetMeasurement(probe)
+			if got := For(Shape{Device: device, Program: program, PreserveSource: true, Delivery: DeliveryPreferDirect}); got != Forward {
+				t.Errorf("composed %q, want a forward", got)
 			}
 		})
 	}

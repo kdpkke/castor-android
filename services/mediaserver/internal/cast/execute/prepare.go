@@ -62,6 +62,7 @@ type presentation struct {
 	// embeddedCaptions is a playlist that lists the generated captions itself.
 	embeddedCaptions bool
 	source           bool
+	direct           bool
 	// runtime is what is left of the program from where the attempt begins, zero where the source declared none.
 	runtime time.Duration
 	// live is a program with no end, which has no runtime.
@@ -107,6 +108,7 @@ func (s *preparation) inspectPresentation() (p inspectedPresentation, err error)
 	case compose.Handoff:
 		primary, _ := s.attempt.Program.PrimaryInput()
 		p.target, p.contentType, p.source = primary.URL, primary.ContentType, true
+		p.direct = true
 		return p, nil
 	case compose.Forward:
 		primary, _ := s.attempt.Program.PrimaryInput()

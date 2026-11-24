@@ -4,6 +4,8 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -18,7 +20,9 @@ import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.platform.app.InstrumentationRegistry
 import castor.v1.CastOuterClass.*
 import castor.v1.DeviceOuterClass.*
+import castor.v1.StreamOuterClass.Delivery
 import com.muratoreware.castorandroid.data.Rpc
+import java.util.concurrent.atomic.AtomicReference
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -187,19 +191,19 @@ class MainScreenTest {
         SavedTv("Chosen receiver", "192.0.2.88", DeviceType.DEVICE_TYPE_DLNA, manual = true)
       )
     val server = MockWebServer()
+    val submitted = AtomicReference<CastRequest>()
     server.dispatcher =
       object : Dispatcher() {
-        override fun dispatch(request: RecordedRequest): MockResponse =
-          MockResponse()
+        override fun dispatch(request: RecordedRequest): MockResponse {
+          val response =
+            if (request.path == "/castor.v1.CastService/Cast") {
+              submitted.set(CastRequest.parseFrom(request.body.readByteArray()))
+              CastResponse.newBuilder().setCastId("new-cast").build().toByteArray()
+            } else byteArrayOf()
+          return MockResponse()
             .setHeader("Content-Type", "application/proto")
-            .setBody(
-              Buffer()
-                .write(
-                  if (request.path == "/castor.v1.CastService/Cast")
-                    CastResponse.newBuilder().setCastId("new-cast").build().toByteArray()
-                  else byteArrayOf()
-                )
-            )
+            .setBody(Buffer().write(response))
+        }
       }
     server.start()
     val model = MainScreenViewModel()
@@ -213,11 +217,15 @@ class MainScreenTest {
         model.connect(Rpc(server.url("/").toString().removeSuffix("/"), "fixture"))
       }
       compose.waitUntil(5000) { model.uiState.value.ready }
+      compose.onNodeWithText("Playback settings").performScrollTo().performClick()
+      compose.onNodeWithText("Download directly on the TV").performScrollTo().performClick()
+      compose.onNodeWithText("Save").performScrollTo().performClick()
       compose.onNodeWithTag("cast-action").performClick()
       compose.waitUntil(5000) { model.uiState.value.castId == "new-cast" }
       compose.onAllNodesWithText("Chosen receiver").onFirst().assertExists()
       compose.onNodeWithText("submitted.example.org").assertExists()
       compose.runOnIdle {
+        assertEquals(Delivery.DELIVERY_PREFER_DIRECT, submitted.get()?.preferences?.delivery)
         assertEquals("192.0.2.88", model.uiState.value.activeCast?.device?.address)
         assertEquals(
           "https://submitted.example.org/movie.mp4",
@@ -255,10 +263,15 @@ class MainScreenTest {
       com.muratoreware.castorandroid.theme.CastorTheme { MainScreen(model, null, "", {}) }
     }
     compose.onNodeWithText("Playback settings").performScrollTo().performClick()
-    compose.onNodeWithText("Optimized").performClick().assertIsSelected()
+    compose.onNodeWithText("Download directly on the TV")
+      .performScrollTo()
+      .assertIsOff()
+      .performClick()
+      .assertIsOn()
+    compose.onNodeWithText("Optimized").performScrollTo().performClick().assertIsSelected()
     compose.onNodeWithText("720p").assertDoesNotExist()
     compose.onNodeWithText("Custom").assertDoesNotExist()
-    compose.onNodeWithText("Language", useUnmergedTree = true).performClick()
+    compose.onNodeWithText("Language", useUnmergedTree = true).performScrollTo().performClick()
     compose.onNodeWithText("Save").performScrollTo().assertIsNotEnabled()
     compose.onNodeWithText("Language code, e.g. it or en").performScrollTo().performTextInput("it")
     // The system IME can still resize the sheet after Compose becomes idle.
@@ -268,6 +281,7 @@ class MainScreenTest {
     compose.runOnIdle {
       assertEquals("optimized", CastOptions(context).height())
       assertEquals("it", CastOptions(context).subtitles())
+      assertEquals(true, CastOptions(context).preferDirectDlna())
     }
   }
 
@@ -299,7 +313,8 @@ class MainScreenTest {
     compose.runOnIdle { assertEquals("optimized", CastOptions(context).height()) }
     // An invalid value cannot be saved from the prompt; dismissing it returns to editing.
     compose.onNodeWithText("Playback settings").performScrollTo().performClick()
-    compose.onNodeWithText("Language", useUnmergedTree = true).performClick()
+    compose.onNodeWithText("Language", useUnmergedTree = true).performScrollTo().performClick()
+    compose.onNodeWithContentDescription("Close").performScrollTo()
     compose.onNodeWithContentDescription("Close").performClick()
     compose.onNodeWithTag("unsaved-save").assertIsNotEnabled()
     androidx.test.espresso.Espresso.pressBack()

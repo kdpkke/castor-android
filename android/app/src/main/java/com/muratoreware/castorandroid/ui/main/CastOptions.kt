@@ -230,7 +230,13 @@ class CastOptions(private val context: Context) {
 
   fun subtitles(): String = preferences.getString("subtitles", "off").orEmpty()
 
-  fun playback(height: String, subtitles: String) {
-    preferences.edit().putString("height", height).putString("subtitles", subtitles).apply()
+  fun preferDirectDlna(): Boolean = preferences.getBoolean("prefer-direct-dlna", false)
+
+  fun playback(height: String, subtitles: String, preferDirectDlna: Boolean) {
+    preferences.edit()
+      .putString("height", height)
+      .putString("subtitles", subtitles)
+      .putBoolean("prefer-direct-dlna", preferDirectDlna)
+      .apply()
   }
 }

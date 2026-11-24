@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import castor.v1.CastOuterClass.*
 import castor.v1.DeviceOuterClass.*
 import castor.v1.DeviceOuterClass.Target
+import castor.v1.StreamOuterClass.Delivery
 import castor.v1.StreamOuterClass.Stream
 import com.connectrpc.Code
 import com.connectrpc.ConnectException
@@ -564,11 +565,12 @@ class MainScreenViewModel : ViewModel() {
     subtitleLanguage: String = "en",
     localVideo: LocalVideo? = null,
     automatic: Boolean = false,
+    preferDirectDlna: Boolean = false,
   ) {
     if (!uiState.value.ready || uiState.value.recovering || submission?.isActive == true) return
     if (engine == null && repository == null) return
     lastCast = {
-      cast(url, page, target, maxHeight, subtitles, receiverName, subtitleLanguage, localVideo, automatic)
+      cast(url, page, target, maxHeight, subtitles, receiverName, subtitleLanguage, localVideo, automatic, preferDirectDlna)
     }
     submission = viewModelScope.launch {
       try {
@@ -607,7 +609,7 @@ class MainScreenViewModel : ViewModel() {
                     setPreferences(
                       request.preferences
                         .toBuilder()
-                        .setDelivery(castor.v1.StreamOuterClass.Delivery.DELIVERY_SERVE)
+                        .setDelivery(Delivery.DELIVERY_SERVE)
                     )
                 }
                 .setMediaInfo(MediaInfo.newBuilder().setTitle(localVideo.name.take(256)))
@@ -650,19 +652,24 @@ class MainScreenViewModel : ViewModel() {
               selectedCastId = null,
               pendingCast = pending,
             )
-          if (localVideo == null && automatic && page) {
-            val source = VideoSources.automatic(url)
+          if (localVideo == null) {
+            val automaticPage = automatic && page
+            val source = if (automaticPage) VideoSources.automatic(url) else request.source
             request =
               request
                 .toBuilder()
                 .setSource(source)
                 .apply {
-                  if (source.hasStream() && servesDirectLink(device))
-                    setPreferences(
-                      request.preferences
-                        .toBuilder()
-                        .setDelivery(castor.v1.StreamOuterClass.Delivery.DELIVERY_SERVE)
-                    )
+                  if (source.hasStream()) {
+                    val delivery = when {
+                      preferDirectDlna && request.preferences.preserveSource &&
+                        device.type == DeviceType.DEVICE_TYPE_DLNA -> Delivery.DELIVERY_PREFER_DIRECT
+                      automaticPage && servesDirectLink(device) -> Delivery.DELIVERY_SERVE
+                      else -> null
+                    }
+                    if (delivery != null)
+                      setPreferences(request.preferences.toBuilder().setDelivery(delivery))
+                  }
                 }
                 .build()
           }

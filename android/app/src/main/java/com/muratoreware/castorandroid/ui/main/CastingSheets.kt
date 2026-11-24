@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -518,10 +519,12 @@ internal fun TvPicker(
 internal fun PlaybackSettings(
   initialHeight: String,
   initialSubtitles: String,
+  initialPreferDirectDlna: Boolean,
   dismiss: () -> Unit,
-  save: (String, String) -> Unit,
+  save: (String, String, Boolean) -> Unit,
 ) {
   var height by rememberSaveable { mutableStateOf(playbackQuality(initialHeight)) }
+  var preferDirectDlna by rememberSaveable { mutableStateOf(initialPreferDirectDlna) }
   var subtitleMode by rememberSaveable {
     mutableStateOf(if (initialSubtitles in listOf("off", "auto")) initialSubtitles else "language")
   }
@@ -533,7 +536,10 @@ internal fun PlaybackSettings(
       Regex("^[a-z]{2,3}$").matches(language.trim().lowercase(Locale.ROOT))
   val subtitles =
     if (subtitleMode == "language") language.trim().lowercase(Locale.ROOT) else subtitleMode
-  val changed = height != playbackQuality(initialHeight) || subtitles != initialSubtitles
+  val changed =
+    height != playbackQuality(initialHeight) ||
+      subtitles != initialSubtitles ||
+      preferDirectDlna != initialPreferDirectDlna
   // Closing with unsaved changes asks first, whether through X, a tap outside, a swipe or Back.
   var confirmClose by rememberSaveable { mutableStateOf(false) }
   fun close() {
@@ -551,7 +557,7 @@ internal fun PlaybackSettings(
         canSave = validLanguage,
         keepEditing = { confirmClose = false },
         discard = dismiss,
-        save = { save(height, subtitles) },
+        save = { save(height, subtitles, preferDirectDlna) },
       )
     Column(
       Modifier.fillMaxWidth()
@@ -596,6 +602,23 @@ internal fun PlaybackSettings(
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
+      val native = height == NATIVE_QUALITY
+      Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+          .toggleable(preferDirectDlna, enabled = native, role = Role.Switch) { preferDirectDlna = it },
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          Text(stringResource(R.string.dlna_direct_download), style = MaterialTheme.typography.titleMedium)
+          Text(
+            stringResource(R.string.dlna_direct_download_help),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+        Switch(checked = preferDirectDlna, onCheckedChange = null, enabled = native)
+      }
       HorizontalDivider()
       Text(stringResource(R.string.subtitles), style = MaterialTheme.typography.titleMedium)
       FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -635,7 +658,7 @@ internal fun PlaybackSettings(
         )
       GlassButton(
         prominent = true,
-        onClick = { save(height, subtitles) },
+        onClick = { save(height, subtitles, preferDirectDlna) },
         enabled = validLanguage,
         modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
       ) {

@@ -107,6 +107,8 @@
     <string name="quality_native_help">Mantiene video e audio originali quando supportati. Le dirette passano automaticamente a Ottimizzata se serve una conversione. Per gli altri video, Castor chiede prima di convertire.</string>
     <string name="quality_optimized">Ottimizzata</string>
     <string name="quality_optimized_help">Adatta video e audio al ricevitore, con risoluzione fino a 1080p. Se necessario, converte HDR in SDR o cambia codec. L’elaborazione consuma più batteria.</string>
+    <string name="dlna_direct_download">Scarica direttamente sulla TV</string>
+    <string name="dlna_direct_download_help">In modalità Nativa via DLNA, la TV prova ad aprire il link del video. Se non ci riesce, Castor inoltra il file originale.</string>
     <string name="subtitles_native_help">Usa i sottotitoli originali quando disponibili. La modalità Nativa non imprime testo nel video e non genera i sottotitoli mancanti.</string>
     <string name="native_incompatible_help">Castor non può inviare questo video al ricevitore senza convertirlo. Scegli la modalità Ottimizzata per consentire la conversione, poi avvia di nuovo il cast.</string>
     <string name="live_optimized_automatically">Ottimizzata automaticamente: questa diretta richiede una conversione per la riproduzione.</string>

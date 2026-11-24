@@ -18,12 +18,12 @@ const (
 // For is the kind of cast shape s calls for; a remux answers a device that rejects the source or whose headers do not match.
 func For(s Shape) Kind {
 	switch {
+	case s.handoff():
+		return Handoff
 	case s.forwards():
 		return Forward
 	case !s.Device.SelfFetch:
 		return ReadOnce
-	case s.handoff():
-		return Handoff
 	default:
 		return Remux
 	}

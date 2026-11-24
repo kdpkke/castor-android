@@ -145,8 +145,15 @@ var serveInstead = strategy{
 	apply: func(_ context.Context, c change) (Attempt, bool) {
 		a := c.attempt
 		// A device already served would refuse the next attempt's identical serve.
-		if a.Delivery == compose.DeliveryServe || !c.outcome.Evidence.Handoff {
+		if a.Delivery == compose.DeliveryServe || a.Delivery == compose.DeliveryForward || !c.outcome.Evidence.Handoff {
 			return a, false
+		}
+		if a.Delivery == compose.DeliveryPreferDirect {
+			if !c.outcome.Evidence.Direct {
+				return a, false
+			}
+			a.Delivery = compose.DeliveryForward
+			return a, true
 		}
 		a.Delivery = compose.DeliveryServe
 		return a, true

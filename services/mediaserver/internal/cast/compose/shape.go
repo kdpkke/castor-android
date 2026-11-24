@@ -36,14 +36,21 @@ const (
 	DeliveryAuto DeliveryPreference = "auto"
 	// DeliveryServe refuses the handoff: castor reads the source and serves the device locally.
 	DeliveryServe DeliveryPreference = "serve"
+	// DeliveryPreferDirect tries an origin URL that would otherwise be forwarded.
+	DeliveryPreferDirect DeliveryPreference = "prefer-direct"
+	// DeliveryForward keeps a native original local after its origin URL was refused.
+	DeliveryForward DeliveryPreference = "forward"
 )
 
 // handoff is a device that fetches for itself and plays the source as it is, within the ceiling; a Native
 // cast leaves a trial device to judge the tracks, so an HDR or Dolby Vision original reaches it unchanged.
 func (s Shape) handoff() bool {
 	primary, ok := s.Program.PrimaryInput()
-	if !ok || s.Delivery == DeliveryServe {
+	if !ok || s.Delivery == DeliveryServe || s.Delivery == DeliveryForward {
 		return false
+	}
+	if s.Delivery == DeliveryPreferDirect {
+		return s.Program.SelfFetchable() && primary.URL.User == nil && s.forwards()
 	}
 	probe, measured := s.Program.Measurement()
 	return s.Device.SelfFetch && s.Program.SelfFetchable() && measured &&

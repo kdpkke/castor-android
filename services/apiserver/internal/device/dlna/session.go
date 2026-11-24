@@ -72,7 +72,10 @@ func (s *session) Play(ctx context.Context, playback device.Playback) error {
 	if err != nil {
 		return fmt.Errorf("building DIDL-Lite metadata: %w", err)
 	}
-	slog.DebugContext(ctx, "DIDL metadata", "xml", metadata)
+	direct := playback.Play.GetSource().GetDirect()
+	if !direct {
+		slog.DebugContext(ctx, "DIDL metadata", "xml", metadata)
+	}
 
 	setURI := &struct {
 		InstanceID         string
@@ -110,6 +113,9 @@ func (s *session) Play(ctx context.Context, playback device.Playback) error {
 		// A renderer may start playing without acknowledging Play before its deadline.
 		// Do not tear down that stream, or resend Play, if its state confirms the handover.
 		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+			if direct {
+				return s.awaitDirectStart(ctx, playback.URL)
+			}
 			if s.playingStream(ctx, playback.URL) {
 				slog.InfoContext(ctx, "device confirmed playback after Play timed out", "device", s.name())
 				return nil
@@ -119,7 +125,35 @@ func (s *session) Play(ctx context.Context, playback device.Playback) error {
 		}
 		return fmt.Errorf("starting playback: %w", err)
 	}
+	if direct {
+		return s.awaitDirectStart(ctx, playback.URL)
+	}
 	return nil
+}
+
+// An acknowledgement is not proof that the renderer can download the origin.
+func (s *session) awaitDirectStart(ctx context.Context, streamURL *url.URL) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	polls := time.NewTicker(500 * time.Millisecond)
+	defer polls.Stop()
+	for {
+		info, err := s.transportInfo(ctx)
+		started := info.CurrentTransportState == statePlaying || info.CurrentTransportState == statePaused
+		if err == nil && (started || info.CurrentTransportStatus == transportStatusError) {
+			if uri, err := s.currentURI(ctx); err == nil && ctx.Err() == nil && uri == streamURL.String() {
+				if info.CurrentTransportStatus == transportStatusError {
+					return errors.New("the renderer could not play the origin URL")
+				}
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for the renderer to play the origin URL: %w", context.Cause(ctx))
+		case <-polls.C:
+		}
+	}
 }
 
 // playingStream confirms both playback and the resource, since an older stream playing is not success.

@@ -294,6 +294,8 @@ message DeviceCommand {
         google.protobuf.Duration duration = 2 [(buf.validate.field).duration.gt = {}];
         Live live = 3;
       }
+      // The URL names the origin itself instead of a Castor forward.
+      bool direct = 1000;
     }
 
     message Progressive {

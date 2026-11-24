@@ -6,6 +6,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -33,6 +36,7 @@ class PlaybackModesTest {
     val localized = context.createConfigurationContext(configuration)
     val resources = localized.resources
     var saved: String? = null
+    var savedDirect: Boolean? = null
     compose.setContent {
       CompositionLocalProvider(
         LocalContext provides localized,
@@ -40,20 +44,30 @@ class PlaybackModesTest {
         LocalConfiguration provides configuration,
       ) {
         CastorTheme {
-          PlaybackSettings("native", "off", {}, { quality, _ -> saved = quality })
+          PlaybackSettings("native", "off", false, {}) { quality, _, direct ->
+            saved = quality
+            savedDirect = direct
+          }
         }
       }
     }
     compose.onNodeWithText(resources.getString(R.string.quality_native)).assertIsSelected()
     compose.onNodeWithText(resources.getString(R.string.quality_native_help)).assertExists()
+    val direct = compose.onNodeWithText(resources.getString(R.string.dlna_direct_download))
+    direct.performScrollTo().assertIsOff().performClick().assertIsOn()
     compose
       .onNodeWithText(resources.getString(R.string.quality_optimized))
+      .performScrollTo()
       .performClick()
       .assertIsSelected()
     compose.onNodeWithText(resources.getString(R.string.quality_optimized_help)).assertExists()
+    direct.assertIsOn().assertIsNotEnabled()
     compose.onNodeWithContentDescription(resources.getString(R.string.close)).assertExists()
     compose.onNodeWithText("720p").assertDoesNotExist()
     compose.onNodeWithText(resources.getString(R.string.save)).performScrollTo().performClick()
-    compose.runOnIdle { assertEquals("optimized", saved) }
+    compose.runOnIdle {
+      assertEquals("optimized", saved)
+      assertEquals(true, savedDirect)
+    }
   }
 }

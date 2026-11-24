@@ -162,6 +162,33 @@ func TestOnlyADeviceHandedWhatItFetchesItselfIsServedInstead(t *testing.T) {
 	}
 }
 
+func TestARefusedDirectOriginalIsOnlyRetriedAsAForward(t *testing.T) {
+	refusal := errors.New("renderer refused the origin")
+	direct := Outcome{Err: refusal, Evidence: Evidence{Reached: health.Opening, PlayErr: refusal, Handoff: true, Direct: true}}
+	forward := direct
+	forward.Evidence.Direct = false
+	for _, tt := range []struct {
+		name   string
+		second Outcome
+		failed bool
+	}{
+		{"forward succeeds", delivered, false},
+		{"forward fails without a conversion attempt", forward, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/movie.mkv"), Delivery: compose.DeliveryPreferDirect, PreserveSource: true}
+			run := &scriptedRunner{outcomes: []Outcome{direct, tt.second}}
+			err := Cast(t.Context(), in, run, &fakeProgram{})
+			if (err != nil) != tt.failed || len(run.seen) != 2 {
+				t.Fatalf("Cast() = %v after %d attempts; want exactly two, failed=%v", err, len(run.seen), tt.failed)
+			}
+			if next := run.seen[1]; next.Delivery != compose.DeliveryForward || next.Stream != run.seen[0].Stream || next.Program.Start != 0 {
+				t.Fatalf("retry = %+v, want the same file forwarded from its start", next)
+			}
+		})
+	}
+}
+
 func TestUnreadableLinksAreMovedPastInRankOrder(t *testing.T) {
 	in := Intent{Turns: unheard{}, Candidates: candidates(t,
 		"https://cdn.example/expired.m3u8",

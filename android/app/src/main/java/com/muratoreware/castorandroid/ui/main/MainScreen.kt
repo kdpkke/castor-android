@@ -183,6 +183,7 @@ fun MainScreen(
   LaunchedEffect(found) { found?.takeIf { it != tv }?.let(::saveTv) }
   var height by rememberSaveable { mutableStateOf(options.height()) }
   var subtitles by rememberSaveable { mutableStateOf(options.subtitles()) }
+  var preferDirectDlna by rememberSaveable { mutableStateOf(options.preferDirectDlna()) }
   var sheet by rememberSaveable { mutableStateOf<String?>(null) }
   var menu by remember { mutableStateOf(false) }
   var debugMode by remember { mutableStateOf(DebugLog.enabled(context)) }
@@ -372,6 +373,7 @@ fun MainScreen(
                         subtitleLanguage = options.language().tag,
                         localVideo = selectedVideo,
                         automatic = mode == VideoSourceMode.Automatic,
+                        preferDirectDlna = preferDirectDlna,
                       )
                     }
                   }
@@ -663,7 +665,7 @@ fun MainScreen(
             state.nativeIncompatible,
             {
               height = OPTIMIZED_QUALITY
-              options.playback(height, subtitles)
+              options.playback(height, subtitles, preferDirectDlna)
               viewModel.dismissError()
               sheet = "settings"
             },
@@ -852,10 +854,11 @@ fun MainScreen(
     PairingDialog(it, viewModel::startPairing, viewModel::finishPairing, viewModel::cancelPairing)
   }
   if (sheet == "settings")
-    PlaybackSettings(height, subtitles, { sheet = null }) { newHeight, newSubtitles ->
+    PlaybackSettings(height, subtitles, preferDirectDlna, { sheet = null }) { newHeight, newSubtitles, direct ->
       height = newHeight
       subtitles = newSubtitles
-      options.playback(height, subtitles)
+      preferDirectDlna = direct
+      options.playback(height, subtitles, preferDirectDlna)
       sheet = null
     }
 }
