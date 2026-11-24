@@ -2,6 +2,7 @@ package lend
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"net/url"
 	"slices"
@@ -123,6 +124,46 @@ func TestThePlayheadIsInTheWholeMediaNotTheStreamHanded(t *testing.T) {
 		}
 		if head := r.heads[0]; head.GetPosition().AsDuration() != 90*time.Second || head.GetDuration().AsDuration() != 91*time.Minute || !head.GetPaused() {
 			t.Errorf("playhead %v, want 1m30s into 1h31m, paused by the viewer", head)
+		}
+	})
+}
+
+func TestFollowingAPlayingDevicePublishesItsPositionEachSecond(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := &remote{}
+		d := r.device(t, 30*time.Second)
+		published := func() int {
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			return len(r.heads)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		if err := d.Play(ctx, fromAMinuteIn); err != nil {
+			t.Fatal(err)
+		}
+		go d.Follow(ctx)
+		synctest.Wait()
+		for second := 1; second <= 3; second++ {
+			time.Sleep(time.Second)
+			synctest.Wait()
+			if got := published(); got != second {
+				t.Fatalf("after %d seconds, published %d playheads, want %d", second, got, second)
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+		if _, _, ok := d.Position(ctx); !ok {
+			t.Fatal("the health sampler could not read the position")
+		}
+		time.Sleep(500 * time.Millisecond)
+		synctest.Wait()
+		if got := published(); got != 4 {
+			t.Fatalf("polled again less than a second after the health sampler: %d playheads", got)
+		}
+		time.Sleep(500 * time.Millisecond)
+		synctest.Wait()
+		if got := published(); got != 5 {
+			t.Fatalf("one second after the health sampler, published %d playheads, want 5", got)
 		}
 	})
 }

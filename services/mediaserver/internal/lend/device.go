@@ -301,25 +301,32 @@ func (d *Device) Seek(ctx context.Context, at time.Duration) error {
 	return nil
 }
 
-// Follow asks the device where it plays whenever nothing else has for a while, until ctx ends.
+// Follow keeps the position shown in playback controls current, independently of the health sampler.
 func (d *Device) Follow(ctx context.Context) {
-	tick := time.NewTicker(health.HeadEvery)
-	defer tick.Stop()
+	const interval = time.Second
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
 	defer d.moves.End(context.WithoutCancel(ctx))
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-tick.C:
+		case <-timer.C:
 		}
+		wait := interval
 		d.mu.Lock()
-		due := d.streaming() && time.Since(d.askedAt) >= health.HeadEvery
+		if d.streaming() {
+			wait = time.Until(d.askedAt.Add(interval))
+		}
 		d.mu.Unlock()
-		if due {
+		if wait <= 0 {
 			asking, cancel := context.WithTimeout(ctx, health.HeadEvery)
 			d.Position(asking)
 			cancel()
+			wait = interval
 		}
+		// A recent position request sets the next deadline instead of skipping a whole tick.
+		timer.Reset(wait)
 	}
 }
 
