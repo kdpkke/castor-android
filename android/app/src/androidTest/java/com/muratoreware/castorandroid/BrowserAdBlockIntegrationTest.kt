@@ -105,20 +105,24 @@ class BrowserAdBlockIntegrationTest {
               }, 4500)</script>
             """
                       .trimIndent()
-                  // Real generic rules bundled in both extensions block these same-origin
-                  // resources.
-                  // No external advertising service is contacted, even if filtering regresses.
+                  // Both extensions block this same-origin script using their real filters.
                   "/ads/custom_ads.js" -> "location.href='/amazon-offer';"
                   "/player" -> "<script>fetch('/iframe.m3u8')</script>"
                   else -> "#EXTM3U\n#EXT-X-ENDLIST\n"
                 }
-              return MockResponse()
+              val response = MockResponse()
                 .setHeader(
                   "Content-Type",
                   if (request.path == "/ads/custom_ads.js") "application/javascript"
                   else "text/html",
                 )
                 .setBody(body)
+              // Keep the video requests blocked even when the extensions update their media rules.
+              // The script still exercises the installed blockers and the HLS fetches stay allowed.
+              if (request.path == "/page") {
+                response.setHeader("Content-Security-Policy", "media-src 'none'")
+              }
+              return response
             }
           }
         origin.start()
@@ -131,6 +135,7 @@ class BrowserAdBlockIntegrationTest {
               )
             }
           assertEquals(
+            "Requests: $requests. Request errors: ${browser.requestErrors}",
             setOf(origin.url("/main.m3u8").toString(), origin.url("/iframe.m3u8").toString()),
             result.streamsList.map { it.stream.url }.toSet(),
           )
