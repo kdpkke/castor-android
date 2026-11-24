@@ -88,7 +88,7 @@ internal class BrowserPageSession(
 
   @Volatile private var loadFailure: String? = null
   private var loadingUrl: String? = null
-  // Gecko runs clearPage's about:blank asynchronously. A load issued before that blank page
+  // Gecko runs about:blank asynchronously. A load issued before that blank page
   // starts is replaced by it, so the next navigation waits for this to complete.
   private var blankPage: CompletableDeferred<Unit>? = null
   private var mainPort: WebExtension.Port? = null
@@ -504,11 +504,22 @@ internal class BrowserPageSession(
         if (interactive && page.value == null) page.value = BrowserPage(request.getUrls(0))
       }
       prepare()
-      for (address in request.urlsList) {
+      for ((index, address) in request.urlsList.withIndex()) {
         withContext(Dispatchers.Main) {
           val reuse =
-            interactive && page.value != null && sourcePage == address && loadFailure == null
+            index == 0 &&
+              interactive &&
+              page.value != null &&
+              sourcePage == address &&
+              loadFailure == null
           if (!reuse) {
+            if (index > 0) {
+              // A failed page can still be committing while Gecko starts its replacement.
+              capturing = false
+              extracting = false
+              loadBlankPage()
+            }
+            blankPage?.let { withTimeoutOrNull(5_000) { it.await() } }
             candidates.clear()
             requestErrors.clear()
             // Any connected port belongs to the document this navigation replaces.
@@ -521,7 +532,6 @@ internal class BrowserPageSession(
           extracting = true
           if (!reuse) {
             page.value = if (interactive) BrowserPage(address, protectionReady = true) else null
-            blankPage?.let { withTimeoutOrNull(5_000) { it.await() } }
             navigationStarted = System.currentTimeMillis()
             session.loadUri(address)
           }
@@ -616,6 +626,13 @@ internal class BrowserPageSession(
     callbacks.forEach { it("null") }
   }
 
+  private fun loadBlankPage() {
+    if (!opened) return
+    session.stop()
+    blankPage = CompletableDeferred()
+    session.loadUri("about:blank")
+  }
+
   private fun clearPage() {
     page.value = null
     capturedRequest = null
@@ -625,11 +642,7 @@ internal class BrowserPageSession(
     loadFailure = null
     mainPort = null
     finishEvaluations()
-    if (opened) {
-      session.stop()
-      blankPage = CompletableDeferred()
-      session.loadUri("about:blank")
-    }
+    loadBlankPage()
     candidates.clear()
   }
 

@@ -17,6 +17,7 @@ import castor.scraping.v1.Scraping.ResolveRequest
 import com.muratoreware.castorandroid.BrowserEngine
 import com.muratoreware.castorandroid.BrowserResolver
 import com.muratoreware.castorandroid.theme.CastorTheme
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.*
 import okhttp3.mockwebserver.Dispatcher
@@ -718,11 +719,24 @@ class BrowserPresentationTest {
         server.dispatcher =
           object : Dispatcher() {
             override fun dispatch(request: RecordedRequest) =
-              if (request.path == "/missing") MockResponse().setResponseCode(404)
-              else
-                MockResponse()
-                  .setHeader("Content-Type", "text/html")
-                  .setBody("<script>fetch('/available.m3u8')</script>")
+              when (request.path) {
+                // The status arrives before the failed page's document can finish loading.
+                "/missing" ->
+                  MockResponse()
+                    .setResponseCode(404)
+                    .setHeader("Content-Type", "text/html")
+                    .setBody("<p>Missing</p>")
+                    .setBodyDelay(1, TimeUnit.SECONDS)
+                "/available" ->
+                  MockResponse()
+                    .setHeader("Content-Type", "text/html")
+                    .setBody("<script>fetch('/available.m3u8')</script>")
+                "/available.m3u8" ->
+                  MockResponse()
+                    .setHeader("Content-Type", "application/vnd.apple.mpegurl")
+                    .setBody("#EXTM3U\n")
+                else -> MockResponse().setResponseCode(404)
+              }
           }
         server.start()
         val browser = withContext(Dispatchers.Main) { BrowserResolver(context) }
