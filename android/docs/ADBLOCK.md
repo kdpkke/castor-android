@@ -100,7 +100,7 @@ the cost of some rendering performance while the page is visible.
 
 | Component | Version | Source / license |
 | --- | --- | --- |
-| GeckoView | 158.0.20261021001945 | [Mozilla Maven](https://maven.mozilla.org/maven2/org/mozilla/geckoview/geckoview/158.0.20261021001945/) · [Firefox source](https://firefox-source-docs.mozilla.org/contributing/contribution_quickref.html) · MPL 2.0 |
+| GeckoView | 161.0.20261118180411 | [Mozilla Maven](https://maven.mozilla.org/maven2/org/mozilla/geckoview/geckoview/161.0.20261118180411/) · [Firefox source](https://firefox-source-docs.mozilla.org/contributing/contribution_quickref.html) · MPL 2.0 |
 | uBlock Origin | 1.75.0 | [Signed AMO package](https://addons.mozilla.org/firefox/downloads/file/5034826/ublock_origin-1.75.0.xpi) · [corresponding source](https://github.com/gorhill/uBlock/tree/1.75.0) · GPL 3.0 |
 | AdGuard AdBlocker | 5.5.3.5 | [Signed AMO package](https://addons.mozilla.org/firefox/downloads/file/5116233/adguard_adblocker-5.5.3.5.xpi) · [corresponding source](https://github.com/AdguardTeam/AdguardBrowserExtension/tree/v5.5.3.5) · GPL 3.0 (repository LICENSE; AMO lists LGPL-3.0-only) |
 

@@ -78,7 +78,7 @@ git submodule update --init third_party/whisper.cpp
 
 The native build runs the checked-in Bash script through WSL. It downloads pinned Go and NDK toolchains and builds FFmpeg, FFprobe, x264, OpenSSL, FreeType, HarfBuzz, zimg, and the repository's pinned Whisper. Native build caches live in the Linux filesystem at `/var/tmp/castor-android-native`: extracting the Linux NDK onto case-insensitive NTFS loses distinct headers. Whisper's CMake build directory is keyed by the checkout path, so separate clones can share dependencies without reusing a cache tied to another source directory. `CASTOR_NATIVE_CACHE` may select another **case-sensitive** Linux directory. Do not use `/tmp` for a cache that must survive WSL restarts.
 
-The Gradle wrapper pins Gradle 9.8.1; the version catalog pins AGP 9.4.1 and Kotlin 2.4.21. Existing desktop dependencies and the Whisper submodule revision are retained. Generated native binaries and Gradle output are ignored by Git.
+The Gradle wrapper pins Gradle 9.8.1. The version catalog pins AGP 9.5.2 and Kotlin 2.4.21. Existing desktop dependencies and the Whisper submodule revision are retained. Generated native binaries and Gradle output are ignored by Git.
 
 Client generation is part of a normal Gradle build on Windows and Linux; no separate Buf installation is needed. To regenerate explicitly, run `:client:bufGenerate` with the Gradle wrapper from `android/`. Buf CLI 1.74.0, its Gradle plugin 0.11.2 and Connect-Kotlin 0.9.0 are pinned. The generator template is `client/buf.gen.yaml`; keep its Connect version aligned with the runtime in the version catalog. Generation uses the public Buf remote plugin and requires network access when it runs. Buf is a build tool and is not included in the APK.
 

@@ -1,7 +1,7 @@
 version: v2
 clean: true
 plugins:
-  - remote: buf.build/connectrpc/kotlin:v0.9.0
+  - remote: buf.build/connectrpc/kotlin:v0.10.0
     out: kotlin
 inputs:
   - directory: ../..

@@ -21,8 +21,8 @@ android {
         minSdk = 28
         ndk { abiFilters += targetAbi?.let { listOf(it) } ?: listOf("arm64-v8a", "x86_64") }
         targetSdk = 37
-        versionCode = 59
-        versionName = "2.2.1"
+        versionCode = 62
+        versionName = "2.2.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["appLabel"] = "@string/app_name"
         // Manual diagnostics need real hardware or an explicitly supplied external URL.
@@ -34,7 +34,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            versionNameSuffix = "-test.40"
+            versionNameSuffix = "-test.41"
             manifestPlaceholders["appLabel"] = "Castor (test)"
         }
         release {
@@ -138,6 +138,11 @@ dependencies {
   implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.activity.compose)
+  constraints {
+    implementation(libs.androidx.fragment) {
+      because("CameraX and Play Services request Fragment 1.1.0, which Google Play flags as outdated.")
+    }
+  }
 
   // Arch Components
   implementation(libs.androidx.lifecycle.runtime.compose)

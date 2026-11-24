@@ -3,6 +3,18 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
+## 2.2.2 — 2026-11-24
+
+- Updated the in-app browser to GeckoView 161 and the FCast scanner's camera stack to CameraX 1.7.0.
+- Updated Jetpack Compose and Lifecycle. Castor now uses Fragment 1.9.1 in place of the outdated version flagged by Google Play.
+- Updated OkHttp to 5.5.1 and Connect Kotlin to 0.10.0, with a matching client generator. Updated the Android Gradle Plugin, Buf, the Protobuf Gradle plugin and the JVM test JSON library.
+
+### Italiano
+
+- Aggiornato il browser integrato a GeckoView 161 e la gestione della fotocamera dello scanner FCast a CameraX 1.7.0.
+- Aggiornati Jetpack Compose e Lifecycle. Castor usa ora Fragment 1.9.1 al posto della versione obsoleta segnalata da Google Play.
+- Aggiornati OkHttp alla 5.5.1 e Connect Kotlin alla 0.10.0, con il generatore client corrispondente. Aggiornati anche Android Gradle Plugin, Buf, il plugin Gradle di Protobuf e la libreria JSON dei test JVM.
+
 ## 2.2.1 — 2026-11-24
 
 - **Let a DLNA TV download the video directly.** In Native quality, enable **Download directly on the TV** in Playback settings to hand a compatible video link to the TV. The option starts off. If the TV refuses the link, Castor forwards the original file through the phone without re-encoding it, keeping its Dolby Vision metadata, audio tracks and subtitles.
