@@ -1,5 +1,6 @@
 package com.muratoreware.castorandroid.ui.main
 
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.view.MotionEvent
 import androidx.activity.ComponentActivity
@@ -124,7 +125,7 @@ class BrowserPresentationTest {
                     """<meta name="viewport" content="width=device-width,initial-scale=1">
                 <style>html,body{margin:0;width:100%;height:100%;overflow:hidden}#scroll{width:100%;height:100%;overflow:auto}main{width:2400px;height:2400px;background:#217a39}
                 header{position:fixed;left:0;top:0;z-index:1;background:white;padding:8px}
-                input,button{box-sizing:border-box;height:44px;font-size:16px}input{width:180px}
+                input,button{box-sizing:border-box;height:44px;font-size:16px}input{width:180px;background:#b2dfdb}
                 button{display:block;width:180px;margin-top:8px}</style>
                 <header><input id="name" aria-label="Fixture username"><button id="submit" onclick="fetch('/clicked')">Test button</button></header>
                 <div id="scroll"><main>Scrollable form fixture</main></div>
@@ -181,8 +182,12 @@ class BrowserPresentationTest {
           }
         }
         compose.onNodeWithTag("page-browser").performScrollTo()
-        delay(500)
-        tapPage(70f, 28f)
+        val origin = IntArray(2)
+        val scale = state.get().getDouble("scale")
+        val dx = (70 * scale).toInt()
+        val dy = (28 * scale).toInt()
+        waitForBrowserPixel(browser, origin, dx, dy, Color.rgb(178, 223, 219)).recycle()
+        browserTouchGesture((origin[0] + dx).toFloat(), (origin[1] + dy).toFloat())
         val keyboardOpened =
           withTimeoutOrNull(10_000) {
             while (!imeVisible()) delay(100)
@@ -481,12 +486,11 @@ class BrowserPresentationTest {
         browser.resolve(ResolveRequest.newBuilder().addUrls(server.url("/page").toString()).build())
       }
       try {
-        var location = IntArray(2)
+        val location = IntArray(2)
         withTimeout(10_000) {
           while (true) {
             var ready = false
             compose.runOnIdle {
-              browser.view.getLocationOnScreen(location)
               ready =
                 browser.view.isShown &&
                   browser.view.height > 0 &&
@@ -496,22 +500,15 @@ class BrowserPresentationTest {
             delay(100)
           }
         }
-        delay(500)
         compose.runOnIdle {
           browser.dismissPage()
           assertNotNull("Dismiss must not interrupt an active resolution", browser.page.value)
         }
         // The production automatic scroll must expose the browser; do not repair it in the test.
-        compose.runOnIdle { browser.view.getLocationOnScreen(location) }
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
-        val screenshot = automation.takeScreenshot()
+        val screenshot = waitForBrowserPixel(browser, location, 20, 20, Color.rgb(33, 122, 57))
         val x = location[0] + 20
         val y = location[1] + 20
-        assertEquals(
-          "The embedded page must paint instead of leaving a blank browser",
-          Color.rgb(33, 122, 57),
-          screenshot.getPixel(x, y),
-        )
         var whiteTextPixels = 0
         val width = browser.view.width
         val height = browser.view.height
@@ -716,6 +713,7 @@ class BrowserPresentationTest {
     runBlocking<Unit> {
       val context = InstrumentationRegistry.getInstrumentation().targetContext
       MockWebServer().use { server ->
+        val fallbackRequested = CompletableDeferred<Unit>()
         server.dispatcher =
           object : Dispatcher() {
             override fun dispatch(request: RecordedRequest) =
@@ -725,13 +723,15 @@ class BrowserPresentationTest {
                   MockResponse()
                     .setResponseCode(404)
                     .setHeader("Content-Type", "text/html")
-                    .setBody("<p>Missing</p>")
+                    .setBody("<script>fetch('/stale.m3u8')</script>")
                     .setBodyDelay(1, TimeUnit.SECONDS)
-                "/available" ->
+                "/available" -> {
+                  fallbackRequested.complete(Unit)
                   MockResponse()
                     .setHeader("Content-Type", "text/html")
                     .setBody("<script>fetch('/available.m3u8')</script>")
-                "/available.m3u8" ->
+                }
+                "/available.m3u8", "/stale.m3u8" ->
                   MockResponse()
                     .setHeader("Content-Type", "application/vnd.apple.mpegurl")
                     .setBody("#EXTM3U\n")
@@ -746,8 +746,27 @@ class BrowserPresentationTest {
               .addUrls(server.url("/missing").toString())
               .addUrls(server.url("/available").toString())
               .build()
-          val result = withTimeout(15_000) { browser.resolve(request) }
-          assertTrue(result.streamsList.any { it.stream.url.endsWith("/available.m3u8") })
+          val originalTab =
+            withContext(Dispatchers.Main) {
+              browser.prepare()
+              checkNotNull(browser.view.session)
+            }
+          val result =
+            withTimeout(15_000) {
+              val resolving = async { browser.resolve(request) }
+              fallbackRequested.await()
+              withContext(Dispatchers.Main) {
+                assertFalse(
+                  "The failed tab must be closed when its replacement loads",
+                  originalTab.isOpen,
+                )
+              }
+              resolving.await()
+            }
+          assertEquals(
+            listOf(server.url("/available.m3u8").toString()),
+            result.streamsList.map { it.stream.url },
+          )
           assertEquals(server.url("/available").toString(), result.getStreams(0).sourcePage)
           assertNull(browser.page.value)
         } finally {
@@ -755,6 +774,33 @@ class BrowserPresentationTest {
         }
       }
     }
+
+  // Gecko can finish loading before its TextureView frame reaches the screen. Sample the same
+  // point the test will tap, using the view's current position as Compose scrolls it into place.
+  private fun waitForBrowserPixel(
+    browser: BrowserResolver,
+    origin: IntArray,
+    dx: Int,
+    dy: Int,
+    color: Int,
+  ): Bitmap {
+    val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+    var painted: Bitmap? = null
+    compose.waitUntil("The browser must paint the expected color at the tap target", 10_000) {
+      compose.runOnUiThread { browser.view.getLocationOnScreen(origin) }
+      val frame = automation.takeScreenshot() ?: return@waitUntil false
+      val x = origin[0] + dx
+      val y = origin[1] + dy
+      if (x in 0 until frame.width && y in 0 until frame.height && frame.getPixel(x, y) == color) {
+        painted = frame
+        true
+      } else {
+        frame.recycle()
+        false
+      }
+    }
+    return checkNotNull(painted)
+  }
 }
 
 internal fun browserTouchGesture(x: Float, y: Float, dx: Float = 0f, dy: Float = 0f) {

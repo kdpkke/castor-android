@@ -58,8 +58,7 @@ internal class BrowserPageSession(
   }
 
   private val engine by lazy { BrowserEngine.get(context) }
-  private val session =
-    GeckoSession(GeckoSessionSettings.Builder().suspendMediaWhenInactive(false).build())
+  private lateinit var session: GeckoSession
   private val mutex = Mutex()
   private val candidates = ConcurrentHashMap<String, StreamCandidate>()
   private val playerSources = ConcurrentHashMap<Pair<String, String>, PlayerSource>()
@@ -88,9 +87,6 @@ internal class BrowserPageSession(
 
   @Volatile private var loadFailure: String? = null
   private var loadingUrl: String? = null
-  // Gecko runs about:blank asynchronously. A load issued before that blank page
-  // starts is replaced by it, so the next navigation waits for this to complete.
-  private var blankPage: CompletableDeferred<Unit>? = null
   private var mainPort: WebExtension.Port? = null
   // The extension's id for this session's tab, learned from its content script; -1 until then.
   private var tabId = -1
@@ -103,7 +99,9 @@ internal class BrowserPageSession(
       failedLoading(text(R.string.page_http_error, status))
   }
 
-  init {
+  private fun newTab(): GeckoSession {
+    val session =
+      GeckoSession(GeckoSessionSettings.Builder().suspendMediaWhenInactive(false).build())
     session.navigationDelegate =
       object : GeckoSession.NavigationDelegate {
         override fun onLoadRequest(
@@ -169,8 +167,7 @@ internal class BrowserPageSession(
         }
 
         override fun onPageStop(session: GeckoSession, success: Boolean) {
-          if (loadingUrl == "about:blank") blankPage?.complete(Unit)
-          else if (loadingUrl == page.value?.url) page.value = page.value?.copy(loading = false)
+          if (loadingUrl == page.value?.url) page.value = page.value?.copy(loading = false)
         }
       }
     session.contentDelegate =
@@ -197,16 +194,13 @@ internal class BrowserPageSession(
             else GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY
           )
       }
+    return session
   }
 
   // GeckoView closed the session with its content process. Reopen it on the next resolution; the
   // visible page explains the failure and a retry loads it again.
   private fun contentStopped() {
-    opened = false
-    mainPort = null
-    tabId = -1
-    finishEvaluations()
-    view.releaseSession()
+    releaseTab()
     failedLoading(text(R.string.page_player_stopped))
   }
 
@@ -224,6 +218,7 @@ internal class BrowserPageSession(
           )
         } ?: throw java.io.IOException(text(R.string.browser_protection_failed, ""))
       val enabled = engine.runtime.webExtensionController.list().await().associateBy { it.id }
+      check(!closed) { "The browser is closed" }
       if (!BrowserEngine.blockers.keys.all { enabled[it]?.metaData?.disabledFlags == 0 })
         throw IllegalStateException(text(R.string.browser_protection_unavailable))
       if (!listening) {
@@ -231,6 +226,7 @@ internal class BrowserPageSession(
         listening = true
       }
       if (!opened) {
+        session = newTab()
         session.open(engine.runtime)
         view.setSession(session)
         opened = true
@@ -239,7 +235,8 @@ internal class BrowserPageSession(
           object : WebExtension.MessageDelegate {
             override fun onConnect(port: WebExtension.Port) {
               if (
-                port.sender.session !== session ||
+                !opened ||
+                  port.sender.session !== session ||
                   !port.sender.isTopLevel ||
                   !isHttp(port.sender.url)
               ) {
@@ -503,9 +500,12 @@ internal class BrowserPageSession(
         active.value = interactive
         if (interactive && page.value == null) page.value = BrowserPage(request.getUrls(0))
       }
-      prepare()
       for ((index, address) in request.urlsList.withIndex()) {
         withContext(Dispatchers.Main) {
+          // A 404 can arrive while Gecko is still committing the failed document. Give its
+          // replacement a fresh tab so a late commit cannot displace the next address.
+          if (index > 0 || loadFailure != null) releaseTab()
+          prepare()
           val reuse =
             index == 0 &&
               interactive &&
@@ -513,13 +513,6 @@ internal class BrowserPageSession(
               sourcePage == address &&
               loadFailure == null
           if (!reuse) {
-            if (index > 0) {
-              // A failed page can still be committing while Gecko starts its replacement.
-              capturing = false
-              extracting = false
-              loadBlankPage()
-            }
-            blankPage?.let { withTimeoutOrNull(5_000) { it.await() } }
             candidates.clear()
             requestErrors.clear()
             // Any connected port belongs to the document this navigation replaces.
@@ -554,7 +547,9 @@ internal class BrowserPageSession(
             if (!startPlayer(starts)) starts = PLAY_ATTEMPTS
           }
         }
-        streams += candidates.values
+        // Error documents can themselves fetch media. Only a successfully loaded source can
+        // supply candidates, even if a media response raced its main-frame error notification.
+        if (loadFailure == null) streams += candidates.values
         if (streams.isNotEmpty()) break
       }
       if (streams.isEmpty()) {
@@ -611,7 +606,6 @@ internal class BrowserPageSession(
         loadFailure = null
         capturing = true
         page.value = BrowserPage(address, protectionReady = true)
-        blankPage?.let { withTimeoutOrNull(5_000) { it.await() } }
         navigationStarted = System.currentTimeMillis()
         session.loadUri(address)
       }
@@ -626,11 +620,21 @@ internal class BrowserPageSession(
     callbacks.forEach { it("null") }
   }
 
-  private fun loadBlankPage() {
+  private fun releaseTab() {
     if (!opened) return
-    session.stop()
-    blankPage = CompletableDeferred()
-    session.loadUri("about:blank")
+    opened = false
+    session.navigationDelegate = null
+    session.progressDelegate = null
+    session.contentDelegate = null
+    mainPort = null
+    tabId = -1
+    loadingUrl = null
+    automaticUntil = 0L
+    capturing = false
+    extracting = false
+    finishEvaluations()
+    view.releaseSession()
+    if (session.isOpen) session.close()
   }
 
   private fun clearPage() {
@@ -640,9 +644,7 @@ internal class BrowserPageSession(
     capturing = false
     extracting = false
     loadFailure = null
-    mainPort = null
-    finishEvaluations()
-    loadBlankPage()
+    releaseTab()
     candidates.clear()
   }
 
@@ -654,10 +656,6 @@ internal class BrowserPageSession(
     playerSources.clear()
     detachView()
     if (listening) engine.pageErrors -= pageError
-    if (opened) {
-      view.releaseSession()
-      session.close()
-    }
   }
 
   companion object {

@@ -80,8 +80,8 @@ jobs:
   android:
     needs: native
     runs-on: ubuntu-latest
-    # The 16 KB emulator suite can exceed 53 minutes after setup and build have already run.
-    timeout-minutes: 75
+    # A slow 16 KB emulator was still running test 150 of 158 at the 75-minute job limit.
+    timeout-minutes: 90
     env:
       ANDROID_CMDLINE_TOOLS_VERSION: '23.0'
     steps:
