@@ -6,6 +6,7 @@ import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.view.KeyEvent
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.core.view.WindowCompat
@@ -180,7 +181,11 @@ class AppLanguageTest {
       compose.onNodeWithText("Appearance").assertDoesNotExist()
       openAppearance()
       compose.onNodeWithText("Light").assertIsSelected()
-      Espresso.pressBack()
+      // The modal sheet owns window focus after recreation. Send Back to the focused window.
+      InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+      compose.waitUntil(10_000) {
+        compose.onAllNodesWithText("Appearance").fetchSemanticsNodes().isEmpty()
+      }
       compose.onNodeWithText("Appearance").assertDoesNotExist()
     } finally {
       night(

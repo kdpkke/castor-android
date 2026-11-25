@@ -28,8 +28,15 @@ dependencyResolutionManagement {
     }
 }
 
-plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+// The CI runner and Android Studio already supply JDK 25. Resolve a downloader only for other JDKs.
+buildscript {
+    if (JavaVersion.current() != JavaVersion.VERSION_25) {
+        repositories { gradlePluginPortal() }
+        dependencies { classpath("org.gradle.toolchains:foojay-resolver:1.0.0") }
+    }
+}
+if (JavaVersion.current() != JavaVersion.VERSION_25) {
+    apply(plugin = "org.gradle.toolchains.foojay-resolver-convention")
 }
 
 rootProject.name = "Castor"
