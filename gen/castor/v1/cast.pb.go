@@ -1550,8 +1550,10 @@ func (*StopResponse) Descriptor() ([]byte, []int) {
 }
 
 type RestartRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	CastId        string                 `protobuf:"bytes,1,opt,name=cast_id,json=castId,proto3" json:"cast_id,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	CastId string                 `protobuf:"bytes,1,opt,name=cast_id,json=castId,proto3" json:"cast_id,omitempty"`
+	// Android: replace playback preferences when restarting; absent keeps the current preferences.
+	Preferences   *Preferences `protobuf:"bytes,1000,opt,name=preferences,proto3" json:"preferences,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1591,6 +1593,13 @@ func (x *RestartRequest) GetCastId() string {
 		return x.CastId
 	}
 	return ""
+}
+
+func (x *RestartRequest) GetPreferences() *Preferences {
+	if x != nil {
+		return x.Preferences
+	}
+	return nil
 }
 
 type RestartResponse struct {
@@ -1713,9 +1722,11 @@ type Cast struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// device has an empty id for a pinned target.
-	Device        *Device     `protobuf:"bytes,2,opt,name=device,proto3" json:"device,omitempty"`
-	Source        *Source     `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
-	Status        *CastStatus `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
+	Device *Device     `protobuf:"bytes,2,opt,name=device,proto3" json:"device,omitempty"`
+	Source *Source     `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
+	Status *CastStatus `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
+	// Android: the preferences of this cast, so its settings can be edited after reconnecting.
+	Preferences   *Preferences `protobuf:"bytes,1000,opt,name=preferences,proto3" json:"preferences,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1774,6 +1785,13 @@ func (x *Cast) GetSource() *Source {
 func (x *Cast) GetStatus() *CastStatus {
 	if x != nil {
 		return x.Status
+	}
+	return nil
+}
+
+func (x *Cast) GetPreferences() *Preferences {
+	if x != nil {
+		return x.Preferences
 	}
 	return nil
 }
@@ -2226,18 +2244,20 @@ const file_castor_v1_cast_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\amessage\"1\n" +
 	"\vStopRequest\x12\"\n" +
 	"\acast_id\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x10\x01(@R\x06castId\"\x0e\n" +
-	"\fStopResponse\"4\n" +
+	"\fStopResponse\"o\n" +
 	"\x0eRestartRequest\x12\"\n" +
-	"\acast_id\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x10\x01(@R\x06castId\"\x11\n" +
+	"\acast_id\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x10\x01(@R\x06castId\x129\n" +
+	"\vpreferences\x18\xe8\a \x01(\v2\x16.castor.v1.PreferencesR\vpreferences\"\x11\n" +
 	"\x0fRestartResponse\"\x12\n" +
 	"\x10ListCastsRequest\":\n" +
 	"\x11ListCastsResponse\x12%\n" +
-	"\x05casts\x18\x01 \x03(\v2\x0f.castor.v1.CastR\x05casts\"\x9b\x01\n" +
+	"\x05casts\x18\x01 \x03(\v2\x0f.castor.v1.CastR\x05casts\"\xd6\x01\n" +
 	"\x04Cast\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12)\n" +
 	"\x06device\x18\x02 \x01(\v2\x11.castor.v1.DeviceR\x06device\x12)\n" +
 	"\x06source\x18\x03 \x01(\v2\x11.castor.v1.SourceR\x06source\x12-\n" +
-	"\x06status\x18\x04 \x01(\v2\x15.castor.v1.CastStatusR\x06status\"2\n" +
+	"\x06status\x18\x04 \x01(\v2\x15.castor.v1.CastStatusR\x06status\x129\n" +
+	"\vpreferences\x18\xe8\a \x01(\v2\x16.castor.v1.PreferencesR\vpreferences\"2\n" +
 	"\fPauseRequest\x12\"\n" +
 	"\acast_id\x18\x01 \x01(\tB\t\xbaH\x06r\x04\x10\x01(@R\x06castId\"\x0f\n" +
 	"\rPauseResponse\"3\n" +
@@ -2366,35 +2386,37 @@ var file_castor_v1_cast_proto_depIdxs = []int32{
 	41, // 30: castor.v1.Ended.stopped:type_name -> google.protobuf.Empty
 	20, // 31: castor.v1.Ended.failed:type_name -> castor.v1.Failure
 	0,  // 32: castor.v1.Failure.code:type_name -> castor.v1.FailureCode
-	27, // 33: castor.v1.ListCastsResponse.casts:type_name -> castor.v1.Cast
-	44, // 34: castor.v1.Cast.device:type_name -> castor.v1.Device
-	6,  // 35: castor.v1.Cast.source:type_name -> castor.v1.Source
-	13, // 36: castor.v1.Cast.status:type_name -> castor.v1.CastStatus
-	37, // 37: castor.v1.SeekRequest.position:type_name -> google.protobuf.Duration
-	45, // 38: castor.v1.Source.ResolvedStreams.streams:type_name -> castor.v1.StreamCandidate
-	1,  // 39: castor.v1.CastService.Cast:input_type -> castor.v1.CastRequest
-	4,  // 40: castor.v1.CastService.Resolve:input_type -> castor.v1.ResolveRequest
-	11, // 41: castor.v1.CastService.Watch:input_type -> castor.v1.WatchRequest
-	21, // 42: castor.v1.CastService.Stop:input_type -> castor.v1.StopRequest
-	23, // 43: castor.v1.CastService.Restart:input_type -> castor.v1.RestartRequest
-	25, // 44: castor.v1.CastService.ListCasts:input_type -> castor.v1.ListCastsRequest
-	28, // 45: castor.v1.CastService.Pause:input_type -> castor.v1.PauseRequest
-	30, // 46: castor.v1.CastService.Resume:input_type -> castor.v1.ResumeRequest
-	32, // 47: castor.v1.CastService.Seek:input_type -> castor.v1.SeekRequest
-	3,  // 48: castor.v1.CastService.Cast:output_type -> castor.v1.CastResponse
-	5,  // 49: castor.v1.CastService.Resolve:output_type -> castor.v1.ResolveResponse
-	12, // 50: castor.v1.CastService.Watch:output_type -> castor.v1.WatchResponse
-	22, // 51: castor.v1.CastService.Stop:output_type -> castor.v1.StopResponse
-	24, // 52: castor.v1.CastService.Restart:output_type -> castor.v1.RestartResponse
-	26, // 53: castor.v1.CastService.ListCasts:output_type -> castor.v1.ListCastsResponse
-	29, // 54: castor.v1.CastService.Pause:output_type -> castor.v1.PauseResponse
-	31, // 55: castor.v1.CastService.Resume:output_type -> castor.v1.ResumeResponse
-	33, // 56: castor.v1.CastService.Seek:output_type -> castor.v1.SeekResponse
-	48, // [48:57] is the sub-list for method output_type
-	39, // [39:48] is the sub-list for method input_type
-	39, // [39:39] is the sub-list for extension type_name
-	39, // [39:39] is the sub-list for extension extendee
-	0,  // [0:39] is the sub-list for field type_name
+	7,  // 33: castor.v1.RestartRequest.preferences:type_name -> castor.v1.Preferences
+	27, // 34: castor.v1.ListCastsResponse.casts:type_name -> castor.v1.Cast
+	44, // 35: castor.v1.Cast.device:type_name -> castor.v1.Device
+	6,  // 36: castor.v1.Cast.source:type_name -> castor.v1.Source
+	13, // 37: castor.v1.Cast.status:type_name -> castor.v1.CastStatus
+	7,  // 38: castor.v1.Cast.preferences:type_name -> castor.v1.Preferences
+	37, // 39: castor.v1.SeekRequest.position:type_name -> google.protobuf.Duration
+	45, // 40: castor.v1.Source.ResolvedStreams.streams:type_name -> castor.v1.StreamCandidate
+	1,  // 41: castor.v1.CastService.Cast:input_type -> castor.v1.CastRequest
+	4,  // 42: castor.v1.CastService.Resolve:input_type -> castor.v1.ResolveRequest
+	11, // 43: castor.v1.CastService.Watch:input_type -> castor.v1.WatchRequest
+	21, // 44: castor.v1.CastService.Stop:input_type -> castor.v1.StopRequest
+	23, // 45: castor.v1.CastService.Restart:input_type -> castor.v1.RestartRequest
+	25, // 46: castor.v1.CastService.ListCasts:input_type -> castor.v1.ListCastsRequest
+	28, // 47: castor.v1.CastService.Pause:input_type -> castor.v1.PauseRequest
+	30, // 48: castor.v1.CastService.Resume:input_type -> castor.v1.ResumeRequest
+	32, // 49: castor.v1.CastService.Seek:input_type -> castor.v1.SeekRequest
+	3,  // 50: castor.v1.CastService.Cast:output_type -> castor.v1.CastResponse
+	5,  // 51: castor.v1.CastService.Resolve:output_type -> castor.v1.ResolveResponse
+	12, // 52: castor.v1.CastService.Watch:output_type -> castor.v1.WatchResponse
+	22, // 53: castor.v1.CastService.Stop:output_type -> castor.v1.StopResponse
+	24, // 54: castor.v1.CastService.Restart:output_type -> castor.v1.RestartResponse
+	26, // 55: castor.v1.CastService.ListCasts:output_type -> castor.v1.ListCastsResponse
+	29, // 56: castor.v1.CastService.Pause:output_type -> castor.v1.PauseResponse
+	31, // 57: castor.v1.CastService.Resume:output_type -> castor.v1.ResumeResponse
+	33, // 58: castor.v1.CastService.Seek:output_type -> castor.v1.SeekResponse
+	50, // [50:59] is the sub-list for method output_type
+	41, // [41:50] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_castor_v1_cast_proto_init() }

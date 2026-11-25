@@ -36,6 +36,41 @@ func handoffStream() *source.Stream {
 	return c
 }
 
+func TestAnOptedInDirectFileResumesOnItsFullTimeline(t *testing.T) {
+	const start = 42 * time.Second
+	const duration = 5 * time.Minute
+	caps := chromecastLike(media.MP4)
+	caps.SelfFetch = false
+	stream := handoffStream()
+	program := programFromStream(t, stream)
+	program.Start = start
+	for _, delivery := range []compose.DeliveryPreference{compose.DeliveryPreferDirect, compose.DeliveryRedirect} {
+		t.Run(string(delivery), func(t *testing.T) {
+			dev := &fakeDevice{caps: caps, ended: true}
+			var published atomic.Int64
+			var publisher output.Publisher = countedPublisher{asked: &published}
+			if delivery == compose.DeliveryRedirect {
+				publisher = loopback{}
+			}
+			cast := Cast{Timelines: direct{}, Outputs: testOutputs(), PreserveSource: true, Device: dev, Publisher: publisher}
+			out := cast.Run(t.Context(), recovery.Attempt{
+				Program: program, Origin: source.Origin{Duration: duration}, Delivery: delivery,
+			})
+			if out.Err != nil {
+				t.Fatal(out.Err)
+			}
+			src, ok := dev.handed.Stream.(Source)
+			if !ok || !src.Direct || src.ResumeAt != start || src.Runtime != duration || dev.handed.Begins != 0 {
+				t.Fatalf("wanted the complete origin and a resume at %v; handed %#v (%#v)", start, dev.handed, src)
+			}
+			if delivery == compose.DeliveryPreferDirect && (dev.handed.URL.String() != stream.URL.String() || published.Load() != 0) ||
+				delivery == compose.DeliveryRedirect && dev.handed.URL.Path != "/source.mp4" {
+				t.Fatalf("unexpected playback route for %s: %v", delivery, dev.handed.URL)
+			}
+		})
+	}
+}
+
 func TestAHandoffBuildsNoLocalMachinery(t *testing.T) {
 	var asked atomic.Int64
 	dev := &fakeDevice{caps: chromecastLike(media.MP4), ended: true}

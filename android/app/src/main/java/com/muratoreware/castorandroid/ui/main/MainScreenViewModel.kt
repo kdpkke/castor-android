@@ -594,7 +594,7 @@ class MainScreenViewModel : ViewModel() {
             // A compatible Native file can reach the TV through the engine's byte-range forward.
             // Providers without a length still need the stream the engine prepares.
             val forwardable =
-              request.preferences.preserveSource && videos?.supportsByteRanges(localVideo) == true
+              videos?.supportsByteRanges(localVideo) == true
             request =
               request
                 .toBuilder()
@@ -662,8 +662,8 @@ class MainScreenViewModel : ViewModel() {
                 .apply {
                   if (source.hasStream()) {
                     val delivery = when {
-                      preferDirectDlna && request.preferences.preserveSource &&
-                        device.type == DeviceType.DEVICE_TYPE_DLNA -> Delivery.DELIVERY_PREFER_DIRECT
+                      preferDirectDlna && device.type == DeviceType.DEVICE_TYPE_DLNA ->
+                        Delivery.DELIVERY_PREFER_DIRECT
                       automaticPage && servesDirectLink(device) -> Delivery.DELIVERY_SERVE
                       else -> null
                     }
@@ -673,7 +673,11 @@ class MainScreenViewModel : ViewModel() {
                 }
                 .build()
           }
-          val cast = pending.toBuilder().setSource(request.source).setId(data.cast(request)).build()
+          val cast = pending.toBuilder()
+            .setSource(request.source)
+            .setPreferences(request.preferences)
+            .setId(data.cast(request))
+            .build()
           composing = false
           follow(cast)
           uiState.value = uiState.value.copy(selectedCastId = cast.id)
@@ -783,6 +787,39 @@ class MainScreenViewModel : ViewModel() {
 
   fun restartCasting() {
     val id = uiState.value.castId ?: return
+    restartCasting(id, null)
+  }
+
+  internal fun changeCastSettings(
+    id: String,
+    height: String,
+    subtitles: String,
+    preferDirectDlna: Boolean,
+    subtitleLanguage: String,
+  ) {
+    val current = session(id)?.cast ?: return
+    if (!current.hasPreferences()) return
+    val previous = current.preferences
+    val selected = playbackPreferences(height, subtitles, subtitleLanguage)
+    val next = previous.toBuilder()
+      .setMaxHeight(selected.maxHeight)
+      .setPreserveSource(selected.preserveSource)
+      .setSubtitles(selected.subtitles)
+    if (canChooseDirectDlna(current)) {
+      if (preferDirectDlna) next.setDelivery(Delivery.DELIVERY_PREFER_DIRECT)
+      else if (previous.delivery == Delivery.DELIVERY_PREFER_DIRECT) next.clearDelivery()
+    }
+    val preferences = next.build()
+    if (preferences != previous) restartCasting(id, preferences)
+  }
+
+  internal fun canChooseDirectDlna(cast: Cast): Boolean =
+    cast.device.type == DeviceType.DEVICE_TYPE_DLNA &&
+      cast.source.hasStream() &&
+      cast.preferences.delivery != Delivery.DELIVERY_SERVE &&
+      videoName(cast.source.stream.url) == null
+
+  private fun restartCasting(id: String, preferences: Preferences?) {
     val data = repository ?: return
     val current = session(id) ?: return
     if (current.stopping || current.restarting) return
@@ -791,7 +828,10 @@ class MainScreenViewModel : ViewModel() {
     update(id) { it.copy(restarting = true, error = null, playback = PlaybackUiState()) }
     work.restart = viewModelScope.launch {
       try {
-        data.restart(id)
+        data.restart(id, preferences)
+        if (preferences != null) {
+          update(id) { it.copy(cast = it.cast.toBuilder().setPreferences(preferences).build()) }
+        }
       } catch (error: Exception) {
         if (error is CancellationException) throw error
         if (ended(error)) forget(id) else update(id) { it.copy(error = error.message) }
@@ -978,15 +1018,6 @@ class MainScreenViewModel : ViewModel() {
       require(BrowserResolver.isHttp(url) && url.length <= 8192) {
         "Enter a complete HTTP or HTTPS video URL."
       }
-      val height =
-        when (maxHeight) {
-          NATIVE_QUALITY -> NATIVE_HEIGHT_CEILING
-          OPTIMIZED_QUALITY -> OPTIMIZED_HEIGHT_CEILING
-          else -> maxHeight.toIntOrNull()
-        }
-      require(height != null && height >= 2) {
-        "Video height must be a whole number of at least 2 pixels."
-      }
       require(
         target.hasDeviceId() && target.deviceId.isNotBlank() ||
           target.hasPinned() && target.pinned.address.isNotBlank()
@@ -996,6 +1027,27 @@ class MainScreenViewModel : ViewModel() {
       val source = Source.newBuilder()
       if (page) source.pages = Source.Pages.newBuilder().addUrls(url).build()
       else source.stream = Stream.newBuilder().setUrl(url).build()
+      return CastRequest.newBuilder()
+        .setTarget(target)
+        .setSource(source)
+        .setPreferences(playbackPreferences(maxHeight, subtitles, subtitleLanguage))
+        .build()
+    }
+
+    private fun playbackPreferences(
+      maxHeight: String,
+      subtitles: String,
+      subtitleLanguage: String,
+    ): Preferences {
+      val height =
+        when (maxHeight) {
+          NATIVE_QUALITY -> NATIVE_HEIGHT_CEILING
+          OPTIMIZED_QUALITY -> OPTIMIZED_HEIGHT_CEILING
+          else -> maxHeight.toIntOrNull()
+        }
+      require(height != null && height >= 2) {
+        "Video height must be a whole number of at least 2 pixels."
+      }
       val selection = SubtitleSelection.newBuilder()
       when (subtitles) {
         "off" -> selection.setDisabled(com.google.protobuf.Empty.getDefaultInstance())
@@ -1011,23 +1063,16 @@ class MainScreenViewModel : ViewModel() {
           )
         }
       }
-      return CastRequest.newBuilder()
-        .setTarget(target)
-        .setSource(source)
-        .setPreferences(
-          Preferences.newBuilder()
-            .setManagedPlayback(true)
-            .setMaxHeight(height)
-            .setSubtitles(selection)
-            .setPreserveSource(maxHeight == NATIVE_QUALITY)
-        )
+      return Preferences.newBuilder()
+        .setManagedPlayback(true)
+        .setMaxHeight(height)
+        .setSubtitles(selection)
+        .setPreserveSource(maxHeight == NATIVE_QUALITY)
         .build()
     }
 
-    // A TV handed a recognized download link might not read it, so Castor serves the video itself. A DLNA TV never
-    // fetches the link: asking Castor to serve it would only stop Castor forwarding the original file, which keeps
-    // Dolby Vision and lets the TV seek by bytes. An FCast receiver tries the link and the engine waits for it to play,
-    // so one it cannot play falls back to a video Castor serves.
+    // Keep the engine's original-file paths available for DLNA and FCast. For a DLNA download it
+    // forwards the file by default, or tries the origin URL first when the user enabled that option.
     internal fun servesDirectLink(device: Device): Boolean =
       device.type != DeviceType.DEVICE_TYPE_DLNA && device.type != DeviceType.DEVICE_TYPE_FCAST
   }

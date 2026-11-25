@@ -3,6 +3,18 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
+## 2.2.3 — 2026-11-25
+
+- **Direct DLNA playback for HTTPS links.** Some LG TVs reject a link when checking the file but can play it directly. With **Native** and **Download directly on the TV** enabled, Castor now answers the file check and redirects the TV to the original HTTPS link. If the TV also refuses the redirect, Castor can still relay the original file through the phone.
+- **Playback settings during a cast.** Tap the sliders icon on the active cast card to change quality, subtitles or direct DLNA download where available. Saving a change restarts only the selected cast and resumes from the reported position when supported. Saving without changes keeps playback running.
+- Tested with a TorBox Dolby Vision MP4 on an LG C1. The TV streamed from TorBox and continued playing after a seek to 12 minutes.
+
+### Italiano
+
+- **Riproduzione diretta dei link HTTPS via DLNA.** Alcune TV LG rifiutano il link durante il controllo iniziale del file, ma riescono a riprodurlo direttamente. Con **Nativa** e **Scarica direttamente sulla TV** attivi, Castor ora risponde al controllo e indirizza la TV al link HTTPS originale. Se la TV rifiuta anche il reindirizzamento, Castor può ancora inoltrare il file originale dal telefono.
+- **Impostazioni durante il cast.** Tocca l’icona con i cursori nella scheda della trasmissione per cambiare qualità, sottotitoli o download diretto via DLNA, quando disponibile. Salvare una modifica riavvia solo il cast selezionato e riprende dalla posizione comunicata dal ricevitore, se supportato. Salvare senza modifiche lascia proseguire il video.
+- Provato con un MP4 Dolby Vision di TorBox su una LG C1. La TV ha scaricato il film da TorBox e ha continuato a riprodurlo dopo un salto a 12 minuti.
+
 ## 2.2.2 — 2026-11-24
 
 - Updated the in-app browser to GeckoView 161 and the FCast scanner's camera stack to CameraX 1.7.0.

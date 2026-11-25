@@ -598,7 +598,8 @@ class CastorRuntimeTest {
               (before?.positionMs ?: 0) > 0,
             )
             val bytesBefore = receivedBytes.get()
-            data.restart(id)
+            val changed = data.casts().single().preferences.toBuilder().setMaxHeight(1080).build()
+            data.restart(id, changed)
             withTimeout(30_000) {
               while (plays.get() < 2 || receivedBytes.get() <= bytesBefore) delay(50)
             }
@@ -607,6 +608,16 @@ class CastorRuntimeTest {
               listOf(id),
               data.casts().map { it.id },
             )
+            assertEquals(changed, data.casts().single().preferences)
+            val resumed = withTimeout(15_000) {
+              var head = data.playback(id)
+              while (head.positionMs == null) {
+                delay(100)
+                head = data.playback(id)
+              }
+              head
+            }
+            assertTrue("Restart must keep the full-video position", resumed.positionMs!! >= before!!.positionMs!!)
             assertNull("Restart must not end the cast", ended)
             assertFalse(
               "Restart must keep the engine and private file bridge",

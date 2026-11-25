@@ -13,7 +13,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	mediav1 "github.com/stupside/castor/gen/castor/media/v1"
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"github.com/stupside/castor/internal/castid"
 	"github.com/stupside/castor/services/apiserver/internal/device"
@@ -23,8 +22,9 @@ const liveStallTimeout = 10 * time.Second
 const maxStalledLiveRestarts = 3
 
 type restartRequest struct {
-	ctx  context.Context
-	done chan error
+	ctx         context.Context
+	done        chan error
+	preferences *castorv1.Preferences
 }
 
 // Restart keeps ownership and the private original source, including its headers.
@@ -38,7 +38,10 @@ func (s *Service) Restart(ctx context.Context, req *castorv1.RestartRequest) (*c
 		return nil, connect.NewError(connect.CodeAborted, errors.New("this cast is already restarting"))
 	}
 	defer c.restarting.Store(false)
-	request := &restartRequest{ctx: ctx, done: make(chan error, 1)}
+	request := &restartRequest{ctx: ctx, done: make(chan error, 1), preferences: proto.CloneOf(req.GetPreferences())}
+	if request.preferences != nil {
+		request.preferences.ManagedPlayback = c.managed
+	}
 	select {
 	case c.restarts <- request:
 	case <-c.done:
@@ -57,11 +60,10 @@ func (s *Service) Restart(ctx context.Context, req *castorv1.RestartRequest) (*c
 	}
 }
 
-func (s *Service) runConnected(ctx context.Context, c *cast, lent device.Device, asked *mediav1.PlaybackSettings) (*castorv1.Ended, error) {
+func (s *Service) runConnected(ctx context.Context, c *cast, lent device.Device) (*castorv1.Ended, error) {
 	return runRestartable(ctx, c, lent, func(ctx context.Context, w *watched, id string, start time.Duration, software bool) (*castorv1.Ended, error) {
-		settings := asked
+		settings := s.asked(c.preferences.Load())
 		if software {
-			settings = proto.CloneOf(asked)
 			settings.SoftwareVideo = true
 		}
 		return s.runPlayback(ctx, c, w, settings, id, start)
@@ -132,6 +134,10 @@ func runRestartable(ctx context.Context, c *cast, lent device.Device, run func(c
 					request.done <- context.Cause(request.ctx)
 					continue
 				}
+				if request.preferences != nil && proto.Equal(request.preferences, c.preferences.Load()) {
+					request.done <- nil
+					continue
+				}
 				var err error
 				start, paused, err = restartPosition(c, w, c.start)
 				if err != nil {
@@ -180,6 +186,9 @@ func runRestartable(ctx context.Context, c *cast, lent device.Device, run func(c
 			return nil, fmt.Errorf("stopping playback for restart: %w", err)
 		}
 		softwareVideo = softwareVideo || automatic
+		if !automatic && request.preferences != nil {
+			c.preferences.Store(request.preferences)
+		}
 		c.show(&castorv1.CastStatus{State: &castorv1.CastStatus_Restarting{Restarting: &castorv1.RestartingStatus{Automatic: automatic}}})
 		slog.InfoContext(ctx, "restarting cast on its leased receiver", "automatic", automatic, "at", start, "software_video", softwareVideo)
 		if request != nil && !automatic {

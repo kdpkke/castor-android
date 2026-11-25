@@ -162,28 +162,34 @@ func TestOnlyADeviceHandedWhatItFetchesItselfIsServedInstead(t *testing.T) {
 	}
 }
 
-func TestARefusedDirectOriginalIsOnlyRetriedAsAForward(t *testing.T) {
+func TestARefusedDirectOriginalKeepsTheSameFile(t *testing.T) {
 	refusal := errors.New("renderer refused the origin")
 	direct := Outcome{Err: refusal, Evidence: Evidence{Reached: health.Opening, PlayErr: refusal, Handoff: true, Direct: true}}
 	forward := direct
 	forward.Evidence.Direct = false
 	for _, tt := range []struct {
-		name   string
-		second Outcome
-		failed bool
+		name     string
+		scheme   string
+		outcomes []Outcome
+		modes    []compose.DeliveryPreference
+		failed   bool
 	}{
-		{"forward succeeds", delivered, false},
-		{"forward fails without a conversion attempt", forward, true},
+		{"HTTPS redirect succeeds", "https", []Outcome{direct, delivered}, []compose.DeliveryPreference{compose.DeliveryPreferDirect, compose.DeliveryRedirect}, false},
+		{"HTTPS redirect refused, then forward", "https", []Outcome{direct, direct, delivered}, []compose.DeliveryPreference{compose.DeliveryPreferDirect, compose.DeliveryRedirect, compose.DeliveryForward}, false},
+		{"HTTP goes straight to forward", "http", []Outcome{direct, delivered}, []compose.DeliveryPreference{compose.DeliveryPreferDirect, compose.DeliveryForward}, false},
+		{"forward fails without conversion", "https", []Outcome{direct, direct, forward}, []compose.DeliveryPreference{compose.DeliveryPreferDirect, compose.DeliveryRedirect, compose.DeliveryForward}, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			in := Intent{Turns: unheard{}, Candidates: candidates(t, "https://cdn.example/movie.mkv"), Delivery: compose.DeliveryPreferDirect, PreserveSource: true}
-			run := &scriptedRunner{outcomes: []Outcome{direct, tt.second}}
+			in := Intent{Turns: unheard{}, Candidates: candidates(t, tt.scheme+"://cdn.example/movie.mkv"), Delivery: compose.DeliveryPreferDirect, PreserveSource: true}
+			run := &scriptedRunner{outcomes: tt.outcomes}
 			err := Cast(t.Context(), in, run, &fakeProgram{})
-			if (err != nil) != tt.failed || len(run.seen) != 2 {
-				t.Fatalf("Cast() = %v after %d attempts; want exactly two, failed=%v", err, len(run.seen), tt.failed)
+			if (err != nil) != tt.failed || len(run.seen) != len(tt.modes) {
+				t.Fatalf("Cast() = %v after %d attempts, want %d, failed=%v", err, len(run.seen), len(tt.modes), tt.failed)
 			}
-			if next := run.seen[1]; next.Delivery != compose.DeliveryForward || next.Stream != run.seen[0].Stream || next.Program.Start != 0 {
-				t.Fatalf("retry = %+v, want the same file forwarded from its start", next)
+			for i, attempt := range run.seen {
+				if attempt.Delivery != tt.modes[i] || attempt.Stream != run.seen[0].Stream || attempt.Program.Start != 0 {
+					t.Fatalf("attempt %d: want %s with the same file from its start, got %+v", i, tt.modes[i], attempt)
+				}
 			}
 		})
 	}

@@ -189,7 +189,7 @@ func (busyDevice) Connect(context.Context, device.Info) (device.Device, error) {
 func TestBusyReceiverReportsActionablePlaybackFailure(t *testing.T) {
 	// No cast of this server holds the device, so none is replaced.
 	s := &Service{devices: busyDevice{}, casts: registry.New[*cast](linger)}
-	ended := s.play(t.Context(), &cast{}, device.Info{}, nil)
+	ended := s.play(t.Context(), &cast{}, device.Info{})
 	if ended.GetFailed().GetCode() != castorv1.FailureCode_FAILURE_CODE_PLAYBACK_FAILED || !strings.Contains(ended.GetFailed().GetMessage(), "stop its current cast") {
 		t.Fatalf("ended=%v", ended)
 	}

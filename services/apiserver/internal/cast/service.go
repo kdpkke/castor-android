@@ -99,7 +99,6 @@ func (s *Service) Cast(ctx context.Context, req *castorv1.CastRequest) (*castorv
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	asked := s.asked(req.GetPreferences())
 	id := castid.New()
 	run, stop := context.WithCancelCause(castid.With(telemetry.WithTrace(s.ctx, ctx), id))
 	c := newCast(id, target.Public(), req, stop)
@@ -114,7 +113,7 @@ func (s *Service) Cast(ctx context.Context, req *castorv1.CastRequest) (*castorv
 		defer close(c.done)
 		defer stop(nil)
 		defer awake.Hold()()
-		ended := s.play(run, c, target, asked)
+		ended := s.play(run, c, target)
 		c.end(ended)
 		slog.InfoContext(run, "cast ended", "device", cmp.Or(c.device.GetName(), c.device.GetAddress()), "result", result(ended))
 	}()
@@ -257,7 +256,7 @@ func (s *Service) ListCasts(context.Context, *castorv1.ListCastsRequest) (*casto
 	listed := make([]*castorv1.Cast, len(playing))
 	for i, c := range playing {
 		v, _ := c.now.Load()
-		listed[i] = &castorv1.Cast{Id: c.id, Device: proto.CloneOf(c.device), Source: shareable(c.source), Status: proto.CloneOf(v.status)}
+		listed[i] = &castorv1.Cast{Id: c.id, Device: proto.CloneOf(c.device), Source: shareable(c.source), Status: proto.CloneOf(v.status), Preferences: proto.CloneOf(c.preferences.Load())}
 	}
 	return &castorv1.ListCastsResponse{Casts: listed}, nil
 }

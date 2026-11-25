@@ -45,6 +45,7 @@ func TestTheCompositionADeviceGets(t *testing.T) {
 	}{
 		{"a Native cast on a push-only device that plays the source gets its own bytes", pushOnly, media.MP4, true, DeliveryAuto, Forward},
 		{"an opted-in Native cast gives the renderer the origin URL", pushOnly, media.MP4, true, DeliveryPreferDirect, Handoff},
+		{"a redirect still hands the original to the renderer", pushOnly, media.MP4, true, DeliveryRedirect, Redirect},
 		{"an opted-in optimized cast remains served", pushOnly, media.MP4, false, DeliveryPreferDirect, ReadOnce},
 		{"a refused direct URL can still be forwarded", pushOnly, media.MP4, true, DeliveryForward, Forward},
 		{"an optimized cast stays served, so castor keeps pacing it", pushOnly, media.MP4, false, DeliveryAuto, ReadOnce},
@@ -76,8 +77,10 @@ func TestDirectOriginalRequiresAnOriginTheRendererCanFetch(t *testing.T) {
 			probe, _ := program.Measurement()
 			tt.edit(&program.Inputs[0])
 			program.SetMeasurement(probe)
-			if got := For(Shape{Device: device, Program: program, PreserveSource: true, Delivery: DeliveryPreferDirect}); got != Forward {
-				t.Errorf("composed %q, want a forward", got)
+			for _, delivery := range []DeliveryPreference{DeliveryPreferDirect, DeliveryRedirect} {
+				if got := For(Shape{Device: device, Program: program, PreserveSource: true, Delivery: delivery}); got != Forward {
+					t.Errorf("delivery %q composed %q, want a forward", delivery, got)
+				}
 			}
 		})
 	}

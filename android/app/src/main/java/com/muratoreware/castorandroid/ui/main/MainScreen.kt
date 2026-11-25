@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import castor.v1.DeviceOuterClass.DeviceType
+import castor.v1.StreamOuterClass.Delivery
 import com.muratoreware.castorandroid.AppUpdates
 import com.muratoreware.castorandroid.BrowserResolver
 import com.muratoreware.castorandroid.DebugLog
@@ -185,6 +186,7 @@ fun MainScreen(
   var subtitles by rememberSaveable { mutableStateOf(options.subtitles()) }
   var preferDirectDlna by rememberSaveable { mutableStateOf(options.preferDirectDlna()) }
   var sheet by rememberSaveable { mutableStateOf<String?>(null) }
+  var settingsCastId by rememberSaveable { mutableStateOf<String?>(null) }
   var menu by remember { mutableStateOf(false) }
   var debugMode by remember { mutableStateOf(DebugLog.enabled(context)) }
   var debugLog by remember { mutableStateOf<String?>(null) }
@@ -460,6 +462,9 @@ fun MainScreen(
               viewModel::togglePlaybackPause,
               viewModel::seekBy,
               viewModel::seekTo,
+              openSettings = state.selected?.cast?.takeIf { it.hasPreferences() }?.let { cast ->
+                { settingsCastId = cast.id }
+              },
               pageShown = pageUrl?.let { browserPage != null },
               togglePage = {
                 if (browserPage != null) browser?.dismissPage()
@@ -861,6 +866,21 @@ fun MainScreen(
       options.playback(height, subtitles, preferDirectDlna)
       sheet = null
     }
+  val settingsCast = state.sessions.firstOrNull { it.cast.id == settingsCastId }?.cast
+  if (settingsCast != null) key(settingsCast.id) {
+    val preferences = settingsCast.preferences
+    PlaybackSettings(
+      if (preferences.preserveSource) NATIVE_QUALITY else OPTIMIZED_QUALITY,
+      preferences.subtitles.preferences.languagesList.firstOrNull() ?: "off",
+      preferences.delivery == Delivery.DELIVERY_PREFER_DIRECT,
+      dismiss = { settingsCastId = null },
+      showDirectDlna = viewModel.canChooseDirectDlna(settingsCast),
+      saveOnlyChanges = true,
+    ) { newHeight, newSubtitles, direct ->
+      viewModel.changeCastSettings(settingsCast.id, newHeight, newSubtitles, direct, options.language().tag)
+      settingsCastId = null
+    }
+  }
 }
 
 @Composable
@@ -1045,6 +1065,7 @@ private fun ActiveCast(
   togglePause: () -> Unit,
   seekBy: (Long) -> Unit,
   seekTo: (Long) -> Unit,
+  openSettings: (() -> Unit)?,
   pageShown: Boolean? = null,
   togglePage: () -> Unit = {},
 ) {
@@ -1075,7 +1096,18 @@ private fun ActiveCast(
         Modifier.fillMaxWidth().padding(28.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
       ) {
-        CastIcon(R.drawable.ic_cast)
+        Row(
+          Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          CastIcon(R.drawable.ic_cast)
+          if (phase == CastPhase.Casting && openSettings != null) {
+            IconButton(onClick = openSettings, enabled = controlsEnabled) {
+              CastIcon(R.drawable.ic_tune, stringResource(R.string.playback_settings))
+            }
+          }
+        }
         Text(
           tv?.name ?: stringResource(R.string.current_tv),
           style = MaterialTheme.typography.headlineMedium,

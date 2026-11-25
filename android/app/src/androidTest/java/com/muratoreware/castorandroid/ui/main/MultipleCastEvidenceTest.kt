@@ -50,6 +50,7 @@ class MultipleCastEvidenceTest {
         .setSource(
           Source.newBuilder().setStream(Stream.newBuilder().setUrl("https://example.test/$id"))
         )
+        .setPreferences(Preferences.newBuilder().setManagedPlayback(true).setPreserveSource(!live))
         .setStatus(
           CastStatus.newBuilder()
             .setCasting(
@@ -155,6 +156,12 @@ class MultipleCastEvidenceTest {
     compose.onNodeWithTag("restart-casting").assertIsDisplayed().assertIsEnabled()
     compose.onNodeWithTag("cast-action").assertIsDisplayed().assertIsEnabled()
     capture("dark")
+    compose.onNodeWithContentDescription("Playback settings").performScrollTo().assertIsDisplayed()
+    capture("cast-settings-button")
+    compose.onNodeWithContentDescription("Playback settings").performClick()
+    compose.onNodeWithText("Native").assertIsSelected()
+    capture("cast-settings")
+    compose.onNodeWithContentDescription("Close").performClick()
     compose.runOnIdle {
       dark = false
       italian = true

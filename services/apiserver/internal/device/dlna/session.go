@@ -73,6 +73,7 @@ func (s *session) Play(ctx context.Context, playback device.Playback) error {
 		return fmt.Errorf("building DIDL-Lite metadata: %w", err)
 	}
 	direct := playback.Play.GetSource().GetDirect()
+	resumeAt := playback.Play.GetSource().GetResumeAt().AsDuration()
 	if !direct {
 		slog.DebugContext(ctx, "DIDL metadata", "xml", metadata)
 	}
@@ -114,7 +115,7 @@ func (s *session) Play(ctx context.Context, playback device.Playback) error {
 		// Do not tear down that stream, or resend Play, if its state confirms the handover.
 		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
 			if direct {
-				return s.awaitDirectStart(ctx, playback.URL)
+				return s.startDirect(ctx, playback.URL, resumeAt)
 			}
 			if s.playingStream(ctx, playback.URL) {
 				slog.InfoContext(ctx, "device confirmed playback after Play timed out", "device", s.name())
@@ -126,9 +127,34 @@ func (s *session) Play(ctx context.Context, playback device.Playback) error {
 		return fmt.Errorf("starting playback: %w", err)
 	}
 	if direct {
-		return s.awaitDirectStart(ctx, playback.URL)
+		return s.startDirect(ctx, playback.URL, resumeAt)
 	}
 	return nil
+}
+
+func (s *session) startDirect(ctx context.Context, streamURL *url.URL, resumeAt time.Duration) error {
+	if err := s.awaitDirectStart(ctx, streamURL); err != nil || resumeAt <= 0 {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+	if err := s.Seek(ctx, resumeAt); err != nil {
+		return fmt.Errorf("resuming the origin URL: %w", err)
+	}
+	// A renderer can acknowledge Seek and keep playing from the beginning.
+	target := resumeAt.Truncate(time.Second)
+	polls := time.NewTicker(300 * time.Millisecond)
+	defer polls.Stop()
+	for {
+		if head, err := s.Position(ctx); err == nil && head.At >= target && head.At <= target+3*time.Second {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("confirming the origin URL resumed at %s: %w", target, context.Cause(ctx))
+		case <-polls.C:
+		}
+	}
 }
 
 // An acknowledgement is not proof that the renderer can download the origin.

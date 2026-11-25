@@ -521,6 +521,8 @@ internal fun PlaybackSettings(
   initialSubtitles: String,
   initialPreferDirectDlna: Boolean,
   dismiss: () -> Unit,
+  showDirectDlna: Boolean = true,
+  saveOnlyChanges: Boolean = false,
   save: (String, String, Boolean) -> Unit,
 ) {
   var height by rememberSaveable { mutableStateOf(playbackQuality(initialHeight)) }
@@ -545,6 +547,9 @@ internal fun PlaybackSettings(
   fun close() {
     if (changed) confirmClose = true else dismiss()
   }
+  fun saveDraft() {
+    if (changed || !saveOnlyChanges) save(height, subtitles, preferDirectDlna) else dismiss()
+  }
   GlassSheet(
     dismiss,
     allowDismiss = {
@@ -557,7 +562,7 @@ internal fun PlaybackSettings(
         canSave = validLanguage,
         keepEditing = { confirmClose = false },
         discard = dismiss,
-        save = { save(height, subtitles, preferDirectDlna) },
+        save = ::saveDraft,
       )
     Column(
       Modifier.fillMaxWidth()
@@ -603,7 +608,7 @@ internal fun PlaybackSettings(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
       val native = height == NATIVE_QUALITY
-      Row(
+      if (showDirectDlna) Row(
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
           .toggleable(preferDirectDlna, enabled = native, role = Role.Switch) { preferDirectDlna = it },
         horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -658,7 +663,7 @@ internal fun PlaybackSettings(
         )
       GlassButton(
         prominent = true,
-        onClick = { save(height, subtitles, preferDirectDlna) },
+        onClick = ::saveDraft,
         enabled = validLanguage,
         modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
       ) {

@@ -259,6 +259,8 @@ message RestartRequest {
     min_len: 1
     max_bytes: 64
   }];
+  // Android: replace playback preferences when restarting; absent keeps the current preferences.
+  Preferences preferences = 1000;
 }
 
 message RestartResponse {}
@@ -275,6 +277,8 @@ message Cast {
   Device device = 2;
   Source source = 3;
   CastStatus status = 4;
+  // Android: the preferences of this cast, so its settings can be edited after reconnecting.
+  Preferences preferences = 1000;
 }
 
 message PauseRequest {

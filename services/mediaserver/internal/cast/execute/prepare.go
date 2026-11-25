@@ -63,6 +63,7 @@ type presentation struct {
 	embeddedCaptions bool
 	source           bool
 	direct           bool
+	resumeAt         time.Duration
 	// runtime is what is left of the program from where the attempt begins, zero where the source declared none.
 	runtime time.Duration
 	// live is a program with no end, which has no runtime.
@@ -103,20 +104,25 @@ func (s *preparation) inspectPresentation() (p inspectedPresentation, err error)
 	}
 	p.kind = s.compose()
 	p.runtime, p.live, p.reached.began = s.attempt.Runtime(), s.attempt.Live(), s.attempt.Program.Start
-	p.captions = s.shownCaptions()
+	if p.kind.DeviceFetches() {
+		p.resumeAt, p.reached.began = p.reached.began, 0
+		p.runtime += p.resumeAt
+	}
+	p.captions = s.shownCaptions(p.reached.began)
 	switch p.kind {
 	case compose.Handoff:
 		primary, _ := s.attempt.Program.PrimaryInput()
 		p.target, p.contentType, p.source = primary.URL, primary.ContentType, true
 		p.direct = true
 		return p, nil
-	case compose.Forward:
+	case compose.Forward, compose.Redirect:
 		primary, _ := s.attempt.Program.PrimaryInput()
-		target, err := s.forwardSource(primary)
+		target, err := s.publishSource(primary, p.kind)
 		if err != nil {
 			return p, err
 		}
 		p.target, p.contentType, p.source = target, primary.ContentType, true
+		p.direct = p.kind == compose.Redirect
 		return p, nil
 	}
 	work, program, err := s.prepare()
@@ -222,6 +228,14 @@ func (s *preparation) compose() compose.Kind {
 		PreserveSource: s.PreserveSource,
 	}
 	kind := compose.For(shape)
+	if (shape.Delivery == compose.DeliveryPreferDirect || shape.Delivery == compose.DeliveryRedirect) && shape.Program.Start > 0 && s.attempt.Runtime() > 0 {
+		// The opted-in renderer can try the whole file and seek; if it refuses,
+		// recovery prepares a phone-served stream at the original offset.
+		shape.Program.Start = 0
+		if whole := compose.For(shape); whole.DeviceFetches() {
+			kind = whole
+		}
+	}
 	// Requested transcription needs a buffered PCM feed whenever no usable
 	// native captions are shown, including sources that publish no caption track.
 	if s.transcribing() {
@@ -231,15 +245,22 @@ func (s *preparation) compose() compose.Kind {
 	return kind
 }
 
-// forwardSource publishes in's file for the device to read through castor, until the attempt releases it.
-func (s *preparation) forwardSource(in media.Input) (*url.URL, error) {
+// publishSource keeps the file's local URL available for the lifetime of this attempt.
+func (s *preparation) publishSource(in media.Input, kind compose.Kind) (*url.URL, error) {
 	served := s.playbackCapabilities().Served(in.ContentType)
 	name := forward.Name(in.ContentType)
 	mux := http.NewServeMux()
-	mux.Handle("GET /"+name, forward.Handler(&http.Client{Transport: forward.Transport()}, in.URL, in.Headers, in.ContentType, served))
+	client := &http.Client{Transport: forward.Transport()}
+	var handler http.Handler
+	if kind == compose.Redirect {
+		handler = forward.Redirect(client, in.URL, in.ContentType, served)
+	} else {
+		handler = forward.Handler(client, in.URL, in.Headers, in.ContentType, served)
+	}
+	mux.Handle("GET /"+name, handler)
 	pub, err := s.Publisher.Publish(s.ctx, mux)
 	if err != nil {
-		return nil, fmt.Errorf("publishing the forwarded source: %w", err)
+		return nil, fmt.Errorf("publishing the source: %w", err)
 	}
 	s.releases.push(pub.Close)
 	return pub.URL(name), nil

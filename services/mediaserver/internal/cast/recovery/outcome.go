@@ -80,7 +80,7 @@ type Evidence struct {
 
 	// Handoff is an original source, including a byte-for-byte forward.
 	Handoff bool
-	// Direct is an original whose URL pointed at the origin.
+	// Direct means the receiver was asked to fetch the original from the origin.
 	Direct bool
 
 	// TimelineErr is a source whose timeline castor must keep and could not read when the read was set up.

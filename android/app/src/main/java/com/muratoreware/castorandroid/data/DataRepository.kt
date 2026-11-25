@@ -42,8 +42,10 @@ class DataRepository(private val api: Rpc) {
     api.result { api.casts.stop(StopRequest.newBuilder().setCastId(id).build()) }
   }
 
-  suspend fun restart(id: String) {
-    api.result { api.casts.restart(RestartRequest.newBuilder().setCastId(id).build()) }
+  suspend fun restart(id: String, preferences: Preferences? = null) {
+    val request = RestartRequest.newBuilder().setCastId(id)
+    preferences?.let { request.setPreferences(it) }
+    api.result { api.casts.restart(request.build()) }
   }
 
   // Where the TV plays, as the engine last heard it; Pause, Resume and Seek act on it.

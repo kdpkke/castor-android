@@ -32,6 +32,8 @@ type cast struct {
 	// media is the media server's id for the run playing now; nil is c's own id.
 	media             atomic.Pointer[string]
 	automaticRestarts atomic.Uint32
+	// Each run reads an immutable preference snapshot; only an accepted restart replaces it.
+	preferences atomic.Pointer[castorv1.Preferences]
 	// managed keeps a direct handoff's receiver until it ends, as the Android client asks.
 	managed bool
 }
@@ -43,7 +45,7 @@ type view struct {
 }
 
 func newCast(id string, device *castorv1.Device, req *castorv1.CastRequest, stop context.CancelCauseFunc) *cast {
-	return &cast{
+	c := &cast{
 		id: id, device: device,
 		source: proto.CloneOf(req.GetSource()), mediaInfo: proto.CloneOf(req.GetMediaInfo()), start: req.GetStart().AsDuration(),
 		started: time.Now(), stop: stop,
@@ -53,6 +55,8 @@ func newCast(id string, device *castorv1.Device, req *castorv1.CastRequest, stop
 		restarts: make(chan *restartRequest),
 		managed:  req.GetPreferences().GetManagedPlayback(),
 	}
+	c.preferences.Store(proto.CloneOf(req.GetPreferences()))
+	return c
 }
 
 // show publishes a new status snapshot until the cast has ended.

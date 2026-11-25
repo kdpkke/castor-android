@@ -5,6 +5,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import castor.v1.CastOuterClass.*
 import castor.v1.DeviceOuterClass.*
+import castor.v1.DeviceOuterClass.Target
 import castor.v1.StreamOuterClass.Stream
 import com.google.protobuf.Duration
 import com.muratoreware.castorandroid.R
@@ -28,6 +29,45 @@ import org.junit.Test
 
 class MultipleCastsTest {
   @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+  @Test
+  fun savingPlaybackSettingsRestartsOnlyTheEditedCastWhenSomethingChanged() {
+    Fixture().use { fixture ->
+      fixture.open()
+      compose.onNodeWithTag("session-bedroom").performClick()
+      compose.waitUntil(5000) { fixture.model.uiState.value.castId == "bedroom" }
+      val resources = compose.activity
+      val settings = resources.getString(R.string.playback_settings)
+      val save = resources.getString(R.string.save)
+      val native = resources.getString(R.string.quality_native)
+      val optimized = resources.getString(R.string.quality_optimized)
+
+      compose.onNodeWithContentDescription(settings).performScrollTo().performClick()
+      compose.onNodeWithText(native).assertIsSelected()
+      compose.onNodeWithText(save).performScrollTo().performClick()
+      compose.waitForIdle()
+      assertTrue(fixture.restartRequests.isEmpty())
+
+      compose.onNodeWithContentDescription(settings).performScrollTo().performClick()
+      compose.onNodeWithText(optimized).performClick()
+      compose.onNodeWithText(save).performScrollTo().performClick()
+      compose.waitUntil(5000) {
+        fixture.restartRequests.size == 1 &&
+          fixture.model.uiState.value.selected?.cast?.preferences?.preserveSource == false &&
+          !fixture.model.uiState.value.restarting
+      }
+      val request = fixture.restartRequests.single()
+      assertEquals("bedroom", request.castId)
+      assertTrue(request.hasPreferences())
+      assertFalse(request.preferences.preserveSource)
+      assertEquals(1080, request.preferences.maxHeight)
+      assertTrue(fixture.model.uiState.value.sessions.first { it.cast.id == "living-room" }.cast.preferences.preserveSource)
+      assertTrue(fixture.submissions.isEmpty())
+      assertTrue(fixture.stops.isEmpty())
+      compose.onNodeWithContentDescription(settings).performScrollTo().performClick()
+      compose.onNodeWithText(optimized).assertIsSelected()
+    }
+  }
 
   @Test
   fun recoveringAllTVsKeepsRestartAndControlsOnTheSelectedTransmission() {
@@ -242,7 +282,8 @@ class MultipleCastsTest {
     val server = MockWebServer()
     val casts = ConcurrentHashMap<String, Cast>()
     val controls = CopyOnWriteArrayList<String>()
-    val restarts = CopyOnWriteArrayList<String>()
+    val restartRequests = CopyOnWriteArrayList<RestartRequest>()
+    val restarts get() = restartRequests.map { it.castId }
     val stops = CopyOnWriteArrayList<String>()
     val submissions = CopyOnWriteArrayList<CastRequest>()
     val rejectRestart = AtomicBoolean()
@@ -266,6 +307,14 @@ class MultipleCastsTest {
             .setSource(
               Source.newBuilder()
                 .setStream(Stream.newBuilder().setUrl("https://example.test/$id.mp4"))
+            )
+            .setPreferences(
+              MainScreenViewModel.request(
+                "https://example.test/$id.mp4",
+                false,
+                Target.newBuilder().setDeviceId(id).build(),
+                NATIVE_QUALITY,
+              ).preferences
             )
             .setStatus(
               CastStatus.newBuilder()
@@ -311,7 +360,7 @@ class MultipleCastsTest {
                 proto(CastResponse.newBuilder().setCastId("new-transmission").build().toByteArray())
               }
               "/castor.v1.CastService/Restart" -> {
-                restarts += RestartRequest.parseFrom(request.body.readByteArray()).castId
+                restartRequests += RestartRequest.parseFrom(request.body.readByteArray())
                 if (rejectRestart.getAndSet(false))
                   MockResponse()
                     .setResponseCode(503)

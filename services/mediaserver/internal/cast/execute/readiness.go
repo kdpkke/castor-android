@@ -49,7 +49,7 @@ func (p readyPresentation) play(ctx context.Context, device Device) error {
 func (p presentation) stream() Stream {
 	switch {
 	case p.source:
-		return Source{ContentType: p.contentType, Direct: p.direct, Runtime: p.runtime, Live: p.live}
+		return Source{ContentType: p.contentType, Direct: p.direct, ResumeAt: p.resumeAt, Runtime: p.runtime, Live: p.live}
 	case p.contentType == media.HLS:
 		return Playlist{Runtime: p.runtime, Segments: p.segments, Live: p.live, EmbeddedCaptions: p.embeddedCaptions}
 	}

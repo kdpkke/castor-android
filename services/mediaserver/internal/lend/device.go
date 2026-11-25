@@ -127,6 +127,9 @@ func played(p execute.Playback) *mediav1.DeviceCommand_Play {
 	switch s := p.Stream.(type) {
 	case execute.Source:
 		source := &mediav1.DeviceCommand_Play_Source{Container: wire.Container(s.ContentType), Direct: s.Direct}
+		if s.ResumeAt > 0 {
+			source.ResumeAt = durationpb.New(s.ResumeAt)
+		}
 		switch {
 		case s.Live:
 			source.Length = &mediav1.DeviceCommand_Play_Source_Live{Live: &mediav1.DeviceCommand_Play_Live{}}

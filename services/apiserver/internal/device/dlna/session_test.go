@@ -20,11 +20,47 @@ import (
 
 	"github.com/stupside/castor/services/apiserver/internal/device"
 	"github.com/stupside/castor/services/apiserver/internal/device/devicetest"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 type actionTransport func(*http.Request) (*http.Response, error)
 
 func (f actionTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestDirectPlaybackMustReachTheRequestedResumePosition(t *testing.T) {
+	for _, reached := range []bool{true, false} {
+		synctest.Test(t, func(t *testing.T) {
+			const origin = "http://192.0.2.1/video.mp4"
+			position, sought := "0:00:01", false
+			s := renderer(func(action string) string {
+				switch action {
+				case "Seek":
+					sought = true
+					if reached {
+						position = "0:01:42"
+					}
+				case "GetPositionInfo":
+					return "<TrackURI>" + origin + "</TrackURI><RelTime>" + position + "</RelTime>"
+				case "GetTransportInfo":
+					return "<CurrentTransportState>PLAYING</CurrentTransportState><CurrentTransportStatus>OK</CurrentTransportStatus>"
+				case "GetMediaInfo":
+					return "<CurrentURI>" + origin + "</CurrentURI>"
+				}
+				return ""
+			})
+			_, s.sinks = parseSinkProtocolInfo("http-get:*:video/mp4:*")
+			u, _ := url.Parse(origin)
+			play := devicetest.Source(mediav1.Container_CONTAINER_MP4)
+			play.GetSource().Direct = true
+			play.GetSource().ResumeAt = durationpb.New(102 * time.Second)
+			play.GetSource().Length = &mediav1.DeviceCommand_Play_Source_Duration{Duration: durationpb.New(5 * time.Minute)}
+			err := s.Play(t.Context(), device.Playback{URL: u, Play: play})
+			if !sought || (err == nil) != reached {
+				t.Fatalf("renderer reached=%t: seek sent=%t, error=%v", reached, sought, err)
+			}
+		})
+	}
+}
 
 func TestAPlayTimeoutNeedsConfirmationOfTheRequestedStream(t *testing.T) {
 	const target = "http://192.0.2.1:8080/media/stream"

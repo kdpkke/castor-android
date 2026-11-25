@@ -294,8 +294,10 @@ message DeviceCommand {
         google.protobuf.Duration duration = 2 [(buf.validate.field).duration.gt = {}];
         Live live = 3;
       }
-      // The URL names the origin itself instead of a Castor forward.
+      // The receiver fetches the file from the origin, possibly after an HTTP redirect.
       bool direct = 1000;
+      // Android: where the receiver must seek after loading the complete origin file.
+      google.protobuf.Duration resume_at = 1001 [(buf.validate.field).duration.gt = {}];
     }
 
     message Progressive {

@@ -26,13 +26,13 @@ type fetchedCaption struct {
 
 // shownCaptions serves the fetched caption for the device, its cues moved to where the attempt's program starts.
 // A caption is a courtesy: whatever stops it is logged and the cast plays without.
-func (s *preparation) shownCaptions() []media.Caption {
+func (s *preparation) shownCaptions(start time.Duration) []media.Caption {
 	c := s.caption
 	if c == nil {
 		return nil
 	}
 	vtt := c.vtt
-	if start := s.attempt.Program.Start; start > 0 {
+	if start > 0 {
 		vtt = captions.Shifted(vtt, start)
 	}
 	name, contentType, body := "captions.vtt", "text/vtt", vtt

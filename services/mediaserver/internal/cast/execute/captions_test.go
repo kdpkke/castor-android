@@ -43,7 +43,7 @@ func TestTheSourcesCaptionIsServedToADeviceThatShowsThem(t *testing.T) {
 	s := captionedAttempt(t, media.Capabilities{Formats: []media.FormatSupport{{Transport: media.TransportMP4, Captions: []media.CaptionFormat{media.CaptionSRT}}}}, []string{"en"})
 	t.Cleanup(func() { _ = s.releases.release() })
 	s.caption = s.fetchCaption()
-	shown := s.shownCaptions()
+	shown := s.shownCaptions(s.attempt.Program.Start)
 	if len(shown) != 1 || shown[0].Format != media.CaptionSRT || !shown[0].Default {
 		t.Fatalf("shown = %+v, want one SubRip caption", shown)
 	}
@@ -66,7 +66,7 @@ func TestNoCaptionIsShownWhenTheDeviceTakesNoneOrTheLanguageIsAbsent(t *testing.
 		if s.caption = s.fetchCaption(); s.caption != nil {
 			t.Errorf("%s: fetched %+v, want none", name, s.caption)
 		}
-		if shown := s.shownCaptions(); len(shown) != 0 {
+		if shown := s.shownCaptions(s.attempt.Program.Start); len(shown) != 0 {
 			t.Errorf("%s: shown = %+v, want none", name, shown)
 		}
 	}
@@ -96,7 +96,7 @@ func TestBrokenPreferredCaptionTriesTheNextLanguage(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s.releases.release() })
 	s.caption = s.fetchCaption()
-	shown := s.shownCaptions()
+	shown := s.shownCaptions(s.attempt.Program.Start)
 	if len(shown) != 1 || shown[0].Language != "fr" {
 		t.Fatalf("shown = %+v, want the working French track", shown)
 	}

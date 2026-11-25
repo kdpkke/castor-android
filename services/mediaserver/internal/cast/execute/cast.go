@@ -110,8 +110,10 @@ type Stream interface {
 // Source is the source itself, fetched from its own server, which alone knows how it seeks.
 type Source struct {
 	ContentType string
-	// Direct means the receiver fetches the URL from the origin.
+	// Direct means the receiver fetches the media bytes from the origin.
 	Direct bool
+	// ResumeAt asks a direct renderer to seek after loading the complete source.
+	ResumeAt time.Duration
 	// Runtime is zero where the source declared none.
 	Runtime time.Duration
 	// Live is a source with no end, which has no Runtime.

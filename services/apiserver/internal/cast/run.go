@@ -16,7 +16,7 @@ import (
 )
 
 // play casts c's source on target and returns how it ended: the media server's word, unless this server ended it first.
-func (s *Service) play(ctx context.Context, c *cast, target device.Info, asked *mediav1.PlaybackSettings) (result *castorv1.Ended) {
+func (s *Service) play(ctx context.Context, c *cast, target device.Info) (result *castorv1.Ended) {
 	ctx, finish := telemetry.Start(ctx, telemetry.Playback)
 	defer func() {
 		switch {
@@ -28,7 +28,7 @@ func (s *Service) play(ctx context.Context, c *cast, target device.Info, asked *
 			finish(nil)
 		}
 	}()
-	ended, err := s.run(ctx, c, target, asked)
+	ended, err := s.run(ctx, c, target)
 	cause := context.Cause(ctx)
 	switch {
 	case cause != nil && !errors.Is(cause, errStopped) && !errors.Is(cause, context.Canceled):
@@ -67,7 +67,7 @@ func failedResult(code castorv1.FailureCode, err error) *castorv1.Ended {
 }
 
 // run connects target, runs c on the media server and lends it the device until the media server's cast has ended.
-func (s *Service) run(ctx context.Context, c *cast, target device.Info, asked *mediav1.PlaybackSettings) (ended *castorv1.Ended, err error) {
+func (s *Service) run(ctx context.Context, c *cast, target device.Info) (ended *castorv1.Ended, err error) {
 	// Connected first, so an unreachable device costs no media cast and a slow one never outlasts the media server's wait for it.
 	connectCtx, finishConnect := telemetry.Start(ctx, telemetry.Connect)
 	lent, err := s.devices.Connect(connectCtx, target)
@@ -100,7 +100,7 @@ func (s *Service) run(ctx context.Context, c *cast, target device.Info, asked *m
 			err = nil
 		}
 	}()
-	return s.runConnected(ctx, c, lent, asked)
+	return s.runConnected(ctx, c, lent)
 }
 
 // runPlayback resolves c's source and plays it once, from start, on player.

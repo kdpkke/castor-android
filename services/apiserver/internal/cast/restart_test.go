@@ -13,6 +13,7 @@ import (
 	castorv1 "github.com/stupside/castor/gen/castor/v1"
 	"github.com/stupside/castor/services/apiserver/internal/device"
 	"github.com/stupside/castor/services/apiserver/internal/device/devicetest"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -240,7 +241,8 @@ func TestRestartJoinsOldPipelineBeforeStopAndKeepsTheCastIdentity(t *testing.T) 
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		c := newCast("same-cast", &castorv1.Device{Id: "same-tv"}, &castorv1.CastRequest{}, func(error) {})
+		original := &castorv1.Preferences{PreserveSource: new(true)}
+		c := newCast("same-cast", &castorv1.Device{Id: "same-tv"}, &castorv1.CastRequest{Preferences: original}, func(error) {})
 		s := New(nil, nil, nil, nil)
 		d := &restartDevice{}
 		var running atomic.Int32
@@ -270,7 +272,14 @@ func TestRestartJoinsOldPipelineBeforeStopAndKeepsTheCastIdentity(t *testing.T) 
 		if first := <-ids; first != c.id || c.mediaID() != c.id {
 			t.Fatalf("the first run played as %q and controls reach %q, want the cast's own id", first, c.mediaID())
 		}
-		if _, err := s.Restart(ctx, &castorv1.RestartRequest{CastId: c.id}); err != nil {
+		if _, err := s.Restart(ctx, &castorv1.RestartRequest{CastId: c.id, Preferences: original}); err != nil {
+			t.Fatal(err)
+		}
+		if d.stops.Load() != 0 || c.mediaID() != c.id {
+			t.Fatal("saving the existing preferences restarted playback")
+		}
+		revised := &castorv1.Preferences{PreserveSource: new(false), MaxHeight: new(uint32(1080))}
+		if _, err := s.Restart(ctx, &castorv1.RestartRequest{CastId: c.id, Preferences: revised}); err != nil {
 			t.Fatal(err)
 		}
 		if at := <-starts; at != 42*time.Minute {
@@ -281,6 +290,10 @@ func TestRestartJoinsOldPipelineBeforeStopAndKeepsTheCastIdentity(t *testing.T) 
 		}
 		if d.stops.Load() != 1 || c.device.Id != "same-tv" {
 			t.Fatal("restart did not retain the receiver")
+		}
+		listed, err := s.ListCasts(ctx, &castorv1.ListCastsRequest{})
+		if err != nil || len(listed.GetCasts()) != 1 || !proto.Equal(listed.GetCasts()[0].GetPreferences(), revised) {
+			t.Fatalf("reconnecting client did not see the revised settings: %v, %v", listed, err)
 		}
 		cancel()
 		<-finished

@@ -38,6 +38,8 @@ const (
 	DeliveryServe DeliveryPreference = "serve"
 	// DeliveryPreferDirect tries an origin URL that would otherwise be forwarded.
 	DeliveryPreferDirect DeliveryPreference = "prefer-direct"
+	// DeliveryRedirect lets a renderer inspect the file over HTTP and fetch its bytes over HTTPS.
+	DeliveryRedirect DeliveryPreference = "redirect"
 	// DeliveryForward keeps a native original local after its origin URL was refused.
 	DeliveryForward DeliveryPreference = "forward"
 )
@@ -49,7 +51,7 @@ func (s Shape) handoff() bool {
 	if !ok || s.Delivery == DeliveryServe || s.Delivery == DeliveryForward {
 		return false
 	}
-	if s.Delivery == DeliveryPreferDirect {
+	if s.Delivery == DeliveryPreferDirect || s.Delivery == DeliveryRedirect {
 		return s.Program.SelfFetchable() && primary.URL.User == nil && s.forwards()
 	}
 	probe, measured := s.Program.Measurement()
