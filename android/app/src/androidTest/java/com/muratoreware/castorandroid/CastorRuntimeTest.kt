@@ -803,13 +803,16 @@ class CastorRuntimeTest {
           java.util.zip.GZIPOutputStream(this).use { it.write(ts) }
         }
         .toByteArray()
+    val width = 128
+    // Start in the last color channel of the first row, so the header spans two rows.
+    val prefixSize = width * 3 - 1
     val payload =
-      java.nio.ByteBuffer.allocate(12 + compressed.size)
+      java.nio.ByteBuffer.allocate(prefixSize + 12 + compressed.size)
+        .apply { position(prefixSize) }
         .put("TIKTIKPX".toByteArray())
         .putInt(compressed.size)
         .put(compressed)
         .array()
-    val width = 128
     val height = (payload.size + width * 3 - 1) / (width * 3)
     val colors =
       IntArray(width * height) { index ->

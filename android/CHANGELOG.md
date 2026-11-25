@@ -3,6 +3,18 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
+## 2.3.0 — 2026-11-25
+
+- HLS with MPEG-TS in PNG pixels (KWP1/kwLn or TIKTIKPX with a variable-length prefix).
+- HLS with MPEG-TS in numbered PNG iTXt chunks, after the PNG IEND chunk, or in a WebP EXIF chunk.
+- HLS with TIKTIKRAW or gzip-compressed TIKTIKTSGZ segments.
+
+### Italiano
+
+- HLS con MPEG-TS nei pixel PNG (KWP1/kwLn o TIKTIKPX con prefisso di lunghezza variabile).
+- HLS con MPEG-TS in blocchi iTXt numerati di un PNG, dopo il blocco IEND del PNG o in un blocco EXIF di un WebP.
+- HLS con segmenti TIKTIKRAW o TIKTIKTSGZ compressi con gzip.
+
 ## 2.2.4 — 2026-11-25
 
 - Fixed playback from a list of web links when an earlier page returns an HTTP 404. Castor now closes the failed tab before opening the next link, so the old page cannot interrupt loading or supply the wrong playlist.

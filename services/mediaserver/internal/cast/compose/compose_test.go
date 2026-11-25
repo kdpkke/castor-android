@@ -18,16 +18,16 @@ func TestTheCompositionADeviceGets(t *testing.T) {
 		name       string
 		device     media.Capabilities
 		sourceCT   string
-		wrapped    bool
+		wrapped    media.HLSExtraSegmentFormat
 		preference DeliveryPreference
 		want       Kind
 	}{
-		{"a push-only device is read once", media.Capabilities{}, media.MP4, false, DeliveryAuto, ReadOnce},
-		{"a self-fetching device that accepts the source is handed the URL", selfFetching, media.MP4, false, DeliveryAuto, Handoff},
-		{"ordinary HLS is handed to a capable device", hlsFetching, media.HLS, false, DeliveryAuto, Handoff},
-		{"observed wrapped HLS is relayed", hlsFetching, media.HLS, true, DeliveryAuto, Remux},
-		{"a rejected container is remuxed", selfFetching, media.MKV, false, DeliveryAuto, Remux},
-		{"the serve preference relays what could have been handed over", selfFetching, media.MP4, false, DeliveryServe, Remux},
+		{"a push-only device is read once", media.Capabilities{}, media.MP4, 0, DeliveryAuto, ReadOnce},
+		{"a self-fetching device that accepts the source is handed the URL", selfFetching, media.MP4, 0, DeliveryAuto, Handoff},
+		{"ordinary HLS is handed to a capable device", hlsFetching, media.HLS, 0, DeliveryAuto, Handoff},
+		{"observed wrapped HLS is relayed", hlsFetching, media.HLS, media.HLSExtraSegmentTIKTIKPX, DeliveryAuto, Remux},
+		{"a rejected container is remuxed", selfFetching, media.MKV, 0, DeliveryAuto, Remux},
+		{"the serve preference relays what could have been handed over", selfFetching, media.MP4, 0, DeliveryServe, Remux},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := For(Shape{Device: tt.device, Program: measured(t, tt.sourceCT, tt.wrapped), Delivery: tt.preference}); got != tt.want {
@@ -54,7 +54,7 @@ func TestTheCompositionADeviceGets(t *testing.T) {
 		{"a playlist is never forwarded", pushOnlyHLS, media.HLS, true, DeliveryAuto, ReadOnce},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			shape := Shape{Device: tt.device, Program: measured(t, tt.sourceCT, false), Delivery: tt.preference, PreserveSource: tt.native}
+			shape := Shape{Device: tt.device, Program: measured(t, tt.sourceCT, 0), Delivery: tt.preference, PreserveSource: tt.native}
 			if got := For(shape); got != tt.want {
 				t.Errorf("composed %q, want %q", got, tt.want)
 			}
@@ -73,7 +73,7 @@ func TestDirectOriginalRequiresAnOriginTheRendererCanFetch(t *testing.T) {
 		{"a file on the phone", func(in *media.Input) { in.URL.Host = "127.0.0.1" }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			program := measured(t, media.MKV, false)
+			program := measured(t, media.MKV, 0)
 			probe, _ := program.Measurement()
 			tt.edit(&program.Inputs[0])
 			program.SetMeasurement(probe)
@@ -100,7 +100,7 @@ func TestAReceiverThatFetchesForItselfCanSeekInALocalFile(t *testing.T) {
 		{"local original refused", "127.0.0.1", true, DeliveryServe, Remux},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			program := measured(t, media.MP4, false)
+			program := measured(t, media.MP4, 0)
 			probe, _ := program.Measurement()
 			program.Inputs[0].URL.Host = tc.host
 			program.SetMeasurement(probe)
@@ -112,12 +112,12 @@ func TestAReceiverThatFetchesForItselfCanSeekInALocalFile(t *testing.T) {
 }
 
 // measured is a header-free H.264/AAC program in contentType, measured as such.
-func measured(t *testing.T, contentType string, wrapped bool) media.Program {
+func measured(t *testing.T, contentType string, wrapped media.HLSExtraSegmentFormat) media.Program {
 	t.Helper()
 	candidate := &source.Stream{
 		URL:         &url.URL{Scheme: "https", Host: "cdn.example", Path: "/movie"},
 		ContentType: contentType,
-		Probe:       &media.ProbeInfo{VideoCodec: media.CodecH264, VideoBitDepth: 8, AudioCodec: media.CodecAAC, AudioChannels: 2, SourceUnwrapped: wrapped},
+		Probe:       &media.ProbeInfo{VideoCodec: media.CodecH264, VideoBitDepth: 8, AudioCodec: media.CodecAAC, AudioChannels: 2, SourceSegments: wrapped},
 	}
 	program, err := source.ProgramFor(candidate)
 	if err != nil {

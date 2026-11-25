@@ -119,7 +119,7 @@ func (r Republisher) Probe(ctx context.Context, program media.Program, inspect f
 			err = errors.Join(err, cause)
 		}
 		for _, feed := range reading.feeds {
-			info.SourceUnwrapped = info.SourceUnwrapped || feed.unwrapped.Load()
+			info.SourceSegments |= media.HLSExtraSegmentFormat(feed.unwrapped.Load())
 		}
 	}()
 	return inspect(reading.program).Probe(ctx)
