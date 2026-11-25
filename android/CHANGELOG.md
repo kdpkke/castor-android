@@ -3,6 +3,14 @@
 Plain-language notes for each Android release. The Italian version follows the
 English one.
 
+## 2.2.4 — 2026-11-25
+
+- Fixed playback from a list of web links when an earlier page returns an HTTP 404. Castor now closes the failed tab before opening the next link, so the old page cannot interrupt loading or supply the wrong playlist.
+
+### Italiano
+
+- Corretta la riproduzione da un elenco di link web quando una pagina restituisce un errore HTTP 404. Castor chiude la scheda fallita prima di aprire il link successivo, così la vecchia pagina non può interferire con il caricamento o proporre la playlist sbagliata.
+
 ## 2.2.3 — 2026-11-25
 
 - **Direct DLNA playback for HTTPS links.** Some LG TVs reject a link when checking the file but can play it directly. With **Native** and **Download directly on the TV** enabled, Castor now answers the file check and redirects the TV to the original HTTPS link. If the TV also refuses the redirect, Castor can still relay the original file through the phone.
